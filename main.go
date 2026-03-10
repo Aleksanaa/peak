@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"os"
 
 	"github.com/gdamore/tcell/v2"
 )
@@ -38,15 +39,23 @@ func (e *Editor) Init() {
 	e.tag = NewTextView(" NewCol Exit ", 0, 0, e.width, 1, tagStyle, true, false)
 	e.focusedView = e.tag
 
-	// Initial Column
-	col := NewColumn(0, 1, e.width, e.height-1, e, e.Execute)
-	e.columns = append(e.columns, col)
+	// Left Column: Empty
+	colLeft := NewColumn(0, 1, e.width/2, e.height-1, e, e.Execute)
+	e.columns = append(e.columns, colLeft)
 
-	// Add initial window
-	win := col.AddWindow(" /home/user/peak/main.go Get Put Snarf Zerox Del ",
-		"Welcome to Peak\nWindow and Column resizing implemented.\nDrag column handles (top-left of column) horizontally.\nDrag window handles (left of tag) vertically.")
+	// Right Column: pwd listing
+	colRight := NewColumn(e.width/2, 1, e.width-e.width/2, e.height-1, e, e.Execute)
+	e.columns = append(e.columns, colRight)
+
+	// Add window to right column
+	dir, _ := os.Getwd()
+	win := colRight.AddWindow(dir+" Get Put Snarf Zerox Del ", "")
 	e.active = win
 	e.focusedView = win.body
+	
+	// Trigger internal "Get" to perform the ls
+	e.Execute(colRight, win, "Get")
+	
 	e.Resize()
 }
 
