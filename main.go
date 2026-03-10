@@ -25,6 +25,7 @@ type Editor struct {
 	scrollAmount    int
 	scrollDir       int
 	scrollStartTime time.Time
+	lastWidth       int
 }
 
 // Init sets up the initial editor state with two columns.
@@ -319,7 +320,18 @@ func (e *Editor) Resize() {
 	}
 	e.tag.Resize(0, 0, e.width, 1)
 
-	xOffset, availableW := 0, e.width
+	// 1. Proportional scaling for existing columns
+	if e.lastWidth > 0 && e.lastWidth != e.width {
+		ratio := float64(e.width) / float64(e.lastWidth)
+		for _, col := range e.columns {
+			if col.explicitWidth > 0 {
+				col.explicitWidth = int(float64(col.explicitWidth) * ratio)
+			}
+		}
+	}
+	e.lastWidth = e.width
+
+	// 2. Count explicit vs automatic columns
 	totalExplicit, numAuto := 0, 0
 	for _, col := range e.columns {
 		if col.explicitWidth > 0 {
@@ -329,6 +341,25 @@ func (e *Editor) Resize() {
 		}
 	}
 
+	// 3. Redistribute if adding new columns to a full editor
+	availableW := e.width
+	if numAuto > 0 && totalExplicit >= availableW {
+		// New columns should get a fair share (1/N total columns)
+		targetTotalAuto := (availableW * numAuto) / len(e.columns)
+		if targetTotalAuto < 5*numAuto {
+			targetTotalAuto = 5 * numAuto
+		}
+		scale := float64(availableW-targetTotalAuto) / float64(totalExplicit)
+		totalExplicit = 0
+		for _, col := range e.columns {
+			if col.explicitWidth > 0 {
+				col.explicitWidth = int(float64(col.explicitWidth) * scale)
+				totalExplicit += col.explicitWidth
+			}
+		}
+	}
+
+	// 4. Final layout
 	autoW := 0
 	if numAuto > 0 {
 		autoW = (availableW - totalExplicit) / numAuto
@@ -337,6 +368,7 @@ func (e *Editor) Resize() {
 		}
 	}
 
+	xOffset := 0
 	for i, col := range e.columns {
 		cw := col.explicitWidth
 		if cw <= 0 {
@@ -348,6 +380,7 @@ func (e *Editor) Resize() {
 		if cw < 1 {
 			cw = 1
 		}
+		col.explicitWidth = cw
 		col.Resize(xOffset, 1, cw, e.height-1)
 		xOffset += cw
 	}

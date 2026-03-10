@@ -12,6 +12,7 @@ type Column struct {
 	w, h          int
 	onExec        func(*Column, *Window, string) bool
 	explicitWidth int
+	lastHeight    int
 }
 
 func NewColumn(x, y, w, h int, editor *Editor, onExec func(*Column, *Window, string) bool) *Column {
@@ -69,11 +70,19 @@ func (c *Column) Resize(x, y, w, h int) {
 		return
 	}
 
-	yOffset := y + 1
-	availableH := h - 1
+	// 1. Proportional scaling for windows
+	if c.lastHeight > 0 && c.lastHeight != h {
+		ratio := float64(h) / float64(c.lastHeight)
+		for _, win := range c.windows {
+			if win.explicitHeight > 0 {
+				win.explicitHeight = int(float64(win.explicitHeight) * ratio)
+			}
+		}
+	}
+	c.lastHeight = h
 
-	totalExplicit := 0
-	numAuto := 0
+	// 2. Count explicit vs automatic windows
+	totalExplicit, numAuto := 0, 0
 	for _, win := range c.windows {
 		if win.explicitHeight > 0 {
 			totalExplicit += win.explicitHeight
@@ -82,6 +91,25 @@ func (c *Column) Resize(x, y, w, h int) {
 		}
 	}
 
+	// 3. Redistribute if adding new windows to a full column
+	availableH := h - 1
+	if numAuto > 0 && totalExplicit >= availableH {
+		// New windows should get a fair share (1/N total windows)
+		targetTotalAuto := (availableH * numAuto) / len(c.windows)
+		if targetTotalAuto < 2*numAuto {
+			targetTotalAuto = 2 * numAuto
+		}
+		scale := float64(availableH-targetTotalAuto) / float64(totalExplicit)
+		totalExplicit = 0
+		for _, win := range c.windows {
+			if win.explicitHeight > 0 {
+				win.explicitHeight = int(float64(win.explicitHeight) * scale)
+				totalExplicit += win.explicitHeight
+			}
+		}
+	}
+
+	// 4. Final layout
 	autoH := 0
 	if numAuto > 0 {
 		autoH = (availableH - totalExplicit) / numAuto
@@ -90,19 +118,19 @@ func (c *Column) Resize(x, y, w, h int) {
 		}
 	}
 
+	yOffset := y + 1
 	for i, win := range c.windows {
 		winH := win.explicitHeight
 		if winH <= 0 {
 			winH = autoH
 		}
-
 		if i == len(c.windows)-1 {
 			winH = (y + h) - yOffset
 		}
-
 		if winH < 1 {
 			winH = 1
 		}
+		win.explicitHeight = winH
 		win.Resize(x, yOffset, w, winH)
 		yOffset += winH
 	}
