@@ -139,7 +139,7 @@ func (e *Editor) HandleEvent(ev tcell.Event) bool {
 		}
 
 		for _, col := range e.columns {
-			if mx >= col.x && mx < col.x+col.w && my >= col.y && my < col.y+col.h {
+			if col.Contains(mx, my) {
 				if my == col.tag.y {
 					if mx == col.x && buttons == tcell.Button1 {
 						e.dragCol = col
@@ -151,7 +151,7 @@ func (e *Editor) HandleEvent(ev tcell.Event) bool {
 					return col.HandleEvent(ev)
 				}
 				for _, win := range col.windows {
-					if mx >= win.x && mx < win.x+win.w && my >= win.y && my < win.y+win.h {
+					if win.Contains(mx, my) {
 						if buttons == tcell.Button1 {
 							if mx == win.x && my >= win.y && my < win.y+win.tagHeight() {
 								e.dragWin, e.active, e.focusedView = win, win, win.tag

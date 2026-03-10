@@ -108,6 +108,10 @@ func (c *Column) Resize(x, y, w, h int) {
 	}
 }
 
+func (c *Column) Contains(x, y int) bool {
+	return x >= c.x && x < c.x+c.w && y >= c.y && y < c.y+c.h
+}
+
 func (c *Column) HandleEvent(ev tcell.Event) bool {
 	switch ev := ev.(type) {
 	case *tcell.EventMouse:
@@ -126,7 +130,7 @@ func (c *Column) HandleEvent(ev tcell.Event) bool {
 			return c.tag.HandleEvent(ev)
 		}
 		for _, win := range c.windows {
-			if mx >= win.x && mx < win.x+win.w && my >= win.y && my < win.y+win.h {
+			if win.Contains(mx, my) {
 				return win.HandleEvent(ev)
 			}
 		}

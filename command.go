@@ -123,6 +123,38 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 	return false
 }
 
+func (e *Editor) listDir(path string) (string, error) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return "", err
+	}
+	var sb strings.Builder
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() {
+			name += "/"
+		}
+		sb.WriteString(name + "\n")
+	}
+	return sb.String(), nil
+}
+
+func (e *Editor) getTargetColumn(col *Column, win *Window) *Column {
+	if col != nil {
+		return col
+	}
+	if win != nil {
+		return win.parent
+	}
+	if e.active != nil {
+		return e.active.parent
+	}
+	if len(e.columns) > 0 {
+		return e.columns[0]
+	}
+	return nil
+}
+
 func (e *Editor) cmdGet(win *Window) {
 	if win == nil {
 		return
@@ -130,16 +162,8 @@ func (e *Editor) cmdGet(win *Window) {
 	path := e.resolvePathWithContext(win, win.GetFilename())
 	if info, err := os.Stat(path); err == nil {
 		if info.IsDir() {
-			if entries, err := os.ReadDir(path); err == nil {
-				var sb strings.Builder
-				for _, entry := range entries {
-					name := entry.Name()
-					if entry.IsDir() {
-						name += "/"
-					}
-					sb.WriteString(name + "\n")
-				}
-				win.body.buffer.SetText(sb.String())
+			if content, err := e.listDir(path); err == nil {
+				win.body.buffer.SetText(content)
 			}
 		} else if data, err := os.ReadFile(path); err == nil {
 			win.body.buffer.SetText(string(data))
@@ -202,16 +226,7 @@ func (e *Editor) cmdNewCol() {
 }
 
 func (e *Editor) cmdNew(col *Column, win *Window) {
-	target := col
-	if target == nil && win != nil {
-		target = win.parent
-	}
-	if target == nil && e.active != nil {
-		target = e.active.parent
-	}
-	if target == nil && len(e.columns) > 0 {
-		target = e.columns[0]
-	}
+	target := e.getTargetColumn(col, win)
 	if target != nil {
 		e.active = target.AddWindow("", "")
 		e.focusedView = e.active.body
@@ -281,16 +296,8 @@ func (e *Editor) cmdLook(win *Window, cmd string) {
 
 	var content string
 	if info.IsDir() {
-		if entries, err := os.ReadDir(full); err == nil {
-			var sb strings.Builder
-			for _, entry := range entries {
-				name := entry.Name()
-				if entry.IsDir() {
-					name += "/"
-				}
-				sb.WriteString(name + "\n")
-			}
-			content = sb.String()
+		if c, err := e.listDir(full); err == nil {
+			content = c
 		}
 	} else {
 		if data, err := os.ReadFile(full); err == nil {
@@ -298,13 +305,7 @@ func (e *Editor) cmdLook(win *Window, cmd string) {
 		}
 	}
 
-	var target *Column
-	if e.active != nil {
-		target = e.active.parent
-	} else if len(e.columns) > 0 {
-		target = e.columns[0]
-	}
-
+	target := e.getTargetColumn(nil, win)
 	if target != nil {
 		tagPath := full // Default abspath
 		if win != nil {
@@ -362,14 +363,7 @@ func (e *Editor) runExternal(col *Column, win *Window, cmd string) {
 					return
 				}
 
-				target := col
-				if target == nil {
-					if e.active != nil {
-						target = e.active.parent
-					} else if len(e.columns) > 0 {
-						target = e.columns[0]
-					}
-				}
+				target := e.getTargetColumn(col, win)
 				if target != nil {
 					newWin := target.AddWindow(" "+filepath.Join(dir, "+Errors")+" Get Put Del ", string(out))
 					e.active, e.focusedView = newWin, newWin.body

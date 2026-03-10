@@ -400,6 +400,10 @@ func (win *Window) GetFilename() string {
 	return ""
 }
 
+func (win *Window) Contains(x, y int) bool {
+	return x >= win.x && x < win.x+win.w && y >= win.y && y < win.y+win.h
+}
+
 func (win *Window) tagHeight() int {
 	h := len(win.tag.layout)
 	if h < 1 {

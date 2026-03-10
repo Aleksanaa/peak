@@ -36,14 +36,17 @@ func NewBuffer(content string) *Buffer {
 	return b
 }
 
-func (b *Buffer) saveState() {
-	// Deep copy lines
+func (b *Buffer) copyLines() [][]rune {
 	newLines := make([][]rune, len(b.lines))
 	for i := range b.lines {
 		newLines[i] = make([]rune, len(b.lines[i]))
 		copy(newLines[i], b.lines[i])
 	}
-	b.history = append(b.history, bufferState{lines: newLines, cursor: b.cursor})
+	return newLines
+}
+
+func (b *Buffer) saveState() {
+	b.history = append(b.history, bufferState{lines: b.copyLines(), cursor: b.cursor})
 	b.redoStack = nil // This is where we clear the redo branch
 }
 
@@ -53,12 +56,7 @@ func (b *Buffer) Undo() {
 	}
 
 	// Save current state to redo stack
-	currentLines := make([][]rune, len(b.lines))
-	for i := range b.lines {
-		currentLines[i] = make([]rune, len(b.lines[i]))
-		copy(currentLines[i], b.lines[i])
-	}
-	b.redoStack = append(b.redoStack, bufferState{lines: currentLines, cursor: b.cursor})
+	b.redoStack = append(b.redoStack, bufferState{lines: b.copyLines(), cursor: b.cursor})
 
 	// Restore last state
 	last := b.history[len(b.history)-1]
@@ -74,12 +72,7 @@ func (b *Buffer) Redo() {
 	}
 
 	// Save current state back to history
-	currentLines := make([][]rune, len(b.lines))
-	for i := range b.lines {
-		currentLines[i] = make([]rune, len(b.lines[i]))
-		copy(currentLines[i], b.lines[i])
-	}
-	b.history = append(b.history, bufferState{lines: currentLines, cursor: b.cursor})
+	b.history = append(b.history, bufferState{lines: b.copyLines(), cursor: b.cursor})
 
 	// Restore from redo stack
 	next := b.redoStack[len(b.redoStack)-1]
