@@ -15,7 +15,7 @@ type Column struct {
 func NewColumn(x, y, w, h int, onExec func(*Column, *Window, string) bool) *Column {
 	// Catppuccin Macchiato Mantle: #1e2030, Sky: #91d7e3
 	tagStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x1e2030)).Foreground(tcell.NewHexColor(0x91d7e3))
-	tag := NewTextView(" New Zerox Delcol ", x+1, y, w-1, 1, tagStyle, true)
+	tag := NewTextView(" New Zerox Delcol ", x+1, y, w-1, 1, tagStyle, true, false)
 
 	c := &Column{
 		tag:    tag,

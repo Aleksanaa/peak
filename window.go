@@ -14,9 +14,10 @@ type TextView struct {
 	scroll     int
 	drag       bool
 	singleLine bool
+	scrollable bool
 }
 
-func NewTextView(text string, x, y, w, h int, style tcell.Style, singleLine bool) *TextView {
+func NewTextView(text string, x, y, w, h int, style tcell.Style, singleLine bool, scrollable bool) *TextView {
 	return &TextView{
 		buffer:     NewBuffer(text),
 		x:          x,
@@ -25,17 +26,21 @@ func NewTextView(text string, x, y, w, h int, style tcell.Style, singleLine bool
 		h:          h,
 		style:      style,
 		singleLine: singleLine,
+		scrollable: scrollable,
 	}
 }
 
 func (tv *TextView) Draw(s tcell.Screen) {
 	selStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x6e738d)).Foreground(tcell.ColorWhite)
 	
+	if !tv.scrollable {
+		tv.scroll = 0
+	}
+
 	vrow := 0
 	skip := tv.scroll
 	
 	for i, line := range tv.buffer.lines {
-		// Calculate how many visual lines this buffer line takes
 		visualLines := 1
 		if tv.w > 0 && len(line) > 0 {
 			visualLines = (len(line) + tv.w - 1) / tv.w
@@ -48,7 +53,7 @@ func (tv *TextView) Draw(s tcell.Screen) {
 				continue
 			}
 			if vrow >= tv.h {
-				return
+				goto done
 			}
 
 			start := vl * tv.w
@@ -71,7 +76,7 @@ func (tv *TextView) Draw(s tcell.Screen) {
 			vrow++
 		}
 	}
-	// Clear remaining visual lines
+done:
 	for ; vrow < tv.h; vrow++ {
 		for col := 0; col < tv.w; col++ {
 			s.SetContent(tv.x+col, tv.y+vrow, ' ', nil, tv.style)
@@ -113,6 +118,7 @@ func (tv *TextView) Resize(x, y, w, h int) {
 func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 	switch ev := ev.(type) {
 	case *tcell.EventKey:
+		logDebug("Key Event: key=%v rune=%v mod=%v", ev.Key(), ev.Rune(), ev.Modifiers())
 		switch ev.Key() {
 		case tcell.KeyCtrlC:
 			text := tv.buffer.GetSelectedText()
@@ -183,9 +189,8 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 			}
 			tv.buffer.Insert(ev.Rune())
 		}
-		// Basic scroll sync (could be improved)
-		if !tv.singleLine {
-			// Find visual row of cursor
+		
+		if tv.scrollable {
 			vrow := 0
 			for i := 0; i < tv.buffer.cursor.y; i++ {
 				vl := 1
@@ -205,11 +210,13 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 			} else if vrow >= tv.scroll+tv.h {
 				tv.scroll = vrow - tv.h + 1
 			}
+		} else {
+			tv.scroll = 0
 		}
 		return false
 	case *tcell.EventMouse:
 		buttons := ev.Buttons()
-		if !tv.singleLine {
+		if tv.scrollable {
 			if buttons&tcell.WheelUp != 0 {
 				if tv.scroll > 0 {
 					tv.scroll--
@@ -217,7 +224,6 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 				return false
 			}
 			if buttons&tcell.WheelDown != 0 {
-				// Simple check for max scroll
 				totalVRows := 0
 				for _, line := range tv.buffer.lines {
 					vl := 1
@@ -234,11 +240,10 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 		}
 
 		mx, my := ev.Position()
-		if buttons == tcell.Button1 {
-			// Translate screen Y to visual row
+		isClick := buttons == tcell.Button1 || buttons == tcell.Button2 || buttons == tcell.Button3
+		
+		if isClick {
 			targetVRow := my - tv.y + tv.scroll
-			
-			// Find buffer position from visual row
 			currVRow := 0
 			found := false
 			for i, line := range tv.buffer.lines {
@@ -252,16 +257,22 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 					if bx > len(line) { bx = len(line) }
 					if bx < 0 { bx = 0 }
 					
-					if !tv.drag {
-						tv.drag = true
-						tv.buffer.ClearSelection()
-						tv.buffer.cursor.y = i
-						tv.buffer.cursor.x = bx
-						tv.buffer.SetSelection(tv.buffer.cursor, tv.buffer.cursor)
+					if buttons == tcell.Button1 {
+						if !tv.drag {
+							tv.drag = true
+							tv.buffer.ClearSelection()
+							tv.buffer.cursor.y = i
+							tv.buffer.cursor.x = bx
+							tv.buffer.SetSelection(tv.buffer.cursor, tv.buffer.cursor)
+						} else {
+							tv.buffer.cursor.y = i
+							tv.buffer.cursor.x = bx
+							tv.buffer.selectionEnd = &Cursor{bx, i}
+						}
 					} else {
+						// Middle/Right click: move cursor for word detection
 						tv.buffer.cursor.y = i
 						tv.buffer.cursor.x = bx
-						tv.buffer.selectionEnd = &Cursor{bx, i}
 					}
 					found = true
 					break
@@ -269,20 +280,24 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 				currVRow += vl
 			}
 			if !found && targetVRow >= currVRow {
-				// Clicked below all text
 				lastLine := len(tv.buffer.lines) - 1
 				if lastLine < 0 { lastLine = 0 }
 				bx := len(tv.buffer.lines[lastLine])
-				if !tv.drag {
-					tv.drag = true
-					tv.buffer.ClearSelection()
-					tv.buffer.cursor.y = lastLine
-					tv.buffer.cursor.x = bx
-					tv.buffer.SetSelection(tv.buffer.cursor, tv.buffer.cursor)
+				if buttons == tcell.Button1 {
+					if !tv.drag {
+						tv.drag = true
+						tv.buffer.ClearSelection()
+						tv.buffer.cursor.y = lastLine
+						tv.buffer.cursor.x = bx
+						tv.buffer.SetSelection(tv.buffer.cursor, tv.buffer.cursor)
+					} else {
+						tv.buffer.cursor.y = lastLine
+						tv.buffer.cursor.x = bx
+						tv.buffer.selectionEnd = &Cursor{bx, lastLine}
+					}
 				} else {
 					tv.buffer.cursor.y = lastLine
 					tv.buffer.cursor.x = bx
-					tv.buffer.selectionEnd = &Cursor{bx, lastLine}
 				}
 			}
 		} else {
@@ -310,8 +325,8 @@ func NewWindow(tagText, bodyText string, parent *Column, x, y, w, h int, onExec 
 	tagStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x1e2030)).Foreground(tcell.NewHexColor(0x91d7e3))
 	bodyStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x24273a)).Foreground(tcell.NewHexColor(0xcad3f5))
 
-	tag := NewTextView(tagText, x+1, y, w-1, 1, tagStyle, true)
-	body := NewTextView(bodyText, x+1, y+1, w-1, h-1, bodyStyle, false)
+	tag := NewTextView(tagText, x+1, y, w-1, 1, tagStyle, false, false)
+	body := NewTextView(bodyText, x+1, y+1, w-1, h-1, bodyStyle, false, true)
 
 	return &Window{
 		tag:    tag,
@@ -344,28 +359,54 @@ func (win *Window) GetFilename() string {
 	return string(line[start:end])
 }
 
+func (win *Window) tagHeight() int {
+	totalVRows := 0
+	for _, line := range win.tag.buffer.lines {
+		if win.tag.w > 0 && len(line) > 0 {
+			totalVRows += (len(line) + win.tag.w - 1) / win.tag.w
+		} else {
+			totalVRows++
+		}
+	}
+	if totalVRows < 1 { return 1 }
+	return totalVRows
+}
+
 func (win *Window) Draw(s tcell.Screen) {
+	th := win.tagHeight()
+	win.tag.h = th
+	win.body.y = win.y + th
+	win.body.h = win.h - th
+	if win.body.h < 0 {
+		win.body.h = 0
+	}
+
 	handleStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0xb7bdf8)).Foreground(tcell.ColorBlack)
-	s.SetContent(win.x, win.tag.y, ' ', nil, handleStyle)
+	for i := 0; i < th; i++ {
+		s.SetContent(win.x, win.y+i, ' ', nil, handleStyle)
+	}
 	win.tag.Draw(s)
 	win.body.Draw(s)
 }
 
 func (win *Window) Resize(x, y, w, h int) {
 	win.x, win.y, win.w, win.h = x, y, w, h
-	win.tag.Resize(x+1, y, w-1, 1)
-	win.body.Resize(x+1, y+1, w-1, h-1)
+	th := win.tagHeight()
+	win.tag.Resize(x+1, y, w-1, th)
+	win.body.Resize(x+1, y+th, w-1, h-th)
 }
 
 func (win *Window) HandleEvent(ev tcell.Event) bool {
+	th := win.tagHeight()
 	switch ev := ev.(type) {
 	case *tcell.EventMouse:
-		mx, my := ev.Position()
-		if my == win.tag.y {
+		_, my := ev.Position()
+		if my >= win.y && my < win.y+th {
+			win.tag.HandleEvent(ev) // Always move cursor on click
 			if ev.Buttons() == tcell.Button3 {
 				word := win.tag.buffer.GetSelectedText()
 				if word == "" {
-					word = win.tag.buffer.GetWordAt(mx-win.tag.x, 0)
+					word = win.tag.buffer.GetWordAt(win.tag.buffer.cursor.x, win.tag.buffer.cursor.y)
 				}
 				if win.onExec != nil {
 					return win.onExec(win.parent, win, word)
@@ -373,23 +414,17 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 			} else if ev.Buttons() == tcell.Button2 {
 				word := win.tag.buffer.GetSelectedText()
 				if word == "" {
-					word = win.tag.buffer.GetWordAt(mx-win.tag.x, 0)
+					word = win.tag.buffer.GetWordAt(win.tag.buffer.cursor.x, win.tag.buffer.cursor.y)
 				}
 				win.body.Search(word)
 				return false
 			}
-			return win.tag.HandleEvent(ev)
-		} else if my >= win.body.y && my < win.body.y+win.body.h {
+			return false
+		} else if my >= win.y+th && my < win.y+win.h {
+			win.body.HandleEvent(ev) // Always move cursor on click
 			if ev.Buttons() == tcell.Button3 {
 				word := win.body.buffer.GetSelectedText()
 				if word == "" {
-					// Word detection here needs to account for wrapping too...
-					// For now, let's keep it simple and use raw buffer word detection
-					// based on translated mouse coords.
-					// HandleEvent already does translation for cursor, 
-					// but GetWordAt needs physical bx, by.
-					// We'll let HandleEvent set the cursor and then grab the word.
-					win.body.HandleEvent(ev) // Update cursor
 					word = win.body.buffer.GetWordAt(win.body.buffer.cursor.x, win.body.buffer.cursor.y)
 				}
 				if win.onExec != nil {
@@ -398,13 +433,12 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 			} else if ev.Buttons() == tcell.Button2 {
 				word := win.body.buffer.GetSelectedText()
 				if word == "" {
-					win.body.HandleEvent(ev)
 					word = win.body.buffer.GetWordAt(win.body.buffer.cursor.x, win.body.buffer.cursor.y)
 				}
 				win.body.Search(word)
 				return false
 			}
-			return win.body.HandleEvent(ev)
+			return false
 		}
 	}
 	return false
@@ -414,7 +448,6 @@ func (tv *TextView) Search(word string) {
 	if word == "" {
 		return
 	}
-	// This search still works on buffer lines, which is correct.
 	startX := tv.buffer.cursor.x + 1
 	startY := tv.buffer.cursor.y
 	for y := startY; y < len(tv.buffer.lines); y++ {

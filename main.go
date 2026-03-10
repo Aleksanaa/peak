@@ -32,7 +32,7 @@ func (e *Editor) Init() {
 	e.width, e.height = e.screen.Size()
 
 	tagStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x181926)).Foreground(tcell.NewHexColor(0x91d7e3))
-	e.tag = NewTextView(" NewCol Exit ", 0, 0, e.width, 1, tagStyle, true)
+	e.tag = NewTextView(" NewCol Exit ", 0, 0, e.width, 1, tagStyle, true, false)
 	e.focusedView = e.tag
 
 	// Initial Column
