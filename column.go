@@ -52,6 +52,18 @@ func (c *Column) AddWindow(tagText, bodyText string) *Window {
 }
 
 func (c *Column) Draw(s tcell.Screen) {
+	sepStyle := tcell.StyleDefault.Background(tcell.ColorPaleTurquoise).Foreground(tcell.ColorBlack)
+	cornerStyle := tcell.StyleDefault.Background(tcell.ColorDarkBlue).Foreground(tcell.ColorBlack)
+
+	// Draw vertical separator
+	for y := c.y; y < c.y+c.h; y++ {
+		style := sepStyle
+		if y == c.y {
+			style = cornerStyle
+		}
+		s.SetContent(c.x, y, ' ', nil, style)
+	}
+
 	c.tag.Draw(s)
 	for _, win := range c.windows {
 		win.Draw(s)
@@ -60,7 +72,7 @@ func (c *Column) Draw(s tcell.Screen) {
 
 func (c *Column) Resize(x, y, w, h int) {
 	c.x, c.y, c.w, c.h = x, y, w, h
-	c.tag.Resize(x, y, w, 1)
+	c.tag.Resize(x+1, y, w-1, 1) // Offset by 1 for separator
 	if len(c.windows) > 0 {
 		winH := (h - 1) / len(c.windows)
 		yOffset := y + 1
@@ -69,7 +81,7 @@ func (c *Column) Resize(x, y, w, h int) {
 			if i == len(c.windows)-1 {
 				actualH = (y + h) - yOffset
 			}
-			win.Resize(x, yOffset, w, actualH)
+			win.Resize(x, yOffset, w, actualH) // Pass x directly
 			yOffset += actualH
 		}
 	}
@@ -79,9 +91,13 @@ func (c *Column) HandleEvent(ev tcell.Event) bool {
 	switch ev := ev.(type) {
 	case *tcell.EventMouse:
 		mx, my := ev.Position()
+		if mx == c.x {
+			// Separator area - ignore for now
+			return false
+		}
 		if my == c.tag.y {
 			if ev.Buttons() == tcell.Button3 { // Middle-click
-				word := c.tag.buffer.GetWordAt(mx-c.x, 0)
+				word := c.tag.buffer.GetWordAt(mx-c.tag.x, 0)
 				return c.onExec(nil, word)
 			}
 			return c.tag.HandleEvent(ev)

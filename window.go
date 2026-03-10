@@ -21,18 +21,18 @@ func NewWindow(tagText, bodyText string, x, y, w, h int, onExec func(*Window, st
 
 	tag := &Tag{
 		buffer: NewBuffer(tagText),
-		x:      x,
+		x:      x + 1,
 		y:      y,
-		w:      w,
+		w:      w - 1,
 		h:      1,
 		style:  tagStyle,
 	}
 
 	body := &Body{
 		buffer: NewBuffer(bodyText),
-		x:      x,
+		x:      x + 1,
 		y:      y + 1,
-		w:      w,
+		w:      w - 1,
 		h:      h - 1,
 		style:  bodyStyle,
 	}
@@ -70,6 +70,13 @@ func (win *Window) GetFilename() string {
 }
 
 func (win *Window) Draw(s tcell.Screen) {
+	// Draw window handle square on the vertical separator line
+	handleStyle := tcell.StyleDefault.Background(tcell.ColorSteelBlue).Foreground(tcell.ColorBlack)
+	if win.focusTag {
+		handleStyle = tcell.StyleDefault.Background(tcell.ColorRoyalBlue).Foreground(tcell.ColorBlack)
+	}
+	s.SetContent(win.x, win.tag.y, ' ', nil, handleStyle)
+
 	win.tag.Draw(s)
 	win.body.Draw(s)
 	// Cursor management
@@ -86,8 +93,8 @@ func (win *Window) Draw(s tcell.Screen) {
 
 func (win *Window) Resize(x, y, w, h int) {
 	win.x, win.y, win.w, win.h = x, y, w, h
-	win.tag.Resize(x, y, w, 1)
-	win.body.Resize(x, y+1, w, h-1)
+	win.tag.Resize(x+1, y, w-1, 1) // Offset by 1 for handle on vertical line
+	win.body.Resize(x+1, y+1, w-1, h-1) // Offset body too
 }
 
 func (win *Window) HandleEvent(ev tcell.Event) bool {
