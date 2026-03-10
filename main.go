@@ -202,11 +202,16 @@ func (e *Editor) moveColumnTo(col *Column, mx int) {
 			e.columns[idx], e.columns[idx-1] = e.columns[idx-1], e.columns[idx]
 			e.columns[idx].explicitWidth, e.columns[idx-1].explicitWidth = 0, 0
 		} else {
-			nw := mx - prev.x
-			if nw < 5 {
-				nw = 5
+			newPrevW := mx - prev.x
+			if newPrevW < 5 {
+				newPrevW = 5
 			}
-			prev.explicitWidth = nw
+			combinedW := prev.w + col.w
+			prev.explicitWidth = newPrevW
+			col.explicitWidth = combinedW - newPrevW
+			if col.explicitWidth < 5 {
+				col.explicitWidth = 5
+			}
 		}
 	}
 	e.Resize()
@@ -268,11 +273,16 @@ func (e *Editor) moveWindowTo(win *Window, mx, my int) {
 			target.windows[idx], target.windows[idx-1] = target.windows[idx-1], target.windows[idx]
 			target.windows[idx].explicitHeight, target.windows[idx-1].explicitHeight = 0, 0
 		} else {
-			nh := my - prev.y
-			if nh < prev.tagHeight()+1 {
-				nh = prev.tagHeight() + 1
+			newPrevH := my - prev.y
+			if newPrevH < prev.tagHeight()+1 {
+				newPrevH = prev.tagHeight() + 1
 			}
-			prev.explicitHeight = nh
+			combinedH := prev.h + win.h
+			prev.explicitHeight = newPrevH
+			win.explicitHeight = combinedH - newPrevH
+			if win.explicitHeight < win.tagHeight()+1 {
+				win.explicitHeight = win.tagHeight() + 1
+			}
 		}
 	}
 	target.Resize(target.x, target.y, target.w, target.h)
