@@ -1,0 +1,206 @@
+package main
+
+import (
+	"github.com/gdamore/tcell/v2"
+)
+
+type Window struct {
+	tag  *Tag
+	body *Body
+	x, y int
+	w, h int
+	onExec func(string) bool
+}
+
+func NewWindow(tagText, bodyText string, x, y, w, h int, onExec func(string) bool) *Window {
+	tagStyle := tcell.StyleDefault.Background(tcell.ColorPaleTurquoise).Foreground(tcell.ColorBlack)
+	bodyStyle := tcell.StyleDefault.Background(tcell.ColorNavajoWhite).Foreground(tcell.ColorBlack)
+
+	tag := &Tag{
+		buffer: NewBuffer(tagText),
+		x:      x,
+		y:      y,
+		w:      w,
+		h:      1,
+		style:  tagStyle,
+	}
+
+	body := &Body{
+		buffer: NewBuffer(bodyText),
+		x:      x,
+		y:      y + 1,
+		w:      w,
+		h:      h - 1,
+		style:  bodyStyle,
+	}
+
+	return &Window{
+		tag:    tag,
+		body:   body,
+		x:      x,
+		y:      y,
+		w:      w,
+		h:      h,
+		onExec: onExec,
+	}
+}
+
+func (win *Window) Draw(s tcell.Screen) {
+	win.tag.Draw(s)
+	win.body.Draw(s)
+}
+
+func (win *Window) Resize(x, y, w, h int) {
+	win.x, win.y, win.w, win.h = x, y, w, h
+	win.tag.Resize(x, y, w, 1)
+	win.body.Resize(x, y+1, w, h-1)
+}
+
+func (win *Window) HandleEvent(ev tcell.Event) bool {
+	switch ev := ev.(type) {
+	case *tcell.EventMouse:
+		mx, my := ev.Position()
+		if my == win.tag.y {
+			if ev.Buttons() == tcell.Button2 { // Middle-click
+				word := win.tag.buffer.GetWordAt(mx-win.tag.x, 0)
+				if win.onExec != nil {
+					return win.onExec(word)
+				}
+			}
+			return win.tag.HandleEvent(ev)
+		} else if my >= win.body.y && my < win.body.y+win.body.h {
+			if ev.Buttons() == tcell.Button2 { // Middle-click
+				word := win.body.buffer.GetWordAt(mx-win.body.x, my-win.body.y+win.body.scroll)
+				if win.onExec != nil {
+					return win.onExec(word)
+				}
+			}
+			return win.body.HandleEvent(ev)
+		}
+	case *tcell.EventKey:
+		return win.body.HandleEvent(ev)
+	}
+	return false
+}
+
+type Tag struct {
+	buffer *Buffer
+	x, y   int
+	w, h   int
+	style  tcell.Style
+}
+
+func (t *Tag) Draw(s tcell.Screen) {
+	for i := 0; i < t.w; i++ {
+		s.SetContent(t.x+i, t.y, ' ', nil, t.style)
+	}
+	if len(t.buffer.lines) > 0 {
+		line := t.buffer.lines[0]
+		for i, r := range line {
+			if i < t.w {
+				s.SetContent(t.x+i, t.y, r, nil, t.style)
+			}
+		}
+	}
+}
+
+func (t *Tag) Resize(x, y, w, h int) {
+	t.x, t.y, t.w, t.h = x, y, w, h
+}
+
+func (t *Tag) HandleEvent(ev tcell.Event) bool {
+	switch ev := ev.(type) {
+	case *tcell.EventMouse:
+		if ev.Buttons() == tcell.Button1 {
+			mx, _ := ev.Position()
+			t.buffer.cursor.x = mx - t.x
+			if t.buffer.cursor.x < 0 {
+				t.buffer.cursor.x = 0
+			}
+			if len(t.buffer.lines) > 0 && t.buffer.cursor.x > len(t.buffer.lines[0]) {
+				t.buffer.cursor.x = len(t.buffer.lines[0])
+			}
+		}
+	}
+	return false
+}
+
+type Body struct {
+	buffer *Buffer
+	x, y   int
+	w, h   int
+	style  tcell.Style
+	scroll int
+}
+
+func (b *Body) Draw(s tcell.Screen) {
+	for row := 0; row < b.h; row++ {
+		bufferRow := row + b.scroll
+		var line []rune
+		if bufferRow < len(b.buffer.lines) {
+			line = b.buffer.lines[bufferRow]
+		}
+		for col := 0; col < b.w; col++ {
+			char := ' '
+			if col < len(line) {
+				char = line[col]
+			}
+			s.SetContent(b.x+col, b.y+row, char, nil, b.style)
+		}
+	}
+	if b.buffer.cursor.y >= b.scroll && b.buffer.cursor.y < b.scroll+b.h {
+		cx := b.x + b.buffer.cursor.x
+		cy := b.y + b.buffer.cursor.y - b.scroll
+		s.ShowCursor(cx, cy)
+	}
+}
+
+func (b *Body) Resize(x, y, w, h int) {
+	b.x, b.y, b.w, b.h = x, y, w, h
+}
+
+func (b *Body) HandleEvent(ev tcell.Event) bool {
+	switch ev := ev.(type) {
+	case *tcell.EventKey:
+		switch ev.Key() {
+		case tcell.KeyUp:
+			b.buffer.MoveUp()
+		case tcell.KeyDown:
+			b.buffer.MoveDown()
+		case tcell.KeyLeft:
+			b.buffer.MoveLeft()
+		case tcell.KeyRight:
+			b.buffer.MoveRight()
+		case tcell.KeyBackspace, tcell.KeyBackspace2:
+			b.buffer.Backspace()
+		case tcell.KeyEnter:
+			b.buffer.NewLine()
+		case tcell.KeyRune:
+			b.buffer.Insert(ev.Rune())
+		}
+		if b.buffer.cursor.y < b.scroll {
+			b.scroll = b.buffer.cursor.y
+		} else if b.buffer.cursor.y >= b.scroll+b.h {
+			b.scroll = b.buffer.cursor.y - b.h + 1
+		}
+	case *tcell.EventMouse:
+		if ev.Buttons() == tcell.Button1 {
+			mx, my := ev.Position()
+			b.buffer.cursor.y = my - b.y + b.scroll
+			if b.buffer.cursor.y >= len(b.buffer.lines) {
+				b.buffer.cursor.y = len(b.buffer.lines) - 1
+			}
+			if b.buffer.cursor.y < 0 {
+				b.buffer.cursor.y = 0
+			}
+			b.buffer.cursor.x = mx - b.x
+			if b.buffer.cursor.x > len(b.buffer.lines[b.buffer.cursor.y]) {
+				b.buffer.cursor.x = len(b.buffer.lines[b.buffer.cursor.y])
+			}
+			if b.buffer.cursor.x < 0 {
+				b.buffer.cursor.x = 0
+			}
+		}
+	}
+	return false
+}
