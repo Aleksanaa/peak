@@ -30,31 +30,79 @@ func NewTextView(text string, x, y, w, h int, style tcell.Style, singleLine bool
 
 func (tv *TextView) Draw(s tcell.Screen) {
 	selStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x6e738d)).Foreground(tcell.ColorWhite)
-	for row := 0; row < tv.h; row++ {
-		bufferRow := row + tv.scroll
-		var line []rune
-		if bufferRow < len(tv.buffer.lines) {
-			line = tv.buffer.lines[bufferRow]
+	
+	vrow := 0
+	skip := tv.scroll
+	
+	for i, line := range tv.buffer.lines {
+		// Calculate how many visual lines this buffer line takes
+		visualLines := 1
+		if tv.w > 0 && len(line) > 0 {
+			visualLines = (len(line) + tv.w - 1) / tv.w
 		}
+		if len(line) == 0 { visualLines = 1 }
+
+		for vl := 0; vl < visualLines; vl++ {
+			if skip > 0 {
+				skip--
+				continue
+			}
+			if vrow >= tv.h {
+				return
+			}
+
+			start := vl * tv.w
+			end := start + tv.w
+			if end > len(line) { end = len(line) }
+
+			for col := 0; col < tv.w; col++ {
+				char := ' '
+				style := tv.style
+				bx := start + col
+				
+				if bx < end {
+					char = line[bx]
+					if tv.buffer.IsSelected(bx, i) {
+						style = selStyle
+					}
+				}
+				s.SetContent(tv.x+col, tv.y+vrow, char, nil, style)
+			}
+			vrow++
+		}
+	}
+	// Clear remaining visual lines
+	for ; vrow < tv.h; vrow++ {
 		for col := 0; col < tv.w; col++ {
-			char := ' '
-			style := tv.style
-			if tv.buffer.IsSelected(col, bufferRow) {
-				style = selStyle
-			}
-			if col < len(line) {
-				char = line[col]
-			}
-			s.SetContent(tv.x+col, tv.y+row, char, nil, style)
+			s.SetContent(tv.x+col, tv.y+vrow, ' ', nil, tv.style)
 		}
 	}
 }
 
 func (tv *TextView) ShowCursor(s tcell.Screen) {
-	if tv.buffer.cursor.y >= tv.scroll && tv.buffer.cursor.y < tv.scroll+tv.h {
-		cx := tv.x + tv.buffer.cursor.x
-		cy := tv.y + tv.buffer.cursor.y - tv.scroll
-		s.ShowCursor(cx, cy)
+	vrow := 0
+	for i, line := range tv.buffer.lines {
+		visualLines := 1
+		if tv.w > 0 && len(line) > 0 {
+			visualLines = (len(line) + tv.w - 1) / tv.w
+		}
+		if len(line) == 0 { visualLines = 1 }
+
+		if i == tv.buffer.cursor.y {
+			vl := 0
+			cx := 0
+			if tv.w > 0 {
+				vl = tv.buffer.cursor.x / tv.w
+				cx = tv.buffer.cursor.x % tv.w
+			}
+			
+			realVRow := vrow + vl
+			if realVRow >= tv.scroll && realVRow < tv.scroll+tv.h {
+				s.ShowCursor(tv.x+cx, tv.y+(realVRow-tv.scroll))
+			}
+			return
+		}
+		vrow += visualLines
 	}
 }
 
@@ -65,7 +113,6 @@ func (tv *TextView) Resize(x, y, w, h int) {
 func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 	switch ev := ev.(type) {
 	case *tcell.EventKey:
-		logDebug("Key Event: key=%v rune=%v mod=%v", ev.Key(), ev.Rune(), ev.Modifiers())
 		switch ev.Key() {
 		case tcell.KeyCtrlC:
 			text := tv.buffer.GetSelectedText()
@@ -82,7 +129,6 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 			return false
 		case tcell.KeyCtrlV:
 			text, err := clipboard.ReadAll()
-			logDebug("Paste: len=%d err=%v", len(text), err)
 			if err == nil {
 				if tv.buffer.selectionStart != nil {
 					tv.buffer.DeleteSelection()
@@ -137,10 +183,28 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 			}
 			tv.buffer.Insert(ev.Rune())
 		}
-		if tv.buffer.cursor.y < tv.scroll {
-			tv.scroll = tv.buffer.cursor.y
-		} else if tv.buffer.cursor.y >= tv.scroll+tv.h {
-			tv.scroll = tv.buffer.cursor.y - tv.h + 1
+		// Basic scroll sync (could be improved)
+		if !tv.singleLine {
+			// Find visual row of cursor
+			vrow := 0
+			for i := 0; i < tv.buffer.cursor.y; i++ {
+				vl := 1
+				if tv.w > 0 && len(tv.buffer.lines[i]) > 0 {
+					vl = (len(tv.buffer.lines[i]) + tv.w - 1) / tv.w
+				}
+				vrow += vl
+			}
+			cvl := 0
+			if tv.w > 0 {
+				cvl = tv.buffer.cursor.x / tv.w
+			}
+			vrow += cvl
+			
+			if vrow < tv.scroll {
+				tv.scroll = vrow
+			} else if vrow >= tv.scroll+tv.h {
+				tv.scroll = vrow - tv.h + 1
+			}
 		}
 		return false
 	case *tcell.EventMouse:
@@ -153,7 +217,16 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 				return false
 			}
 			if buttons&tcell.WheelDown != 0 {
-				if tv.scroll < len(tv.buffer.lines)-1 {
+				// Simple check for max scroll
+				totalVRows := 0
+				for _, line := range tv.buffer.lines {
+					vl := 1
+					if tv.w > 0 && len(line) > 0 {
+						vl = (len(line) + tv.w - 1) / tv.w
+					}
+					totalVRows += vl
+				}
+				if tv.scroll < totalVRows-1 {
 					tv.scroll++
 				}
 				return false
@@ -161,31 +234,56 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 		}
 
 		mx, my := ev.Position()
-		bx := mx - tv.x
-		by := my - tv.y + tv.scroll
-
-		if bx < 0 { bx = 0 }
-		if bx >= tv.w { bx = tv.w - 1 }
-		if by < 0 { by = 0 }
-		if by >= len(tv.buffer.lines) { by = len(tv.buffer.lines) - 1 }
-
 		if buttons == tcell.Button1 {
-			if !tv.drag {
-				tv.drag = true
-				tv.buffer.ClearSelection()
-				tv.buffer.cursor.y = by
-				tv.buffer.cursor.x = bx
-				if tv.buffer.cursor.x > len(tv.buffer.lines[tv.buffer.cursor.y]) {
-					tv.buffer.cursor.x = len(tv.buffer.lines[tv.buffer.cursor.y])
+			// Translate screen Y to visual row
+			targetVRow := my - tv.y + tv.scroll
+			
+			// Find buffer position from visual row
+			currVRow := 0
+			found := false
+			for i, line := range tv.buffer.lines {
+				vl := 1
+				if tv.w > 0 && len(line) > 0 {
+					vl = (len(line) + tv.w - 1) / tv.w
 				}
-				tv.buffer.SetSelection(tv.buffer.cursor, tv.buffer.cursor)
-			} else {
-				tv.buffer.cursor.y = by
-				tv.buffer.cursor.x = bx
-				if tv.buffer.cursor.x > len(tv.buffer.lines[tv.buffer.cursor.y]) {
-					tv.buffer.cursor.x = len(tv.buffer.lines[tv.buffer.cursor.y])
+				if targetVRow >= currVRow && targetVRow < currVRow+vl {
+					offset := targetVRow - currVRow
+					bx := offset * tv.w + (mx - tv.x)
+					if bx > len(line) { bx = len(line) }
+					if bx < 0 { bx = 0 }
+					
+					if !tv.drag {
+						tv.drag = true
+						tv.buffer.ClearSelection()
+						tv.buffer.cursor.y = i
+						tv.buffer.cursor.x = bx
+						tv.buffer.SetSelection(tv.buffer.cursor, tv.buffer.cursor)
+					} else {
+						tv.buffer.cursor.y = i
+						tv.buffer.cursor.x = bx
+						tv.buffer.selectionEnd = &Cursor{bx, i}
+					}
+					found = true
+					break
 				}
-				tv.buffer.selectionEnd = &Cursor{tv.buffer.cursor.x, tv.buffer.cursor.y}
+				currVRow += vl
+			}
+			if !found && targetVRow >= currVRow {
+				// Clicked below all text
+				lastLine := len(tv.buffer.lines) - 1
+				if lastLine < 0 { lastLine = 0 }
+				bx := len(tv.buffer.lines[lastLine])
+				if !tv.drag {
+					tv.drag = true
+					tv.buffer.ClearSelection()
+					tv.buffer.cursor.y = lastLine
+					tv.buffer.cursor.x = bx
+					tv.buffer.SetSelection(tv.buffer.cursor, tv.buffer.cursor)
+				} else {
+					tv.buffer.cursor.y = lastLine
+					tv.buffer.cursor.x = bx
+					tv.buffer.selectionEnd = &Cursor{bx, lastLine}
+				}
 			}
 		} else {
 			tv.drag = false
@@ -285,7 +383,14 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 			if ev.Buttons() == tcell.Button3 {
 				word := win.body.buffer.GetSelectedText()
 				if word == "" {
-					word = win.body.buffer.GetWordAt(mx-win.body.x, my-win.body.y+win.body.scroll)
+					// Word detection here needs to account for wrapping too...
+					// For now, let's keep it simple and use raw buffer word detection
+					// based on translated mouse coords.
+					// HandleEvent already does translation for cursor, 
+					// but GetWordAt needs physical bx, by.
+					// We'll let HandleEvent set the cursor and then grab the word.
+					win.body.HandleEvent(ev) // Update cursor
+					word = win.body.buffer.GetWordAt(win.body.buffer.cursor.x, win.body.buffer.cursor.y)
 				}
 				if win.onExec != nil {
 					return win.onExec(win.parent, win, word)
@@ -293,7 +398,8 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 			} else if ev.Buttons() == tcell.Button2 {
 				word := win.body.buffer.GetSelectedText()
 				if word == "" {
-					word = win.body.buffer.GetWordAt(mx-win.body.x, my-win.body.y+win.body.scroll)
+					win.body.HandleEvent(ev)
+					word = win.body.buffer.GetWordAt(win.body.buffer.cursor.x, win.body.buffer.cursor.y)
 				}
 				win.body.Search(word)
 				return false
@@ -308,6 +414,7 @@ func (tv *TextView) Search(word string) {
 	if word == "" {
 		return
 	}
+	// This search still works on buffer lines, which is correct.
 	startX := tv.buffer.cursor.x + 1
 	startY := tv.buffer.cursor.y
 	for y := startY; y < len(tv.buffer.lines); y++ {
