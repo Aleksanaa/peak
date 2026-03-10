@@ -7,18 +7,20 @@ import (
 type Column struct {
 	tag     *TextView
 	windows []*Window
+	editor  *Editor
 	x, y    int
 	w, h    int
 	onExec  func(*Column, *Window, string) bool
 }
 
-func NewColumn(x, y, w, h int, onExec func(*Column, *Window, string) bool) *Column {
+func NewColumn(x, y, w, h int, editor *Editor, onExec func(*Column, *Window, string) bool) *Column {
 	// Catppuccin Macchiato Mantle: #1e2030, Sky: #91d7e3
 	tagStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x1e2030)).Foreground(tcell.NewHexColor(0x91d7e3))
 	tag := NewTextView(" New Zerox Delcol ", x+1, y, w-1, 1, tagStyle, true, false)
 
 	c := &Column{
 		tag:    tag,
+		editor: editor,
 		x:      x,
 		y:      y,
 		w:      w,
@@ -45,7 +47,7 @@ func (c *Column) AddWindow(tagText, bodyText string) *Window {
 		}
 	}
 
-	newWin := NewWindow(tagText, bodyText, c, c.x, c.y+c.h-h, c.w, h, c.onExec)
+	newWin := NewWindow(tagText, bodyText, c, c.editor, c.x, c.y+c.h-h, c.w, h, c.onExec)
 	c.windows = append(c.windows, newWin)
 	return newWin
 }

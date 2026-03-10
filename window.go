@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 
 	"github.com/atotto/clipboard"
@@ -241,7 +242,6 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 		}
 
 		mx, my := ev.Position()
-		
 		if buttons != tcell.ButtonNone {
 			targetVRow := my - tv.y + tv.scroll
 			currVRow := 0
@@ -257,7 +257,6 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 					if bx > len(line) { bx = len(line) }
 					if bx < 0 { bx = 0 }
 					
-					// If clicking outside existing selection, clear it
 					if buttons == tcell.Button1 && !tv.drag && !tv.buffer.IsSelected(bx, i) {
 						tv.buffer.ClearSelection()
 					}
@@ -331,12 +330,13 @@ type Window struct {
 	tag    *TextView
 	body   *TextView
 	parent *Column
+	editor *Editor
 	x, y   int
 	w, h   int
 	onExec func(*Column, *Window, string) bool
 }
 
-func NewWindow(tagText, bodyText string, parent *Column, x, y, w, h int, onExec func(*Column, *Window, string) bool) *Window {
+func NewWindow(tagText, bodyText string, parent *Column, editor *Editor, x, y, w, h int, onExec func(*Column, *Window, string) bool) *Window {
 	tagStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x1e2030)).Foreground(tcell.NewHexColor(0x91d7e3))
 	bodyStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x24273a)).Foreground(tcell.NewHexColor(0xcad3f5))
 
@@ -347,6 +347,7 @@ func NewWindow(tagText, bodyText string, parent *Column, x, y, w, h int, onExec 
 		tag:    tag,
 		body:   body,
 		parent: parent,
+		editor: editor,
 		x:      x,
 		y:      y,
 		w:      w,
@@ -410,7 +411,7 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 	case *tcell.EventMouse:
 		_, my := ev.Position()
 		if my >= win.y && my < win.y+th {
-			win.tag.HandleEvent(ev) // Always move cursor on click
+			win.tag.HandleEvent(ev)
 			if ev.Buttons() == tcell.Button3 {
 				word := win.tag.buffer.GetSelectedText()
 				if word == "" {
@@ -423,13 +424,27 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 				word := win.tag.buffer.GetSelectedText()
 				if word == "" {
 					word = win.tag.buffer.GetWordAt(win.tag.buffer.cursor.x, win.tag.buffer.cursor.y)
+				}
+				// Plumb check
+				fullPath := ""
+				if win.editor != nil {
+					fullPath = win.editor.resolvePathWithContext(win, word)
+				} else {
+					fullPath = resolvePath(word)
+				}
+				logDebug("Plumb check (tag): word='%s' full='%s'", word, fullPath)
+				if info, err := os.Stat(fullPath); err == nil {
+					logDebug("Plumb match! isDir=%v", info.IsDir())
+					if win.onExec != nil {
+						return win.onExec(win.parent, win, "Look "+word)
+					}
 				}
 				win.body.Search(word)
 				return false
 			}
 			return false
 		} else if my >= win.y+th && my < win.y+win.h {
-			win.body.HandleEvent(ev) // Always move cursor on click
+			win.body.HandleEvent(ev)
 			if ev.Buttons() == tcell.Button3 {
 				word := win.body.buffer.GetSelectedText()
 				if word == "" {
@@ -442,6 +457,20 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 				word := win.body.buffer.GetSelectedText()
 				if word == "" {
 					word = win.body.buffer.GetWordAt(win.body.buffer.cursor.x, win.body.buffer.cursor.y)
+				}
+				// Plumb check
+				fullPath := ""
+				if win.editor != nil {
+					fullPath = win.editor.resolvePathWithContext(win, word)
+				} else {
+					fullPath = resolvePath(word)
+				}
+				logDebug("Plumb check (body): word='%s' full='%s'", word, fullPath)
+				if info, err := os.Stat(fullPath); err == nil {
+					logDebug("Plumb match! isDir=%v", info.IsDir())
+					if win.onExec != nil {
+						return win.onExec(win.parent, win, "Look "+word)
+					}
 				}
 				win.body.Search(word)
 				return false

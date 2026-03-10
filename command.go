@@ -49,48 +49,93 @@ func resolvePath(path string) string {
 	return path
 }
 
+func (e *Editor) resolvePathWithContext(win *Window, path string) string {
+	if strings.HasPrefix(path, "~/") || path == "~" {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			if path == "~" {
+				return home
+			}
+			return filepath.Join(home, path[2:])
+		}
+	}
+	if filepath.IsAbs(path) {
+		return path
+	}
+
+	dir, _ := os.Getwd()
+	targetWin := win
+	if targetWin == nil {
+		targetWin = e.active
+	}
+	if targetWin != nil {
+		f := resolvePath(targetWin.GetFilename())
+		if f != "" {
+			if info, err := os.Stat(f); err == nil && info.IsDir() {
+				dir = f
+			} else {
+				dir = filepath.Dir(f)
+			}
+		}
+	}
+	return filepath.Join(dir, path)
+}
+
 func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 	cmd = strings.TrimSpace(cmd)
 	if cmd == "" {
 		return false
 	}
-	logDebug("Execute: cmd='%s' hasCol=%v hasWin=%v", cmd, col != nil, win != nil)
+	
+	cmdParts := strings.Fields(cmd)
+	rootCmd := cmdParts[0]
+	
+	logDebug("Execute: rootCmd='%s' full='%s' hasCol=%v hasWin=%v", rootCmd, cmd, col != nil, win != nil)
 
-	switch cmd {
+	switch rootCmd {
 	case "Exit":
-		logDebug("Action: Exit")
 		return true
 
 	case "Get":
 		if win != nil {
-			filename := resolvePath(win.GetFilename())
-			logDebug("Action: Get, file='%s'", filename)
+			filename := e.resolvePathWithContext(win, win.GetFilename())
 			if filename != "" {
-				content, err := os.ReadFile(filename)
+				info, err := os.Stat(filename)
 				if err == nil {
-					win.body.buffer.SetText(string(content))
-				} else {
-					logDebug("Get error: %v", err)
+					if info.IsDir() {
+						entries, err := os.ReadDir(filename)
+						if err == nil {
+							var sb strings.Builder
+							for _, entry := range entries {
+								sb.WriteString(entry.Name())
+								if entry.IsDir() {
+									sb.WriteRune('/')
+								}
+								sb.WriteRune('\n')
+							}
+							win.body.buffer.SetText(sb.String())
+						}
+					} else {
+						content, err := os.ReadFile(filename)
+						if err == nil {
+							win.body.buffer.SetText(string(content))
+						}
+					}
 				}
 			}
 		}
 
 	case "Put":
 		if win != nil {
-			filename := resolvePath(win.GetFilename())
-			logDebug("Action: Put, file='%s'", filename)
+			filename := e.resolvePathWithContext(win, win.GetFilename())
 			if filename != "" {
 				content := win.body.buffer.GetText()
-				err := os.WriteFile(filename, []byte(content), 0644)
-				if err != nil {
-					logDebug("Put error: %v", err)
-				}
+				os.WriteFile(filename, []byte(content), 0644)
 			}
 		}
 
 	case "Del":
 		if win != nil {
-			logDebug("Action: Del window, parentCol=%p", win.parent)
 			targetCol := win.parent
 			if targetCol != nil {
 				for i, w := range targetCol.windows {
@@ -120,14 +165,12 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 			targetCol = win.parent
 		}
 		if targetCol != nil {
-			logDebug("Action: Delcol, col=%p", targetCol)
 			e.RemoveColumn(targetCol)
 			return false
 		}
 
 	case "NewCol":
-		logDebug("Action: NewCol")
-		newCol := NewColumn(e.width, 1, 0, e.height-1, e.Execute)
+		newCol := NewColumn(e.width, 1, 0, e.height-1, e, e.Execute)
 		e.columns = append(e.columns, newCol)
 		e.active = newCol.AddWindow("", "")
 		e.focusedView = e.active.body
@@ -144,93 +187,140 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 		if targetCol == nil && len(e.columns) > 0 {
 			targetCol = e.columns[0]
 		}
-
 		if targetCol != nil {
-			logDebug("Action: New window in col=%p", targetCol)
 			e.active = targetCol.AddWindow("", "")
 			e.focusedView = e.active.body
 			targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
 		}
 
 	case "Zerox":
-		targetWin := win
-		if targetWin == nil {
-			targetWin = e.active
-		}
-		if targetWin != nil {
-			targetCol := targetWin.parent
+		if win != nil {
+			targetCol := win.parent
 			if targetCol != nil {
-				logDebug("Action: Zerox window %p", targetWin)
-				tagText := targetWin.tag.buffer.GetText()
-				bodyText := targetWin.body.buffer.GetText()
+				tagText := win.tag.buffer.GetText()
+				bodyText := win.body.buffer.GetText()
 				newWin := targetCol.AddWindow(tagText, bodyText)
-				newWin.body.scroll = targetWin.body.scroll
-				newWin.body.buffer.cursor = targetWin.body.buffer.cursor
+				newWin.body.scroll = win.body.scroll
+				newWin.body.buffer.cursor = win.body.buffer.cursor
 				e.active = newWin
 				e.focusedView = newWin.body
 				targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
 			}
+		} else if col != nil {
+			newCol := NewColumn(e.width, 1, 0, e.height-1, e, e.Execute)
+			e.columns = append(e.columns, newCol)
+			for _, w := range col.windows {
+				tagText := w.tag.buffer.GetText()
+				bodyText := w.body.buffer.GetText()
+				nw := newCol.AddWindow(tagText, bodyText)
+				nw.body.scroll = w.body.scroll
+				nw.body.buffer.cursor = w.body.buffer.cursor
+			}
+			e.Resize()
 		}
 
 	case "Snarf":
-		var text string
 		if e.focusedView != nil {
-			text = e.focusedView.buffer.GetSelectedText()
+			text := e.focusedView.buffer.GetSelectedText()
+			if text != "" {
+				clipboard.WriteAll(text)
+			}
 		}
-		if text != "" {
-			logDebug("Action: Snarf, text len=%d", len(text))
-			clipboard.WriteAll(text)
+
+	case "Look":
+		path := strings.TrimPrefix(cmd, "Look")
+		path = strings.TrimSpace(path)
+		if path == "" { return false }
+		fullPath := e.resolvePathWithContext(win, path)
+		
+		for _, col := range e.columns {
+			for _, w := range col.windows {
+				if e.resolvePathWithContext(nil, w.GetFilename()) == fullPath {
+					e.active = w
+					e.focusedView = w.body
+					return false
+				}
+			}
+		}
+
+		info, err := os.Stat(fullPath)
+		if err != nil { return false }
+
+		var content string
+		if info.IsDir() {
+			files, err := os.ReadDir(fullPath)
+			if err == nil {
+				var sb strings.Builder
+				for _, f := range files {
+					sb.WriteString(f.Name())
+					if f.IsDir() { sb.WriteRune('/') }
+					sb.WriteRune('\n')
+				}
+				content = sb.String()
+			}
+		} else {
+			data, err := os.ReadFile(fullPath)
+			if err == nil { content = string(data) }
+		}
+
+		targetCol := col
+		if targetCol == nil {
+			if e.active != nil { targetCol = e.active.parent } else if len(e.columns) > 0 { targetCol = e.columns[0] }
+		}
+		if targetCol != nil {
+			tagPath := path
+			// If it was a relative path, we need to make it stable for the new window.
+			// But the user wants to "inherit" the style. 
+			// If 'path' is relative, let's use the resolved path but keep it relative to CWD if possible, 
+			// or just use hpath if the parent was hpath.
+			
+			if !filepath.IsAbs(path) && !strings.HasPrefix(path, "~") {
+				// It was a relative path. Let's resolve it to a stable relative path 
+				// from CWD or just use the full resolved path if it's cleaner.
+				// For now, let's use fullPath but check if parent window used hpath.
+				if win != nil {
+					parentFn := win.GetFilename()
+					if strings.HasPrefix(parentFn, "~") {
+						home, _ := os.UserHomeDir()
+						if strings.HasPrefix(fullPath, home) {
+							tagPath = "~" + fullPath[len(home):]
+						}
+					} else if filepath.IsAbs(parentFn) {
+						tagPath = fullPath
+					}
+				} else {
+					// Fallback to absolute if no parent context
+					tagPath = fullPath
+				}
+			}
+			
+			newWin := targetCol.AddWindow(tagPath+" Get Put Snarf Zerox Del ", content)
+			e.active = newWin
+			e.focusedView = newWin.body
+			targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
 		}
 
 	default:
-		// External command execution
-		logDebug("Action: External command '%s'", cmd)
-		
-		dir := "."
+		dir, _ := os.Getwd()
 		if win != nil {
 			f := resolvePath(win.GetFilename())
 			if f != "" {
-				if info, err := os.Stat(f); err == nil && info.IsDir() {
-					dir = f
-				} else {
-					dir = filepath.Dir(f)
+				if info, err := os.Stat(f); err == nil {
+					if info.IsDir() { dir = f } else { dir = filepath.Dir(f) }
 				}
 			}
-		} else if e.active != nil {
-			f := resolvePath(e.active.GetFilename())
-			if f != "" {
-				dir = filepath.Dir(f)
-			}
 		}
-
 		go func() {
-			logDebug("Go: exec 'sh -c %s' in dir '%s'", cmd, dir)
 			c := exec.Command("sh", "-c", cmd)
 			c.Dir = dir
 			output, err := c.CombinedOutput()
-			logDebug("Go: finished '%s', err=%v, output_len=%d, output='%s'", cmd, err, len(output), string(output))
-			
 			if err == nil && len(output) > 0 {
 				e.screen.PostEvent(tcell.NewEventInterrupt(func() {
-					// Check if we can reuse an existing +Errors window
 					var reuseWin *Window
-					if win != nil {
-						fn := win.GetFilename()
-						logDebug("Checking win for reuse: '%s'", fn)
-						if strings.HasSuffix(fn, "+Errors") {
-							reuseWin = win
-						}
-					}
-					if reuseWin == nil && e.active != nil {
-						fn := e.active.GetFilename()
-						logDebug("Checking active for reuse: '%s'", fn)
-						if strings.HasSuffix(fn, "+Errors") {
-							reuseWin = e.active
-						}
-					}
+					if win != nil && strings.HasSuffix(win.GetFilename(), "+Errors") { reuseWin = win }
+					if reuseWin == nil && e.active != nil && strings.HasSuffix(e.active.GetFilename(), "+Errors") { reuseWin = e.active }
 
 					if reuseWin != nil {
-						logDebug("Reusing +Errors window %p", reuseWin)
 						reuseWin.body.buffer.SetText(string(output))
 						e.focusedView = reuseWin.body
 						return
@@ -238,23 +328,16 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 
 					targetCol := col
 					if targetCol == nil {
-						if e.active != nil {
-							targetCol = e.active.parent
-						} else if len(e.columns) > 0 {
-							targetCol = e.columns[0]
-						}
+						if e.active != nil { targetCol = e.active.parent } else if len(e.columns) > 0 { targetCol = e.columns[0] }
 					}
-					
 					if targetCol != nil {
 						title := filepath.Join(dir, "+Errors")
-						newWin := targetCol.AddWindow(title + " Get Put Del ", string(output))
+						newWin := targetCol.AddWindow(title + " Get Put Snarf Zerox Del ", string(output))
 						e.active = newWin
 						e.focusedView = newWin.body
 						targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
 					}
 				}))
-			} else {
-				logDebug("Command finished: err=%v, output_len=%d", err, len(output))
 			}
 		}()
 	}
@@ -262,7 +345,6 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 }
 
 func (e *Editor) RemoveColumn(c *Column) {
-	logDebug("RemoveColumn: col=%p", c)
 	for i, col := range e.columns {
 		if col == c {
 			e.columns = append(e.columns[:i], e.columns[i+1:]...)

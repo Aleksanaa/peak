@@ -36,7 +36,7 @@ func (e *Editor) Init() {
 	e.focusedView = e.tag
 
 	// Initial Column
-	col := NewColumn(0, 1, e.width, e.height-1, e.Execute)
+	col := NewColumn(0, 1, e.width, e.height-1, e, e.Execute)
 	e.columns = append(e.columns, col)
 
 	// Add initial window
