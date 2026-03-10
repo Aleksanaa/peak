@@ -153,9 +153,30 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 		if targetCol != nil {
 			logDebug("Action: New window in col=%p", targetCol)
 			e.active = targetCol.AddWindow("", "")
+			e.focusedView = e.active.body
 			targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
 		} else {
 			logDebug("Warning: New called without column target")
+		}
+
+	case "Zerox":
+		targetWin := win
+		if targetWin == nil {
+			targetWin = e.active
+		}
+		if targetWin != nil {
+			targetCol := targetWin.parent
+			if targetCol != nil {
+				logDebug("Action: Zerox window %p", targetWin)
+				tagText := targetWin.tag.buffer.GetText()
+				bodyText := targetWin.body.buffer.GetText()
+				newWin := targetCol.AddWindow(tagText, bodyText)
+				newWin.body.scroll = targetWin.body.scroll
+				newWin.body.buffer.cursor = targetWin.body.buffer.cursor
+				e.active = newWin
+				e.focusedView = newWin.body
+				targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
+			}
 		}
 	}
 	return false
