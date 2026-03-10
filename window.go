@@ -275,7 +275,20 @@ func (b *Body) HandleEvent(ev tcell.Event) bool {
 			b.scroll = b.buffer.cursor.y - b.h + 1
 		}
 	case *tcell.EventMouse:
-		if ev.Buttons() == tcell.Button1 {
+		buttons := ev.Buttons()
+		if buttons&tcell.WheelUp != 0 {
+			if b.scroll > 0 {
+				b.scroll--
+			}
+			return false
+		}
+		if buttons&tcell.WheelDown != 0 {
+			if b.scroll < len(b.buffer.lines)-1 {
+				b.scroll++
+			}
+			return false
+		}
+		if buttons == tcell.Button1 {
 			mx, my := ev.Position()
 			b.buffer.cursor.y = my - b.y + b.scroll
 			if b.buffer.cursor.y >= len(b.buffer.lines) {
