@@ -23,7 +23,6 @@ type Editor struct {
 
 // Init sets up the initial editor state with two columns.
 func (e *Editor) Init() {
-	initDebug()
 	s, err := tcell.NewScreen()
 	if err != nil {
 		log.Fatalf("%+v", err)

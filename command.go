@@ -92,8 +92,6 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 	fields := strings.Fields(cmd)
 	root := fields[0]
 
-	logDebug("Execute: root='%s' full='%s'", root, cmd)
-
 	switch root {
 	case "Exit":
 		return true

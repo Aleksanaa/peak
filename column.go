@@ -28,7 +28,6 @@ func NewColumn(x, y, w, h int, editor *Editor, onExec func(*Column, *Window, str
 		h:      h,
 		onExec: onExec,
 	}
-	logDebug("NewColumn: col=%p, x=%d", c, x)
 	return c
 }
 
