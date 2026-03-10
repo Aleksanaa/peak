@@ -7,11 +7,12 @@ import (
 )
 
 type Window struct {
-	tag  *Tag
-	body *Body
-	x, y int
-	w, h int
-	onExec func(string) bool
+	tag      *Tag
+	body     *Body
+	x, y     int
+	w, h     int
+	onExec   func(string) bool
+	focusTag bool
 }
 
 func NewWindow(tagText, bodyText string, x, y, w, h int, onExec func(string) bool) *Window {
@@ -50,6 +51,16 @@ func NewWindow(tagText, bodyText string, x, y, w, h int, onExec func(string) boo
 func (win *Window) Draw(s tcell.Screen) {
 	win.tag.Draw(s)
 	win.body.Draw(s)
+	// Cursor management
+	if win.focusTag {
+		s.ShowCursor(win.tag.x+win.tag.buffer.cursor.x, win.tag.y)
+	} else {
+		if win.body.buffer.cursor.y >= win.body.scroll && win.body.buffer.cursor.y < win.body.scroll+win.body.h {
+			cx := win.body.x + win.body.buffer.cursor.x
+			cy := win.body.y + win.body.buffer.cursor.y - win.body.scroll
+			s.ShowCursor(cx, cy)
+		}
+	}
 }
 
 func (win *Window) Resize(x, y, w, h int) {
@@ -63,6 +74,9 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 	case *tcell.EventMouse:
 		mx, my := ev.Position()
 		if my == win.tag.y {
+			if ev.Buttons() == tcell.Button1 {
+				win.focusTag = true
+			}
 			if ev.Buttons() == tcell.Button3 { // Middle-click (100) -> Execute
 				word := win.tag.buffer.GetWordAt(mx-win.tag.x, 0)
 				if win.onExec != nil {
@@ -75,6 +89,9 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 			}
 			return win.tag.HandleEvent(ev)
 		} else if my >= win.body.y && my < win.body.y+win.body.h {
+			if ev.Buttons() == tcell.Button1 {
+				win.focusTag = false
+			}
 			if ev.Buttons() == tcell.Button3 { // Middle-click (100) -> Execute
 				word := win.body.buffer.GetWordAt(mx-win.body.x, my-win.body.y+win.body.scroll)
 				if win.onExec != nil {
@@ -88,6 +105,9 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 			return win.body.HandleEvent(ev)
 		}
 	case *tcell.EventKey:
+		if win.focusTag {
+			return win.tag.HandleEvent(ev)
+		}
 		return win.body.HandleEvent(ev)
 	}
 	return false
@@ -120,6 +140,17 @@ func (t *Tag) Resize(x, y, w, h int) {
 
 func (t *Tag) HandleEvent(ev tcell.Event) bool {
 	switch ev := ev.(type) {
+	case *tcell.EventKey:
+		switch ev.Key() {
+		case tcell.KeyLeft:
+			t.buffer.MoveLeft()
+		case tcell.KeyRight:
+			t.buffer.MoveRight()
+		case tcell.KeyBackspace, tcell.KeyBackspace2:
+			t.buffer.Backspace()
+		case tcell.KeyRune:
+			t.buffer.Insert(ev.Rune())
+		}
 	case *tcell.EventMouse:
 		if ev.Buttons() == tcell.Button1 {
 			mx, _ := ev.Position()

@@ -33,8 +33,8 @@ func (e *Editor) Init() {
 	e.columns = append(e.columns, col)
 
 	// Add initial window
-	win := col.AddWindow(" [No Name] | New | Get | Put | Del | Exit ",
-		"Welcome to Peak\nMiddle-click 'Exit' to quit.\nMiddle-click 'New' to add a window to this column.\nMiddle-click 'NewCol' in the column tag to add a column.\nMiddle-click 'Del' to close a window.")
+	win := col.AddWindow(" /home/user/peak/main.go New Get Put Del Exit ",
+		"Welcome to Peak\nYou can now edit the tag line above!\nClick the tag line to focus it, then type. \nMiddle-click 'Exit' or any other word in the tag to execute.")
 	e.active = win
 	e.Resize()
 }

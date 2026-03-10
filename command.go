@@ -63,7 +63,7 @@ func (e *Editor) Execute(cmd string) bool {
 		// Add new column
 		newCol := NewColumn(e.width, 0, 0, e.height, e.Execute)
 		e.columns = append(e.columns, newCol)
-		e.active = newCol.AddWindow(" [No Name] | Get | Put | Del | Exit ", "")
+		e.active = newCol.AddWindow(" [No Name] Get Put Del Exit ", "")
 		e.Resize() // Trigger layout
 	case "New":
 		// Add window to active column or first column
@@ -72,14 +72,14 @@ func (e *Editor) Execute(cmd string) bool {
 			for _, col := range e.columns {
 				for _, win := range col.windows {
 					if win == e.active {
-						e.active = col.AddWindow(" [No Name] | Get | Put | Del | Exit ", "")
+						e.active = col.AddWindow(" [No Name] Get Put Del Exit ", "")
 						col.Resize(col.x, col.y, col.w, col.h)
 						return false
 					}
 				}
 			}
 		} else if len(e.columns) > 0 {
-			e.active = e.columns[0].AddWindow(" [No Name] | Get | Put | Del | Exit ", "")
+			e.active = e.columns[0].AddWindow(" [No Name] Get Put Del Exit ", "")
 			e.columns[0].Resize(e.columns[0].x, e.columns[0].y, e.columns[0].w, e.columns[0].h)
 		}
 	}
