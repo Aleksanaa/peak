@@ -277,20 +277,20 @@ func (e *Editor) moveColumnTo(col *Column, mx int) {
 		}
 	} else {
 		prev := e.columns[idx-1]
-		if mx < prev.x+2 {
+		if mx < prev.x+2 { // Swap left
 			e.columns[idx], e.columns[idx-1] = e.columns[idx-1], e.columns[idx]
 			e.columns[idx].explicitWidth, e.columns[idx-1].explicitWidth = 0, 0
 		} else {
-			newPrevW := mx - prev.x
-			if newPrevW < 5 {
-				newPrevW = 5
-			}
 			combinedW := prev.w + col.w
-			prev.explicitWidth = newPrevW
-			col.explicitWidth = combinedW - newPrevW
-			if col.explicitWidth < 5 {
-				col.explicitWidth = 5
+			minW := 5
+			if mx < prev.x+minW {
+				mx = prev.x + minW
 			}
+			if mx > prev.x+combinedW-minW {
+				mx = prev.x + combinedW - minW
+			}
+			prev.explicitWidth = mx - prev.x
+			col.explicitWidth = combinedW - prev.explicitWidth
 		}
 	}
 	e.Resize()
@@ -348,20 +348,21 @@ func (e *Editor) moveWindowTo(win *Window, mx, my int) {
 		}
 	} else {
 		prev := target.windows[idx-1]
-		if my < prev.y+prev.tagHeight() {
+		if my < prev.y+prev.tagHeight() { // Swap up
 			target.windows[idx], target.windows[idx-1] = target.windows[idx-1], target.windows[idx]
 			target.windows[idx].explicitHeight, target.windows[idx-1].explicitHeight = 0, 0
 		} else {
-			newPrevH := my - prev.y
-			if newPrevH < prev.tagHeight()+1 {
-				newPrevH = prev.tagHeight() + 1
-			}
 			combinedH := prev.h + win.h
-			prev.explicitHeight = newPrevH
-			win.explicitHeight = combinedH - newPrevH
-			if win.explicitHeight < win.tagHeight()+1 {
-				win.explicitHeight = win.tagHeight() + 1
+			minH := win.tagHeight() + 1
+			prevMinH := prev.tagHeight() + 1
+			if my < prev.y+prevMinH {
+				my = prev.y + prevMinH
 			}
+			if my > prev.y+combinedH-minH {
+				my = prev.y + combinedH - minH
+			}
+			prev.explicitHeight = my - prev.y
+			win.explicitHeight = combinedH - prev.explicitHeight
 		}
 	}
 	target.Resize(target.x, target.y, target.w, target.h)
@@ -427,11 +428,18 @@ func (e *Editor) Resize() {
 		if cw <= 0 {
 			cw = autoW
 		}
+
+		numRemaining := len(e.columns) - 1 - i
+		maxCW := (e.width - xOffset) - numRemaining*5
+		if cw > maxCW {
+			cw = maxCW
+		}
+		if cw < 5 {
+			cw = 5
+		}
+
 		if i == len(e.columns)-1 {
 			cw = e.width - xOffset
-		}
-		if cw < 1 {
-			cw = 1
 		}
 		col.explicitWidth = cw
 		col.Resize(xOffset, 1, cw, e.height-1)

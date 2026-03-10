@@ -123,11 +123,23 @@ func (c *Column) Resize(x, y, w, h int) {
 		if winH <= 0 {
 			winH = autoH
 		}
+
+		neededRemaining := 0
+		for j := i + 1; j < len(c.windows); j++ {
+			neededRemaining += c.windows[j].tagHeight() + 1
+		}
+
+		maxWinH := (y + h - yOffset) - neededRemaining
+		if winH > maxWinH {
+			winH = maxWinH
+		}
+		minWinH := win.tagHeight() + 1
+		if winH < minWinH {
+			winH = minWinH
+		}
+
 		if i == len(c.windows)-1 {
 			winH = (y + h) - yOffset
-		}
-		if winH < 1 {
-			winH = 1
 		}
 		win.explicitHeight = winH
 		win.Resize(x, yOffset, w, winH)
