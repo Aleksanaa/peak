@@ -40,8 +40,8 @@ func (e *Editor) Init() {
 	e.columns = append(e.columns, col)
 
 	// Add initial window
-	win := col.AddWindow(" /home/user/peak/main.go Get Put Del ",
-		"Welcome to Peak\nCursor and focus are now unified.\nClicking anywhere sets the cursor and focus for keyboard input.")
+	win := col.AddWindow(" /home/user/peak/main.go Get Put Snarf Zerox Del ",
+		"Welcome to Peak\nSnarf command added.\nSelect some text and middle-click 'Snarf' to copy it to the clipboard.")
 	e.active = win
 	e.focusedView = win.body
 	e.Resize()

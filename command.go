@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode"
+
+	"github.com/atotto/clipboard"
 )
 
 func (b *Buffer) GetWordAt(x, y int) string {
@@ -177,6 +179,21 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 				e.focusedView = newWin.body
 				targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
 			}
+		}
+
+	case "Snarf":
+		// Snarf copies selection to clipboard
+		var text string
+		if e.focusedView != nil {
+			text = e.focusedView.buffer.GetSelectedText()
+			if text == "" {
+				// If no selection, maybe snarf the whole body?
+				// Acme usually snarfs the selection.
+			}
+		}
+		if text != "" {
+			logDebug("Action: Snarf, text len=%d", len(text))
+			clipboard.WriteAll(text)
 		}
 	}
 	return false

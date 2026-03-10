@@ -31,7 +31,7 @@ func NewColumn(x, y, w, h int, onExec func(*Column, *Window, string) bool) *Colu
 
 func (c *Column) AddWindow(tagText, bodyText string) *Window {
 	if tagText == "" {
-		tagText = " [No Name] Get Put Del "
+		tagText = " [No Name] Get Put Snarf Zerox Del "
 	}
 	// Simple vertical tiling for now
 	h := (c.h - 1)
