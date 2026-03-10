@@ -9,10 +9,10 @@ type Column struct {
 	windows []*Window
 	x, y    int
 	w, h    int
-	onExec  func(string) bool
+	onExec  func(*Window, string) bool
 }
 
-func NewColumn(x, y, w, h int, onExec func(string) bool) *Column {
+func NewColumn(x, y, w, h int, onExec func(*Window, string) bool) *Column {
 	tagStyle := tcell.StyleDefault.Background(tcell.ColorPaleTurquoise).Foreground(tcell.ColorBlack)
 	tag := &Tag{
 		buffer: NewBuffer(" NewCol | Exit "),
@@ -82,7 +82,7 @@ func (c *Column) HandleEvent(ev tcell.Event) bool {
 		if my == c.tag.y {
 			if ev.Buttons() == tcell.Button3 { // Middle-click
 				word := c.tag.buffer.GetWordAt(mx-c.x, 0)
-				return c.onExec(word)
+				return c.onExec(nil, word)
 			}
 			return c.tag.HandleEvent(ev)
 		}

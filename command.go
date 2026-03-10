@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"unicode"
 )
@@ -30,27 +31,58 @@ func isWordChar(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '/' || r == '.' || r == '-'
 }
 
-func (e *Editor) Execute(cmd string) bool {
+func (e *Editor) Execute(win *Window, cmd string) bool {
 	cmd = strings.TrimSpace(cmd)
 	if cmd == "" {
 		return false
 	}
+	logDebug("Execute: %s", cmd)
 
 	switch cmd {
 	case "Exit":
 		return true
+	case "Get":
+		if win != nil {
+			filename := win.GetFilename()
+			logDebug("Get filename: %s", filename)
+			if filename != "" {
+				content, err := os.ReadFile(filename)
+				if err == nil {
+					win.body.buffer.SetText(string(content))
+				} else {
+					logDebug("Get error: %v", err)
+				}
+			}
+		}
+	case "Put":
+		if win != nil {
+			filename := win.GetFilename()
+			logDebug("Put filename: %s", filename)
+			if filename != "" {
+				content := win.body.buffer.GetText()
+				err := os.WriteFile(filename, []byte(content), 0644)
+				if err != nil {
+					logDebug("Put error: %v", err)
+				}
+			}
+		}
 	case "Del":
 		// Find window and remove it from its column
+		target := win
+		if target == nil {
+			target = e.active
+		}
 		for _, col := range e.columns {
-			for i, win := range col.windows {
-				if win == e.active {
+			for i, w := range col.windows {
+				if w == target {
 					col.windows = append(col.windows[:i], col.windows[i+1:]...)
 					if len(col.windows) == 0 {
-						// Remove column too?
 						e.RemoveColumn(col)
 					} else {
 						col.Resize(col.x, col.y, col.w, col.h) // Re-tile
-						e.active = col.windows[0]
+						if e.active == target {
+							e.active = col.windows[0]
+						}
 					}
 					return false
 				}
@@ -67,11 +99,16 @@ func (e *Editor) Execute(cmd string) bool {
 		e.Resize() // Trigger layout
 	case "New":
 		// Add window to active column or first column
-		if e.active != nil {
-			// Find column of active window
+		parent := win
+		if parent == nil {
+			parent = e.active
+		}
+
+		if parent != nil {
+			// Find column of parent window
 			for _, col := range e.columns {
-				for _, win := range col.windows {
-					if win == e.active {
+				for _, w := range col.windows {
+					if w == parent {
 						e.active = col.AddWindow(" [No Name] Get Put Del Exit ", "")
 						col.Resize(col.x, col.y, col.w, col.h)
 						return false

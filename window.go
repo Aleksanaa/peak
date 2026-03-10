@@ -11,11 +11,11 @@ type Window struct {
 	body     *Body
 	x, y     int
 	w, h     int
-	onExec   func(string) bool
+	onExec   func(*Window, string) bool
 	focusTag bool
 }
 
-func NewWindow(tagText, bodyText string, x, y, w, h int, onExec func(string) bool) *Window {
+func NewWindow(tagText, bodyText string, x, y, w, h int, onExec func(*Window, string) bool) *Window {
 	tagStyle := tcell.StyleDefault.Background(tcell.ColorPaleTurquoise).Foreground(tcell.ColorBlack)
 	bodyStyle := tcell.StyleDefault.Background(tcell.ColorNavajoWhite).Foreground(tcell.ColorBlack)
 
@@ -46,6 +46,27 @@ func NewWindow(tagText, bodyText string, x, y, w, h int, onExec func(string) boo
 		h:      h,
 		onExec: onExec,
 	}
+}
+
+func (win *Window) GetFilename() string {
+	if len(win.tag.buffer.lines) == 0 {
+		return ""
+	}
+	line := win.tag.buffer.lines[0]
+	// Skip leading spaces
+	start := 0
+	for start < len(line) && (line[start] == ' ' || line[start] == '\t') {
+		start++
+	}
+	if start >= len(line) {
+		return ""
+	}
+	
+	end := start
+	for end < len(line) && isWordChar(line[end]) {
+		end++
+	}
+	return string(line[start:end])
 }
 
 func (win *Window) Draw(s tcell.Screen) {
@@ -80,7 +101,7 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 			if ev.Buttons() == tcell.Button3 { // Middle-click (100) -> Execute
 				word := win.tag.buffer.GetWordAt(mx-win.tag.x, 0)
 				if win.onExec != nil {
-					return win.onExec(word)
+					return win.onExec(win, word)
 				}
 			} else if ev.Buttons() == tcell.Button2 { // Right-click (10) -> Search
 				word := win.tag.buffer.GetWordAt(mx-win.tag.x, 0)
@@ -95,7 +116,7 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 			if ev.Buttons() == tcell.Button3 { // Middle-click (100) -> Execute
 				word := win.body.buffer.GetWordAt(mx-win.body.x, my-win.body.y+win.body.scroll)
 				if win.onExec != nil {
-					return win.onExec(word)
+					return win.onExec(win, word)
 				}
 			} else if ev.Buttons() == tcell.Button2 { // Right-click (10) -> Search
 				word := win.body.buffer.GetWordAt(mx-win.body.x, my-win.body.y+win.body.scroll)

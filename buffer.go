@@ -1,5 +1,7 @@
 package main
 
+import "strings"
+
 type Cursor struct {
 	x, y int
 }
@@ -23,6 +25,30 @@ func NewBuffer(content string) *Buffer {
 		}
 	}
 	return b
+}
+
+func (b *Buffer) GetText() string {
+	var sb strings.Builder
+	for i, line := range b.lines {
+		sb.WriteString(string(line))
+		if i < len(b.lines)-1 {
+			sb.WriteRune('\n')
+		}
+	}
+	return sb.String()
+}
+
+func (b *Buffer) SetText(content string) {
+	b.lines = [][]rune{{}}
+	for _, r := range content {
+		if r == '\n' {
+			b.lines = append(b.lines, []rune{})
+		} else {
+			last := len(b.lines) - 1
+			b.lines[last] = append(b.lines[last], r)
+		}
+	}
+	b.cursor = Cursor{0, 0}
 }
 
 func (b *Buffer) Insert(r rune) {
