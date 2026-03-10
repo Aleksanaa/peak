@@ -24,9 +24,9 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 	case "Exit":
 		return true
 	case "Get":
-		e.cmdGet(win)
+		e.cmdGet(win, cmd)
 	case "Put":
-		e.cmdPut(win)
+		e.cmdPut(win, cmd)
 	case "Del":
 		e.cmdDel(win)
 	case "Delcol":
@@ -34,7 +34,7 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 	case "NewCol":
 		e.cmdNewCol()
 	case "New":
-		e.cmdNew(col, win)
+		e.cmdNew(col, win, cmd)
 	case "Zerox":
 		e.cmdZerox(col, win)
 	case "Snarf":
@@ -49,6 +49,34 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 		e.runExternal(col, win, cmd)
 	}
 	return false
+}
+
+func (e *Editor) getArg(win *Window, cmd string) string {
+	fields := strings.Fields(cmd)
+	if len(fields) > 1 {
+		return strings.Join(fields[1:], " ")
+	}
+
+	// Prefer selection in the current focused view
+	if e.focusedView != nil {
+		if sel := e.focusedView.buffer.GetSelectedText(); sel != "" {
+			return sel
+		}
+	}
+
+	target := win
+	if target == nil {
+		target = e.active
+	}
+	if target != nil {
+		if sel := target.body.buffer.GetSelectedText(); sel != "" {
+			return sel
+		}
+		if sel := target.tag.buffer.GetSelectedText(); sel != "" {
+			return sel
+		}
+	}
+	return ""
 }
 
 func (e *Editor) listDir(path string) (string, error) {
@@ -83,23 +111,39 @@ func (e *Editor) getTargetColumn(col *Column, win *Window) *Column {
 	return nil
 }
 
-func (e *Editor) cmdGet(win *Window) {
-	if win == nil {
+func (e *Editor) cmdGet(win *Window, cmd string) {
+	target := win
+	if target == nil {
+		target = e.active
+	}
+	if target == nil {
 		return
 	}
-	path := e.resolvePathWithContext(win, win.GetFilename())
+	arg := e.getArg(target, cmd)
+	if arg == "" {
+		arg = target.GetFilename()
+	}
+	path := e.resolvePathWithContext(target, arg)
 	if content, err := e.readFileOrDir(path); err == nil {
-		win.body.buffer.SetText(content)
+		target.body.buffer.SetText(content)
 	}
 }
 
-func (e *Editor) cmdPut(win *Window) {
-	if win == nil {
+func (e *Editor) cmdPut(win *Window, cmd string) {
+	target := win
+	if target == nil {
+		target = e.active
+	}
+	if target == nil {
 		return
 	}
-	path := e.resolvePathWithContext(win, win.GetFilename())
+	arg := e.getArg(target, cmd)
+	if arg == "" {
+		arg = target.GetFilename()
+	}
+	path := e.resolvePathWithContext(target, arg)
 	if path != "" && !strings.HasSuffix(path, "/") {
-		os.WriteFile(path, []byte(win.body.buffer.GetText()), 0644)
+		os.WriteFile(path, []byte(target.body.buffer.GetText()), 0644)
 	}
 }
 
@@ -147,13 +191,27 @@ func (e *Editor) cmdNewCol() {
 	e.Resize()
 }
 
-func (e *Editor) cmdNew(col *Column, win *Window) {
-	target := e.getTargetColumn(col, win)
-	if target != nil {
-		e.active = target.AddWindow("", "")
-		e.focusedView = e.active.body
-		target.Resize(target.x, target.y, target.w, target.h)
+func (e *Editor) cmdNew(col *Column, win *Window, cmd string) {
+	targetCol := e.getTargetColumn(col, win)
+	if targetCol == nil {
+		return
 	}
+
+	arg := e.getArg(win, cmd)
+	if arg != "" {
+		path := e.resolvePathWithContext(win, arg)
+		if content, err := e.readFileOrDir(path); err == nil {
+			newWin := targetCol.AddWindow(path+" Get Put Del ", content)
+			e.active = newWin
+			e.focusedView = newWin.body
+			targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
+			return
+		}
+	}
+
+	e.active = targetCol.AddWindow("", "")
+	e.focusedView = e.active.body
+	targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
 }
 
 func (e *Editor) cmdZerox(col *Column, win *Window) {
@@ -199,16 +257,30 @@ func (e *Editor) cmdRedo(win *Window) {
 }
 
 func (e *Editor) cmdLook(win *Window, cmd string) {
-	word := strings.TrimSpace(strings.TrimPrefix(cmd, "Look"))
-	if word == "" {
-		return
-	}
 	target := win
 	if target == nil {
 		target = e.active
 	}
-	if target != nil {
-		target.body.Search(word)
+	if target == nil {
+		return
+	}
+
+	word := e.getArg(target, cmd)
+	if word == "" {
+		return
+	}
+
+	foundLine := target.body.Search(word)
+	if foundLine != -1 {
+		// Align found line near the clicking point
+		vrow := e.lastClickY - target.body.y
+		if vrow < 0 {
+			vrow = 0
+		}
+		if vrow >= target.body.h {
+			vrow = target.body.h / 2
+		}
+		target.body.ShowLineAt(foundLine, vrow)
 	}
 }
 

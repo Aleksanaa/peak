@@ -400,25 +400,75 @@ func (tv *TextView) SyncScroll() {
 	}
 }
 
-func (tv *TextView) Search(word string) {
-	word = strings.TrimSpace(word)
+func (tv *TextView) Search(word string) int {
 	if word == "" {
-		return
+		return -1
 	}
-	sx, sy := tv.buffer.cursor.x+1, tv.buffer.cursor.y
-	for y := sy; y < len(tv.buffer.lines); y++ {
+	startRX, startRY := tv.buffer.cursor.x+1, tv.buffer.cursor.y
+
+	// Ensure we don't go out of bounds if buffer was changed
+	if startRY >= len(tv.buffer.lines) {
+		startRY = 0
+		startRX = 0
+	}
+
+	// 1. Search from cursor to end
+	for y := startRY; y < len(tv.buffer.lines); y++ {
 		line := string(tv.buffer.lines[y])
+		sx := 0
+		if y == startRY {
+			sx = startRX
+		}
 		if sx >= len(line) {
-			sx = 0
 			continue
 		}
 		if x := strings.Index(line[sx:], word); x != -1 {
-			tv.buffer.cursor = Cursor{sx + x, y}
+			tv.buffer.cursor = Cursor{sx + x + len(word), y}
 			tv.buffer.ClearSelection()
-			return
+			tv.buffer.SetSelection(Cursor{sx + x, y}, tv.buffer.cursor)
+			return y
 		}
-		sx = 0
 	}
+
+	// 2. Wrap: search from top to cursor
+	for y := 0; y <= startRY; y++ {
+		line := string(tv.buffer.lines[y])
+		limit := len(line)
+		if y == startRY {
+			limit = startRX
+		}
+		if limit > len(line) {
+			limit = len(line)
+		}
+		if x := strings.Index(line[:limit], word); x != -1 {
+			tv.buffer.cursor = Cursor{x + len(word), y}
+			tv.buffer.ClearSelection()
+			tv.buffer.SetSelection(Cursor{x, y}, tv.buffer.cursor)
+			return y
+		}
+	}
+	return -1
+}
+
+func (tv *TextView) ShowLineAt(lineNum int, vrow int) {
+	tv.UpdateLayout()
+	vidx := -1
+	for i, vl := range tv.layout {
+		if vl.BufferLine == lineNum {
+			vidx = i
+			break
+		}
+	}
+	if vidx != -1 {
+		tv.scroll = vidx - vrow
+		if tv.scroll < 0 {
+			tv.scroll = 0
+		}
+		if len(tv.layout) > 0 && tv.scroll >= len(tv.layout) {
+			tv.scroll = len(tv.layout) - 1
+		}
+	}
+	tv.SyncScroll()
 }
 
 type Window struct {

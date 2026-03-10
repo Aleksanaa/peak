@@ -26,6 +26,7 @@ type Editor struct {
 	scrollDir       int
 	scrollStartTime time.Time
 	lastWidth       int
+	lastClickY      int
 }
 
 // Init sets up the initial editor state with two columns.
@@ -113,8 +114,20 @@ func (e *Editor) Draw() {
 }
 
 func (e *Editor) HandleEvent(ev tcell.Event) bool {
+	if me, ok := ev.(*tcell.EventMouse); ok {
+		if me.Buttons() != tcell.ButtonNone {
+			_, my := me.Position()
+			e.lastClickY = my
+		}
+	}
+
 	switch ev := ev.(type) {
 	case *tcell.EventKey:
+		if ev.Key() == tcell.KeyCtrlF {
+			if e.focusedView != nil && e.focusedView.buffer.GetSelectedText() != "" {
+				return e.Execute(nil, nil, "Look")
+			}
+		}
 		if e.focusedView != nil {
 			return e.focusedView.HandleEvent(ev)
 		}
