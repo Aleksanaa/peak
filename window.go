@@ -65,11 +65,12 @@ func (tv *TextView) Draw(s tcell.Screen) {
 				style := tv.style
 				bx := start + col
 				
+				if tv.buffer.IsSelected(bx, i) {
+					style = selStyle
+				}
+
 				if bx < end {
 					char = line[bx]
-					if tv.buffer.IsSelected(bx, i) {
-						style = selStyle
-					}
 				}
 				s.SetContent(tv.x+col, tv.y+vrow, char, nil, style)
 			}
@@ -240,9 +241,8 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 		}
 
 		mx, my := ev.Position()
-		isClick := buttons == tcell.Button1 || buttons == tcell.Button2 || buttons == tcell.Button3
 		
-		if isClick {
+		if buttons != tcell.ButtonNone {
 			targetVRow := my - tv.y + tv.scroll
 			currVRow := 0
 			found := false
@@ -257,22 +257,29 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 					if bx > len(line) { bx = len(line) }
 					if bx < 0 { bx = 0 }
 					
+					// If clicking outside existing selection, clear it
+					if buttons == tcell.Button1 && !tv.drag && !tv.buffer.IsSelected(bx, i) {
+						tv.buffer.ClearSelection()
+					}
+
 					if buttons == tcell.Button1 {
 						if !tv.drag {
 							tv.drag = true
-							tv.buffer.ClearSelection()
-							tv.buffer.cursor.y = i
-							tv.buffer.cursor.x = bx
-							tv.buffer.SetSelection(tv.buffer.cursor, tv.buffer.cursor)
+							if !tv.buffer.IsSelected(bx, i) {
+								tv.buffer.cursor.y = i
+								tv.buffer.cursor.x = bx
+								tv.buffer.SetSelection(tv.buffer.cursor, tv.buffer.cursor)
+							}
 						} else {
 							tv.buffer.cursor.y = i
 							tv.buffer.cursor.x = bx
 							tv.buffer.selectionEnd = &Cursor{bx, i}
 						}
 					} else {
-						// Middle/Right click: move cursor for word detection
-						tv.buffer.cursor.y = i
-						tv.buffer.cursor.x = bx
+						if tv.buffer.selectionStart == nil {
+							tv.buffer.cursor.y = i
+							tv.buffer.cursor.x = bx
+						}
 					}
 					found = true
 					break
@@ -283,21 +290,29 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 				lastLine := len(tv.buffer.lines) - 1
 				if lastLine < 0 { lastLine = 0 }
 				bx := len(tv.buffer.lines[lastLine])
+				
+				if buttons == tcell.Button1 && !tv.drag && !tv.buffer.IsSelected(bx, lastLine) {
+					tv.buffer.ClearSelection()
+				}
+
 				if buttons == tcell.Button1 {
 					if !tv.drag {
 						tv.drag = true
-						tv.buffer.ClearSelection()
-						tv.buffer.cursor.y = lastLine
-						tv.buffer.cursor.x = bx
-						tv.buffer.SetSelection(tv.buffer.cursor, tv.buffer.cursor)
+						if !tv.buffer.IsSelected(bx, lastLine) {
+							tv.buffer.cursor.y = lastLine
+							tv.buffer.cursor.x = bx
+							tv.buffer.SetSelection(tv.buffer.cursor, tv.buffer.cursor)
+						}
 					} else {
 						tv.buffer.cursor.y = lastLine
 						tv.buffer.cursor.x = bx
 						tv.buffer.selectionEnd = &Cursor{bx, lastLine}
 					}
 				} else {
-					tv.buffer.cursor.y = lastLine
-					tv.buffer.cursor.x = bx
+					if tv.buffer.selectionStart == nil {
+						tv.buffer.cursor.y = lastLine
+						tv.buffer.cursor.x = bx
+					}
 				}
 			}
 		} else {
