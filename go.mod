@@ -3,6 +3,7 @@ module github.com/aleksana/peak
 go 1.25.7
 
 require (
+	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/gdamore/encoding v1.0.1 // indirect
 	github.com/gdamore/tcell/v2 v2.13.8 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect

@@ -119,6 +119,43 @@ func (b *Buffer) SetText(content string) {
 	b.cursor = Cursor{0, 0}
 }
 
+func (b *Buffer) DeleteLine() {
+	if len(b.lines) <= 1 {
+		b.lines = [][]rune{{}}
+		b.cursor = Cursor{0, 0}
+		return
+	}
+	b.lines = append(b.lines[:b.cursor.y], b.lines[b.cursor.y+1:]...)
+	if b.cursor.y >= len(b.lines) {
+		b.cursor.y = len(b.lines) - 1
+	}
+	b.cursor.x = 0
+}
+
+func (b *Buffer) DeleteWordBefore() {
+	if b.cursor.x == 0 {
+		b.Backspace()
+		return
+	}
+	line := b.lines[b.cursor.y]
+	
+	// Skip trailing spaces
+	end := b.cursor.x
+	for end > 0 && line[end-1] == ' ' {
+		end--
+	}
+	// Find start of word
+	start := end
+	for start > 0 && line[start-1] != ' ' {
+		start--
+	}
+	
+	// Remove from start to original cursor
+	newLine := append(line[:start], line[b.cursor.x:]...)
+	b.lines[b.cursor.y] = newLine
+	b.cursor.x = start
+}
+
 func (b *Buffer) Insert(r rune) {
 	line := b.lines[b.cursor.y]
 	// Insert at cursor position
@@ -143,7 +180,38 @@ func (b *Buffer) NewLine() {
 	b.cursor.x = 0
 }
 
+func (b *Buffer) DeleteSelection() {
+	if b.selectionStart == nil || b.selectionEnd == nil {
+		return
+	}
+	start, end := *b.selectionStart, *b.selectionEnd
+	if start.y > end.y || (start.y == end.y && start.x > end.x) {
+		start, end = end, start
+	}
+
+	if start.y == end.y {
+		line := b.lines[start.y]
+		newLine := append(line[:start.x], line[end.x:]...)
+		b.lines[start.y] = newLine
+	} else {
+		firstLine := b.lines[start.y][:start.x]
+		lastLine := b.lines[end.y][end.x:]
+		newFirstLine := append(firstLine, lastLine...)
+		
+		newLines := append(b.lines[:start.y], newFirstLine)
+		newLines = append(newLines, b.lines[end.y+1:]...)
+		b.lines = newLines
+	}
+
+	b.cursor = start
+	b.ClearSelection()
+}
+
 func (b *Buffer) Backspace() {
+	if b.selectionStart != nil && b.selectionEnd != nil {
+		b.DeleteSelection()
+		return
+	}
 	if b.cursor.x > 0 {
 		line := b.lines[b.cursor.y]
 		b.lines[b.cursor.y] = append(line[:b.cursor.x-1], line[b.cursor.x:]...)

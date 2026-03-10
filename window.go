@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 
+	"github.com/atotto/clipboard"
 	"github.com/gdamore/tcell/v2"
 )
 
@@ -56,27 +57,76 @@ func (tv *TextView) Resize(x, y, w, h int) {
 func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 	switch ev := ev.(type) {
 	case *tcell.EventKey:
-		tv.buffer.ClearSelection()
+		logDebug("Key Event: key=%v rune=%v mod=%v", ev.Key(), ev.Rune(), ev.Modifiers())
 		switch ev.Key() {
+		case tcell.KeyCtrlC:
+			text := tv.buffer.GetSelectedText()
+			if text != "" {
+				clipboard.WriteAll(text)
+			}
+			return false
+		case tcell.KeyCtrlX:
+			text := tv.buffer.GetSelectedText()
+			if text != "" {
+				clipboard.WriteAll(text)
+				tv.buffer.DeleteSelection()
+			}
+			return false
+		case tcell.KeyCtrlV:
+			text, err := clipboard.ReadAll()
+			logDebug("Paste: len=%d err=%v", len(text), err)
+			if err == nil {
+				if tv.buffer.selectionStart != nil {
+					tv.buffer.DeleteSelection()
+				}
+				for _, r := range text {
+					if r == '\n' {
+						if !tv.singleLine {
+							tv.buffer.NewLine()
+						}
+					} else {
+						tv.buffer.Insert(r)
+					}
+				}
+			}
+			return false
+		case tcell.KeyCtrlU:
+			tv.buffer.ClearSelection()
+			tv.buffer.DeleteLine()
+		case tcell.KeyCtrlW:
+			tv.buffer.ClearSelection()
+			tv.buffer.DeleteWordBefore()
+		case tcell.KeyCtrlH, tcell.KeyBackspace, tcell.KeyBackspace2:
+			tv.buffer.Backspace()
+		case tcell.KeyDelete:
+			if tv.buffer.selectionStart != nil {
+				tv.buffer.DeleteSelection()
+			}
 		case tcell.KeyUp:
+			tv.buffer.ClearSelection()
 			if !tv.singleLine {
 				tv.buffer.MoveUp()
 			}
 		case tcell.KeyDown:
+			tv.buffer.ClearSelection()
 			if !tv.singleLine {
 				tv.buffer.MoveDown()
 			}
 		case tcell.KeyLeft:
+			tv.buffer.ClearSelection()
 			tv.buffer.MoveLeft()
 		case tcell.KeyRight:
+			tv.buffer.ClearSelection()
 			tv.buffer.MoveRight()
-		case tcell.KeyBackspace, tcell.KeyBackspace2:
-			tv.buffer.Backspace()
 		case tcell.KeyEnter:
+			tv.buffer.ClearSelection()
 			if !tv.singleLine {
 				tv.buffer.NewLine()
 			}
 		case tcell.KeyRune:
+			if tv.buffer.selectionStart != nil {
+				tv.buffer.DeleteSelection()
+			}
 			tv.buffer.Insert(ev.Rune())
 		}
 		// Adjust scroll
@@ -85,6 +135,7 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 		} else if tv.buffer.cursor.y >= tv.scroll+tv.h {
 			tv.scroll = tv.buffer.cursor.y - tv.h + 1
 		}
+		return false
 	case *tcell.EventMouse:
 		buttons := ev.Buttons()
 		if !tv.singleLine {
@@ -106,38 +157,27 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 		bx := mx - tv.x
 		by := my - tv.y + tv.scroll
 
+		// Clamp coordinates to TextView boundaries for internal logic
+		if bx < 0 { bx = 0 }
+		if bx >= tv.w { bx = tv.w - 1 }
+		if by < 0 { by = 0 }
+		if by >= len(tv.buffer.lines) { by = len(tv.buffer.lines) - 1 }
+
 		if buttons == tcell.Button1 {
 			if !tv.drag {
 				tv.drag = true
 				tv.buffer.cursor.y = by
 				tv.buffer.cursor.x = bx
-				if tv.buffer.cursor.y >= len(tv.buffer.lines) {
-					tv.buffer.cursor.y = len(tv.buffer.lines) - 1
-				}
-				if tv.buffer.cursor.y < 0 {
-					tv.buffer.cursor.y = 0
-				}
+				// Further clamp to actual line length
 				if tv.buffer.cursor.x > len(tv.buffer.lines[tv.buffer.cursor.y]) {
 					tv.buffer.cursor.x = len(tv.buffer.lines[tv.buffer.cursor.y])
-				}
-				if tv.buffer.cursor.x < 0 {
-					tv.buffer.cursor.x = 0
 				}
 				tv.buffer.SetSelection(tv.buffer.cursor, tv.buffer.cursor)
 			} else {
 				tv.buffer.cursor.y = by
 				tv.buffer.cursor.x = bx
-				if tv.buffer.cursor.y >= len(tv.buffer.lines) {
-					tv.buffer.cursor.y = len(tv.buffer.lines) - 1
-				}
-				if tv.buffer.cursor.y < 0 {
-					tv.buffer.cursor.y = 0
-				}
 				if tv.buffer.cursor.x > len(tv.buffer.lines[tv.buffer.cursor.y]) {
 					tv.buffer.cursor.x = len(tv.buffer.lines[tv.buffer.cursor.y])
-				}
-				if tv.buffer.cursor.x < 0 {
-					tv.buffer.cursor.x = 0
 				}
 				tv.buffer.selectionEnd = &Cursor{tv.buffer.cursor.x, tv.buffer.cursor.y}
 			}

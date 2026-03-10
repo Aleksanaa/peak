@@ -7,12 +7,13 @@ import (
 )
 
 type Editor struct {
-	screen  tcell.Screen
-	tag     *TextView
-	columns []*Column
-	active  *Window
-	width   int
-	height  int
+	screen   tcell.Screen
+	tag      *TextView
+	columns  []*Column
+	active   *Window
+	width    int
+	height   int
+	dragView *TextView
 }
 
 func (e *Editor) Init() {
@@ -39,7 +40,7 @@ func (e *Editor) Init() {
 
 	// Add initial window
 	win := col.AddWindow(" /home/user/peak/main.go Get Put Del ",
-		"Welcome to Peak\nRefactored with unified TextView.\nSelection, scrolling and editing now work the same everywhere.")
+		"Welcome to Peak\nSelection now captures the mouse.\nDrag selection outside the window - it stays focused on the original text area.")
 	e.active = win
 	e.Resize()
 }
@@ -66,17 +67,23 @@ func (e *Editor) Draw() {
 func (e *Editor) HandleEvent(ev tcell.Event) bool {
 	switch ev := ev.(type) {
 	case *tcell.EventKey:
-		if ev.Key() == tcell.KeyCtrlC {
-			return true
-		}
 		if e.active != nil {
 			return e.active.HandleEvent(ev)
 		}
 	case *tcell.EventMouse:
 		mx, my := ev.Position()
 		buttons := ev.Buttons()
-		logDebug("Mouse Event: x=%d y=%d buttons=%b", mx, my, buttons)
 
+		// If we are currently dragging, redirect all mouse events to that view
+		if e.dragView != nil {
+			e.dragView.HandleEvent(ev)
+			if buttons == tcell.ButtonNone {
+				e.dragView = nil
+			}
+			return false
+		}
+
+		// Handle Global Tag
 		if my == 0 {
 			if buttons == tcell.Button3 {
 				word := e.tag.buffer.GetSelectedText()
@@ -85,9 +92,13 @@ func (e *Editor) HandleEvent(ev tcell.Event) bool {
 				}
 				return e.Execute(nil, nil, word)
 			}
+			if buttons == tcell.Button1 {
+				e.dragView = e.tag
+			}
 			return e.tag.HandleEvent(ev)
 		}
 
+		// Find component under mouse
 		var clickedCol *Column
 		for _, col := range e.columns {
 			if mx >= col.x && mx < col.x+col.w && my >= col.y && my < col.y+col.h {
@@ -97,13 +108,27 @@ func (e *Editor) HandleEvent(ev tcell.Event) bool {
 		}
 
 		if clickedCol != nil {
-			// Focus logic
+			// Check if column tag was clicked
+			if my == clickedCol.tag.y && mx > clickedCol.x {
+				if buttons == tcell.Button1 {
+					e.dragView = clickedCol.tag
+				}
+				return clickedCol.HandleEvent(ev)
+			}
+
+			// Focus and Window logic
 			for _, win := range clickedCol.windows {
 				if mx >= win.x && mx < win.x+win.w && my >= win.y && my < win.y+win.h {
 					if buttons == tcell.Button1 {
 						e.active = win
+						// Determine if tag or body was clicked to set dragView
+						if my == win.tag.y {
+							e.dragView = win.tag
+						} else {
+							e.dragView = win.body
+						}
 					}
-					break
+					return clickedCol.HandleEvent(ev)
 				}
 			}
 			return clickedCol.HandleEvent(ev)
