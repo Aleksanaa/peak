@@ -9,13 +9,14 @@ import (
 type Window struct {
 	tag      *Tag
 	body     *Body
+	parent   *Column
 	x, y     int
 	w, h     int
-	onExec   func(*Window, string) bool
+	onExec   func(*Column, *Window, string) bool
 	focusTag bool
 }
 
-func NewWindow(tagText, bodyText string, x, y, w, h int, onExec func(*Window, string) bool) *Window {
+func NewWindow(tagText, bodyText string, parent *Column, x, y, w, h int, onExec func(*Column, *Window, string) bool) *Window {
 	tagStyle := tcell.StyleDefault.Background(tcell.ColorPaleTurquoise).Foreground(tcell.ColorBlack)
 	bodyStyle := tcell.StyleDefault.Background(tcell.ColorNavajoWhite).Foreground(tcell.ColorBlack)
 
@@ -40,6 +41,7 @@ func NewWindow(tagText, bodyText string, x, y, w, h int, onExec func(*Window, st
 	return &Window{
 		tag:    tag,
 		body:   body,
+		parent: parent,
 		x:      x,
 		y:      y,
 		w:      w,
@@ -108,7 +110,7 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 			if ev.Buttons() == tcell.Button3 { // Middle-click (100) -> Execute
 				word := win.tag.buffer.GetWordAt(mx-win.tag.x, 0)
 				if win.onExec != nil {
-					return win.onExec(win, word)
+					return win.onExec(win.parent, win, word)
 				}
 			} else if ev.Buttons() == tcell.Button2 { // Right-click (10) -> Search
 				word := win.tag.buffer.GetWordAt(mx-win.tag.x, 0)
@@ -123,7 +125,7 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 			if ev.Buttons() == tcell.Button3 { // Middle-click (100) -> Execute
 				word := win.body.buffer.GetWordAt(mx-win.body.x, my-win.body.y+win.body.scroll)
 				if win.onExec != nil {
-					return win.onExec(win, word)
+					return win.onExec(win.parent, win, word)
 				}
 			} else if ev.Buttons() == tcell.Button2 { // Right-click (10) -> Search
 				word := win.body.buffer.GetWordAt(mx-win.body.x, my-win.body.y+win.body.scroll)

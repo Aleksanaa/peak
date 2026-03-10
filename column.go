@@ -9,21 +9,21 @@ type Column struct {
 	windows []*Window
 	x, y    int
 	w, h    int
-	onExec  func(*Window, string) bool
+	onExec  func(*Column, *Window, string) bool
 }
 
-func NewColumn(x, y, w, h int, onExec func(*Window, string) bool) *Column {
+func NewColumn(x, y, w, h int, onExec func(*Column, *Window, string) bool) *Column {
 	tagStyle := tcell.StyleDefault.Background(tcell.ColorPaleTurquoise).Foreground(tcell.ColorBlack)
 	tag := &Tag{
-		buffer: NewBuffer(" NewCol | Exit "),
-		x:      x,
+		buffer: NewBuffer(" New Delcol "),
+		x:      x + 1,
 		y:      y,
-		w:      w,
+		w:      w - 1,
 		h:      1,
 		style:  tagStyle,
 	}
 
-	return &Column{
+	c := &Column{
 		tag:    tag,
 		x:      x,
 		y:      y,
@@ -31,9 +31,14 @@ func NewColumn(x, y, w, h int, onExec func(*Window, string) bool) *Column {
 		h:      h,
 		onExec: onExec,
 	}
+	logDebug("NewColumn: col=%p, x=%d", c, x)
+	return c
 }
 
 func (c *Column) AddWindow(tagText, bodyText string) *Window {
+	if tagText == "" {
+		tagText = " [No Name] Get Put Del "
+	}
 	// Simple vertical tiling for now
 	h := (c.h - 1)
 	if len(c.windows) > 0 {
@@ -46,7 +51,7 @@ func (c *Column) AddWindow(tagText, bodyText string) *Window {
 		}
 	}
 
-	newWin := NewWindow(tagText, bodyText, c.x, c.y+c.h-h, c.w, h, c.onExec)
+	newWin := NewWindow(tagText, bodyText, c, c.x, c.y+c.h-h, c.w, h, c.onExec)
 	c.windows = append(c.windows, newWin)
 	return newWin
 }
@@ -98,7 +103,7 @@ func (c *Column) HandleEvent(ev tcell.Event) bool {
 		if my == c.tag.y {
 			if ev.Buttons() == tcell.Button3 { // Middle-click
 				word := c.tag.buffer.GetWordAt(mx-c.tag.x, 0)
-				return c.onExec(nil, word)
+				return c.onExec(c, nil, word)
 			}
 			return c.tag.HandleEvent(ev)
 		}
