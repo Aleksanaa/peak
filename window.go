@@ -6,9 +6,156 @@ import (
 	"github.com/gdamore/tcell/v2"
 )
 
+type TextView struct {
+	buffer     *Buffer
+	x, y, w, h int
+	style      tcell.Style
+	scroll     int
+	drag       bool
+	singleLine bool
+}
+
+func NewTextView(text string, x, y, w, h int, style tcell.Style, singleLine bool) *TextView {
+	return &TextView{
+		buffer:     NewBuffer(text),
+		x:          x,
+		y:          y,
+		w:          w,
+		h:          h,
+		style:      style,
+		singleLine: singleLine,
+	}
+}
+
+func (tv *TextView) Draw(s tcell.Screen) {
+	selStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x6e738d)).Foreground(tcell.ColorWhite)
+	for row := 0; row < tv.h; row++ {
+		bufferRow := row + tv.scroll
+		var line []rune
+		if bufferRow < len(tv.buffer.lines) {
+			line = tv.buffer.lines[bufferRow]
+		}
+		for col := 0; col < tv.w; col++ {
+			char := ' '
+			style := tv.style
+			if tv.buffer.IsSelected(col, bufferRow) {
+				style = selStyle
+			}
+			if col < len(line) {
+				char = line[col]
+			}
+			s.SetContent(tv.x+col, tv.y+row, char, nil, style)
+		}
+	}
+}
+
+func (tv *TextView) Resize(x, y, w, h int) {
+	tv.x, tv.y, tv.w, tv.h = x, y, w, h
+}
+
+func (tv *TextView) HandleEvent(ev tcell.Event) bool {
+	switch ev := ev.(type) {
+	case *tcell.EventKey:
+		tv.buffer.ClearSelection()
+		switch ev.Key() {
+		case tcell.KeyUp:
+			if !tv.singleLine {
+				tv.buffer.MoveUp()
+			}
+		case tcell.KeyDown:
+			if !tv.singleLine {
+				tv.buffer.MoveDown()
+			}
+		case tcell.KeyLeft:
+			tv.buffer.MoveLeft()
+		case tcell.KeyRight:
+			tv.buffer.MoveRight()
+		case tcell.KeyBackspace, tcell.KeyBackspace2:
+			tv.buffer.Backspace()
+		case tcell.KeyEnter:
+			if !tv.singleLine {
+				tv.buffer.NewLine()
+			}
+		case tcell.KeyRune:
+			tv.buffer.Insert(ev.Rune())
+		}
+		// Adjust scroll
+		if tv.buffer.cursor.y < tv.scroll {
+			tv.scroll = tv.buffer.cursor.y
+		} else if tv.buffer.cursor.y >= tv.scroll+tv.h {
+			tv.scroll = tv.buffer.cursor.y - tv.h + 1
+		}
+	case *tcell.EventMouse:
+		buttons := ev.Buttons()
+		if !tv.singleLine {
+			if buttons&tcell.WheelUp != 0 {
+				if tv.scroll > 0 {
+					tv.scroll--
+				}
+				return false
+			}
+			if buttons&tcell.WheelDown != 0 {
+				if tv.scroll < len(tv.buffer.lines)-1 {
+					tv.scroll++
+				}
+				return false
+			}
+		}
+
+		mx, my := ev.Position()
+		bx := mx - tv.x
+		by := my - tv.y + tv.scroll
+
+		if buttons == tcell.Button1 {
+			if !tv.drag {
+				tv.drag = true
+				tv.buffer.cursor.y = by
+				tv.buffer.cursor.x = bx
+				if tv.buffer.cursor.y >= len(tv.buffer.lines) {
+					tv.buffer.cursor.y = len(tv.buffer.lines) - 1
+				}
+				if tv.buffer.cursor.y < 0 {
+					tv.buffer.cursor.y = 0
+				}
+				if tv.buffer.cursor.x > len(tv.buffer.lines[tv.buffer.cursor.y]) {
+					tv.buffer.cursor.x = len(tv.buffer.lines[tv.buffer.cursor.y])
+				}
+				if tv.buffer.cursor.x < 0 {
+					tv.buffer.cursor.x = 0
+				}
+				tv.buffer.SetSelection(tv.buffer.cursor, tv.buffer.cursor)
+			} else {
+				tv.buffer.cursor.y = by
+				tv.buffer.cursor.x = bx
+				if tv.buffer.cursor.y >= len(tv.buffer.lines) {
+					tv.buffer.cursor.y = len(tv.buffer.lines) - 1
+				}
+				if tv.buffer.cursor.y < 0 {
+					tv.buffer.cursor.y = 0
+				}
+				if tv.buffer.cursor.x > len(tv.buffer.lines[tv.buffer.cursor.y]) {
+					tv.buffer.cursor.x = len(tv.buffer.lines[tv.buffer.cursor.y])
+				}
+				if tv.buffer.cursor.x < 0 {
+					tv.buffer.cursor.x = 0
+				}
+				tv.buffer.selectionEnd = &Cursor{tv.buffer.cursor.x, tv.buffer.cursor.y}
+			}
+		} else {
+			tv.drag = false
+			if tv.buffer.selectionStart != nil && tv.buffer.selectionEnd != nil {
+				if *tv.buffer.selectionStart == *tv.buffer.selectionEnd {
+					tv.buffer.ClearSelection()
+				}
+			}
+		}
+	}
+	return false
+}
+
 type Window struct {
-	tag      *Tag
-	body     *Body
+	tag      *TextView
+	body     *TextView
 	parent   *Column
 	x, y     int
 	w, h     int
@@ -17,26 +164,11 @@ type Window struct {
 }
 
 func NewWindow(tagText, bodyText string, parent *Column, x, y, w, h int, onExec func(*Column, *Window, string) bool) *Window {
-	tagStyle := tcell.StyleDefault.Background(tcell.ColorPaleTurquoise).Foreground(tcell.ColorBlack)
-	bodyStyle := tcell.StyleDefault.Background(tcell.ColorNavajoWhite).Foreground(tcell.ColorBlack)
+	tagStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x1e2030)).Foreground(tcell.NewHexColor(0x91d7e3))
+	bodyStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x24273a)).Foreground(tcell.NewHexColor(0xcad3f5))
 
-	tag := &Tag{
-		buffer: NewBuffer(tagText),
-		x:      x + 1,
-		y:      y,
-		w:      w - 1,
-		h:      1,
-		style:  tagStyle,
-	}
-
-	body := &Body{
-		buffer: NewBuffer(bodyText),
-		x:      x + 1,
-		y:      y + 1,
-		w:      w - 1,
-		h:      h - 1,
-		style:  bodyStyle,
-	}
+	tag := NewTextView(tagText, x+1, y, w-1, 1, tagStyle, true)
+	body := NewTextView(bodyText, x+1, y+1, w-1, h-1, bodyStyle, false)
 
 	return &Window{
 		tag:    tag,
@@ -55,7 +187,6 @@ func (win *Window) GetFilename() string {
 		return ""
 	}
 	line := win.tag.buffer.lines[0]
-	// Skip leading spaces
 	start := 0
 	for start < len(line) && (line[start] == ' ' || line[start] == '\t') {
 		start++
@@ -63,7 +194,6 @@ func (win *Window) GetFilename() string {
 	if start >= len(line) {
 		return ""
 	}
-	
 	end := start
 	for end < len(line) && isWordChar(line[end]) {
 		end++
@@ -72,16 +202,15 @@ func (win *Window) GetFilename() string {
 }
 
 func (win *Window) Draw(s tcell.Screen) {
-	// Draw window handle square on the vertical separator line
-	handleStyle := tcell.StyleDefault.Background(tcell.ColorSteelBlue).Foreground(tcell.ColorBlack)
+	handleStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0xb7bdf8)).Foreground(tcell.ColorBlack)
 	if win.focusTag {
-		handleStyle = tcell.StyleDefault.Background(tcell.ColorRoyalBlue).Foreground(tcell.ColorBlack)
+		handleStyle = tcell.StyleDefault.Background(tcell.NewHexColor(0x91d7e3)).Foreground(tcell.ColorBlack)
 	}
 	s.SetContent(win.x, win.tag.y, ' ', nil, handleStyle)
 
 	win.tag.Draw(s)
 	win.body.Draw(s)
-	// Cursor management
+
 	if win.focusTag {
 		s.ShowCursor(win.tag.x+win.tag.buffer.cursor.x, win.tag.y)
 	} else {
@@ -95,8 +224,8 @@ func (win *Window) Draw(s tcell.Screen) {
 
 func (win *Window) Resize(x, y, w, h int) {
 	win.x, win.y, win.w, win.h = x, y, w, h
-	win.tag.Resize(x+1, y, w-1, 1) // Offset by 1 for handle on vertical line
-	win.body.Resize(x+1, y+1, w-1, h-1) // Offset body too
+	win.tag.Resize(x+1, y, w-1, 1)
+	win.body.Resize(x+1, y+1, w-1, h-1)
 }
 
 func (win *Window) HandleEvent(ev tcell.Event) bool {
@@ -107,7 +236,7 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 			if ev.Buttons() == tcell.Button1 {
 				win.focusTag = true
 			}
-			if ev.Buttons() == tcell.Button3 { // Middle-click (100) -> Execute
+			if ev.Buttons() == tcell.Button3 {
 				word := win.tag.buffer.GetSelectedText()
 				if word == "" {
 					word = win.tag.buffer.GetWordAt(mx-win.tag.x, 0)
@@ -115,7 +244,7 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 				if win.onExec != nil {
 					return win.onExec(win.parent, win, word)
 				}
-			} else if ev.Buttons() == tcell.Button2 { // Right-click (10) -> Search
+			} else if ev.Buttons() == tcell.Button2 {
 				word := win.tag.buffer.GetSelectedText()
 				if word == "" {
 					word = win.tag.buffer.GetWordAt(mx-win.tag.x, 0)
@@ -128,7 +257,7 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 			if ev.Buttons() == tcell.Button1 {
 				win.focusTag = false
 			}
-			if ev.Buttons() == tcell.Button3 { // Middle-click (100) -> Execute
+			if ev.Buttons() == tcell.Button3 {
 				word := win.body.buffer.GetSelectedText()
 				if word == "" {
 					word = win.body.buffer.GetWordAt(mx-win.body.x, my-win.body.y+win.body.scroll)
@@ -136,7 +265,7 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 				if win.onExec != nil {
 					return win.onExec(win.parent, win, word)
 				}
-			} else if ev.Buttons() == tcell.Button2 { // Right-click (10) -> Search
+			} else if ev.Buttons() == tcell.Button2 {
 				word := win.body.buffer.GetSelectedText()
 				if word == "" {
 					word = win.body.buffer.GetWordAt(mx-win.body.x, my-win.body.y+win.body.scroll)
@@ -155,229 +284,21 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 	return false
 }
 
-type Tag struct {
-	buffer *Buffer
-	x, y   int
-	w, h   int
-	style  tcell.Style
-	drag   bool
-}
-
-func (t *Tag) Draw(s tcell.Screen) {
-	selStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x6e738d)).Foreground(tcell.ColorWhite)
-	for i := 0; i < t.w; i++ {
-		char := ' '
-		style := t.style
-		if t.buffer.IsSelected(i, 0) {
-			style = selStyle
-		}
-		s.SetContent(t.x+i, t.y, char, nil, style)
-	}
-	if len(t.buffer.lines) > 0 {
-		line := t.buffer.lines[0]
-		for i, r := range line {
-			if i < t.w {
-				style := t.style
-				if t.buffer.IsSelected(i, 0) {
-					style = selStyle
-				}
-				s.SetContent(t.x+i, t.y, r, nil, style)
-			}
-		}
-	}
-}
-
-func (t *Tag) Resize(x, y, w, h int) {
-	t.x, t.y, t.w, t.h = x, y, w, h
-}
-
-func (t *Tag) HandleEvent(ev tcell.Event) bool {
-	switch ev := ev.(type) {
-	case *tcell.EventKey:
-		t.buffer.ClearSelection()
-		switch ev.Key() {
-		case tcell.KeyLeft:
-			t.buffer.MoveLeft()
-		case tcell.KeyRight:
-			t.buffer.MoveRight()
-		case tcell.KeyBackspace, tcell.KeyBackspace2:
-			t.buffer.Backspace()
-		case tcell.KeyRune:
-			t.buffer.Insert(ev.Rune())
-		}
-	case *tcell.EventMouse:
-		mx, _ := ev.Position()
-		bx := mx - t.x
-		if ev.Buttons() == tcell.Button1 {
-			if !t.drag {
-				t.drag = true
-				t.buffer.cursor.x = bx
-				t.buffer.SetSelection(Cursor{bx, 0}, Cursor{bx, 0})
-			} else {
-				t.buffer.selectionEnd = &Cursor{bx, 0}
-				t.buffer.cursor.x = bx
-			}
-		} else {
-			t.drag = false
-			// If selection is just a point, clear it
-			if t.buffer.selectionStart != nil && t.buffer.selectionEnd != nil {
-				if *t.buffer.selectionStart == *t.buffer.selectionEnd {
-					t.buffer.ClearSelection()
-				}
-			}
-		}
-	}
-	return false
-}
-
-type Body struct {
-	buffer *Buffer
-	x, y   int
-	w, h   int
-	style  tcell.Style
-	scroll int
-	drag   bool
-}
-
-func (b *Body) Search(word string) {
+func (tv *TextView) Search(word string) {
 	if word == "" {
 		return
 	}
-	// Simple search from current cursor down
-	startX := b.buffer.cursor.x + 1
-	startY := b.buffer.cursor.y
-
-	for y := startY; y < len(b.buffer.lines); y++ {
-		line := string(b.buffer.lines[y])
+	startX := tv.buffer.cursor.x + 1
+	startY := tv.buffer.cursor.y
+	for y := startY; y < len(tv.buffer.lines); y++ {
+		line := string(tv.buffer.lines[y])
 		x := strings.Index(line[startX:], word)
 		if x != -1 {
-			b.buffer.cursor.y = y
-			b.buffer.cursor.x = startX + x
-			b.buffer.ClearSelection() // Clear selection on search result
+			tv.buffer.cursor.y = y
+			tv.buffer.cursor.x = startX + x
+			tv.buffer.ClearSelection()
 			return
 		}
 		startX = 0
 	}
-}
-
-func (b *Body) Draw(s tcell.Screen) {
-	selStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x6e738d)).Foreground(tcell.ColorWhite)
-	for row := 0; row < b.h; row++ {
-		bufferRow := row + b.scroll
-		var line []rune
-		if bufferRow < len(b.buffer.lines) {
-			line = b.buffer.lines[bufferRow]
-		}
-		for col := 0; col < b.w; col++ {
-			char := ' '
-			style := b.style
-			if b.buffer.IsSelected(col, bufferRow) {
-				style = selStyle
-			}
-			if col < len(line) {
-				char = line[col]
-			}
-			s.SetContent(b.x+col, b.y+row, char, nil, style)
-		}
-	}
-	if b.buffer.cursor.y >= b.scroll && b.buffer.cursor.y < b.scroll+b.h {
-		cx := b.x + b.buffer.cursor.x
-		cy := b.y + b.buffer.cursor.y - b.scroll
-		s.ShowCursor(cx, cy)
-	}
-}
-
-func (b *Body) Resize(x, y, w, h int) {
-	b.x, b.y, b.w, b.h = x, y, w, h
-}
-
-func (b *Body) HandleEvent(ev tcell.Event) bool {
-	switch ev := ev.(type) {
-	case *tcell.EventKey:
-		b.buffer.ClearSelection()
-		switch ev.Key() {
-		case tcell.KeyUp:
-			b.buffer.MoveUp()
-		case tcell.KeyDown:
-			b.buffer.MoveDown()
-		case tcell.KeyLeft:
-			b.buffer.MoveLeft()
-		case tcell.KeyRight:
-			b.buffer.MoveRight()
-		case tcell.KeyBackspace, tcell.KeyBackspace2:
-			b.buffer.Backspace()
-		case tcell.KeyEnter:
-			b.buffer.NewLine()
-		case tcell.KeyRune:
-			b.buffer.Insert(ev.Rune())
-		}
-		if b.buffer.cursor.y < b.scroll {
-			b.scroll = b.buffer.cursor.y
-		} else if b.buffer.cursor.y >= b.scroll+b.h {
-			b.scroll = b.buffer.cursor.y - b.h + 1
-		}
-	case *tcell.EventMouse:
-		buttons := ev.Buttons()
-		if buttons&tcell.WheelUp != 0 {
-			if b.scroll > 0 {
-				b.scroll--
-			}
-			return false
-		}
-		if buttons&tcell.WheelDown != 0 {
-			if b.scroll < len(b.buffer.lines)-1 {
-				b.scroll++
-			}
-			return false
-		}
-		
-		mx, my := ev.Position()
-		bx := mx - b.x
-		by := my - b.y + b.scroll
-
-		if buttons == tcell.Button1 {
-			if !b.drag {
-				b.drag = true
-				b.buffer.cursor.y = by
-				b.buffer.cursor.x = bx
-				if b.buffer.cursor.y >= len(b.buffer.lines) {
-					b.buffer.cursor.y = len(b.buffer.lines) - 1
-				}
-				if b.buffer.cursor.y < 0 {
-					b.buffer.cursor.y = 0
-				}
-				if b.buffer.cursor.x > len(b.buffer.lines[b.buffer.cursor.y]) {
-					b.buffer.cursor.x = len(b.buffer.lines[b.buffer.cursor.y])
-				}
-				if b.buffer.cursor.x < 0 {
-					b.buffer.cursor.x = 0
-				}
-				b.buffer.SetSelection(b.buffer.cursor, b.buffer.cursor)
-			} else {
-				b.buffer.cursor.y = by
-				b.buffer.cursor.x = bx
-				if b.buffer.cursor.y >= len(b.buffer.lines) {
-					b.buffer.cursor.y = len(b.buffer.lines) - 1
-				}
-				if b.buffer.cursor.y < 0 {
-					b.buffer.cursor.y = 0
-				}
-				if b.buffer.cursor.x > len(b.buffer.lines[b.buffer.cursor.y]) {
-					b.buffer.cursor.x = len(b.buffer.lines[b.buffer.cursor.y])
-				}
-				if b.buffer.cursor.x < 0 {
-					b.buffer.cursor.x = 0
-				}
-				b.buffer.selectionEnd = &Cursor{b.buffer.cursor.x, b.buffer.cursor.y}
-			}
-		} else {
-			b.drag = false
-			if b.buffer.selectionStart != nil && b.buffer.selectionEnd != nil {
-				if *b.buffer.selectionStart == *b.buffer.selectionEnd {
-					b.buffer.ClearSelection()
-				}
-			}
-		}
-	}
-	return false
 }

@@ -8,7 +8,7 @@ import (
 
 type Editor struct {
 	screen  tcell.Screen
-	tag     *Tag
+	tag     *TextView
 	columns []*Column
 	active  *Window
 	width   int
@@ -29,15 +29,9 @@ func (e *Editor) Init() {
 	e.screen.EnableMouse()
 	e.width, e.height = e.screen.Size()
 
-	tagStyle := tcell.StyleDefault.Background(tcell.ColorPaleTurquoise).Foreground(tcell.ColorBlack)
-	e.tag = &Tag{
-		buffer: NewBuffer(" NewCol Exit "),
-		x:      0,
-		y:      0,
-		w:      e.width,
-		h:      1,
-		style:  tagStyle,
-	}
+	// Catppuccin Macchiato Crust: #181926, Sky: #91d7e3
+	tagStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x181926)).Foreground(tcell.NewHexColor(0x91d7e3))
+	e.tag = NewTextView(" NewCol Exit ", 0, 0, e.width, 1, tagStyle, true)
 
 	// Initial Column
 	col := NewColumn(0, 1, e.width, e.height-1, e.Execute)
@@ -45,7 +39,7 @@ func (e *Editor) Init() {
 
 	// Add initial window
 	win := col.AddWindow(" /home/user/peak/main.go Get Put Del ",
-		"Welcome to Peak\nGlobal commands: NewCol, Exit\nColumn commands: New, Delcol\nWindow commands: Get, Put, Del")
+		"Welcome to Peak\nRefactored with unified TextView.\nSelection, scrolling and editing now work the same everywhere.")
 	e.active = win
 	e.Resize()
 }
@@ -85,7 +79,10 @@ func (e *Editor) HandleEvent(ev tcell.Event) bool {
 
 		if my == 0 {
 			if buttons == tcell.Button3 {
-				word := e.tag.buffer.GetWordAt(mx, 0)
+				word := e.tag.buffer.GetSelectedText()
+				if word == "" {
+					word = e.tag.buffer.GetWordAt(mx, 0)
+				}
 				return e.Execute(nil, nil, word)
 			}
 			return e.tag.HandleEvent(ev)

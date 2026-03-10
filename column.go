@@ -5,7 +5,7 @@ import (
 )
 
 type Column struct {
-	tag     *Tag
+	tag     *TextView
 	windows []*Window
 	x, y    int
 	w, h    int
@@ -13,15 +13,9 @@ type Column struct {
 }
 
 func NewColumn(x, y, w, h int, onExec func(*Column, *Window, string) bool) *Column {
-	tagStyle := tcell.StyleDefault.Background(tcell.ColorPaleTurquoise).Foreground(tcell.ColorBlack)
-	tag := &Tag{
-		buffer: NewBuffer(" New Delcol "),
-		x:      x + 1,
-		y:      y,
-		w:      w - 1,
-		h:      1,
-		style:  tagStyle,
-	}
+	// Catppuccin Macchiato Mantle: #1e2030, Sky: #91d7e3
+	tagStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x1e2030)).Foreground(tcell.NewHexColor(0x91d7e3))
+	tag := NewTextView(" New Delcol ", x+1, y, w-1, 1, tagStyle, true)
 
 	c := &Column{
 		tag:    tag,
@@ -57,8 +51,9 @@ func (c *Column) AddWindow(tagText, bodyText string) *Window {
 }
 
 func (c *Column) Draw(s tcell.Screen) {
-	sepStyle := tcell.StyleDefault.Background(tcell.ColorPaleTurquoise).Foreground(tcell.ColorBlack)
-	cornerStyle := tcell.StyleDefault.Background(tcell.ColorDarkBlue).Foreground(tcell.ColorBlack)
+	// Catppuccin Macchiato Crust: #181926, Blue: #8aadf4
+	sepStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x181926)).Foreground(tcell.NewHexColor(0x8aadf4))
+	cornerStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x8aadf4)).Foreground(tcell.ColorBlack)
 
 	// Draw vertical separator
 	for y := c.y; y < c.y+c.h; y++ {
@@ -86,7 +81,7 @@ func (c *Column) Resize(x, y, w, h int) {
 			if i == len(c.windows)-1 {
 				actualH = (y + h) - yOffset
 			}
-			win.Resize(x, yOffset, w, actualH) // Pass x directly
+			win.Resize(x, yOffset, w, actualH)
 			yOffset += actualH
 		}
 	}
@@ -97,12 +92,14 @@ func (c *Column) HandleEvent(ev tcell.Event) bool {
 	case *tcell.EventMouse:
 		mx, my := ev.Position()
 		if mx == c.x {
-			// Separator area - ignore for now
 			return false
 		}
 		if my == c.tag.y {
 			if ev.Buttons() == tcell.Button3 { // Middle-click
-				word := c.tag.buffer.GetWordAt(mx-c.tag.x, 0)
+				word := c.tag.buffer.GetSelectedText()
+				if word == "" {
+					word = c.tag.buffer.GetWordAt(mx-c.tag.x, 0)
+				}
 				return c.onExec(c, nil, word)
 			}
 			return c.tag.HandleEvent(ev)
