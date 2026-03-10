@@ -203,8 +203,31 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 		case tcell.KeyCtrlH, tcell.KeyBackspace, tcell.KeyBackspace2:
 			tv.buffer.Backspace()
 		case tcell.KeyDelete:
-			if tv.buffer.selectionStart != nil {
-				tv.buffer.DeleteSelection()
+			tv.buffer.Delete()
+		case tcell.KeyPgUp:
+			tv.buffer.ClearSelection()
+			tv.scroll -= tv.h
+			if tv.scroll < 0 {
+				tv.scroll = 0
+			}
+			_, vrow := tv.bufferToVisual(tv.buffer.cursor.x, tv.buffer.cursor.y)
+			if vrow >= tv.scroll+tv.h {
+				bx, by := tv.visualToBuffer(0, tv.scroll)
+				tv.buffer.cursor = Cursor{bx, by}
+			}
+		case tcell.KeyPgDn:
+			tv.buffer.ClearSelection()
+			tv.scroll += tv.h
+			if tv.scroll >= len(tv.layout) {
+				tv.scroll = len(tv.layout) - 1
+			}
+			if tv.scroll < 0 {
+				tv.scroll = 0
+			}
+			_, vrow := tv.bufferToVisual(tv.buffer.cursor.x, tv.buffer.cursor.y)
+			if vrow < tv.scroll {
+				bx, by := tv.visualToBuffer(0, tv.scroll)
+				tv.buffer.cursor = Cursor{bx, by}
 			}
 		case tcell.KeyUp:
 			tv.buffer.ClearSelection()
@@ -218,15 +241,34 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 			}
 		case tcell.KeyLeft:
 			tv.buffer.ClearSelection()
-			tv.buffer.MoveLeft()
+			if ev.Modifiers()&tcell.ModCtrl != 0 {
+				tv.buffer.MoveWordLeft()
+			} else {
+				tv.buffer.MoveLeft()
+			}
 		case tcell.KeyRight:
 			tv.buffer.ClearSelection()
-			tv.buffer.MoveRight()
+			if ev.Modifiers()&tcell.ModCtrl != 0 {
+				tv.buffer.MoveWordRight()
+			} else {
+				tv.buffer.MoveRight()
+			}
+		case tcell.KeyHome:
+			tv.buffer.ClearSelection()
+			tv.buffer.MoveHome()
+		case tcell.KeyEnd:
+			tv.buffer.ClearSelection()
+			tv.buffer.MoveEnd()
 		case tcell.KeyEnter:
 			tv.buffer.ClearSelection()
 			if !tv.singleLine {
 				tv.buffer.NewLine()
 			}
+		case tcell.KeyTab:
+			if tv.buffer.selectionStart != nil {
+				tv.buffer.DeleteSelection()
+			}
+			tv.buffer.Insert('\t')
 		case tcell.KeyRune:
 			if tv.buffer.selectionStart != nil {
 				tv.buffer.DeleteSelection()

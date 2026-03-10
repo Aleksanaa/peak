@@ -188,6 +188,22 @@ func (b *Buffer) NewLine() {
 }
 
 // DeleteSelection removes the selected text.
+func (b *Buffer) Delete() {
+	if b.selectionStart != nil && b.selectionEnd != nil {
+		b.DeleteSelection()
+		return
+	}
+	line := b.lines[b.cursor.y]
+	if b.cursor.x < len(line) {
+		b.lines[b.cursor.y] = append(line[:b.cursor.x], line[b.cursor.x+1:]...)
+	} else if b.cursor.y < len(b.lines)-1 {
+		// Join with next line
+		nextLine := b.lines[b.cursor.y+1]
+		b.lines[b.cursor.y] = append(line, nextLine...)
+		b.lines = append(b.lines[:b.cursor.y+1], b.lines[b.cursor.y+2:]...)
+	}
+}
+
 func (b *Buffer) DeleteSelection() {
 	if b.selectionStart == nil || b.selectionEnd == nil {
 		return
@@ -234,6 +250,50 @@ func (b *Buffer) Backspace() {
 }
 
 // Cursor movement methods
+func (b *Buffer) MoveHome() {
+	b.cursor.x = 0
+}
+
+func (b *Buffer) MoveEnd() {
+	b.cursor.x = len(b.lines[b.cursor.y])
+}
+
+func (b *Buffer) MoveWordLeft() {
+	if b.cursor.x == 0 {
+		b.MoveLeft()
+		return
+	}
+	line := b.lines[b.cursor.y]
+	x := b.cursor.x
+	// Skip current spaces
+	for x > 0 && line[x-1] == ' ' {
+		x--
+	}
+	// Find start of word
+	for x > 0 && line[x-1] != ' ' {
+		x--
+	}
+	b.cursor.x = x
+}
+
+func (b *Buffer) MoveWordRight() {
+	line := b.lines[b.cursor.y]
+	if b.cursor.x >= len(line) {
+		b.MoveRight()
+		return
+	}
+	x := b.cursor.x
+	// Skip current word chars
+	for x < len(line) && line[x] != ' ' {
+		x++
+	}
+	// Skip following spaces
+	for x < len(line) && line[x] == ' ' {
+		x++
+	}
+	b.cursor.x = x
+}
+
 func (b *Buffer) MoveLeft() {
 	if b.cursor.x > 0 {
 		b.cursor.x--
