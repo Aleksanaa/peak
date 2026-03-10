@@ -1,6 +1,8 @@
 package main
 
 import (
+	"strings"
+
 	"github.com/gdamore/tcell/v2"
 )
 
@@ -61,19 +63,27 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 	case *tcell.EventMouse:
 		mx, my := ev.Position()
 		if my == win.tag.y {
-			if ev.Buttons() == tcell.Button2 { // Middle-click
+			if ev.Buttons() == tcell.Button3 { // Middle-click (100) -> Execute
 				word := win.tag.buffer.GetWordAt(mx-win.tag.x, 0)
 				if win.onExec != nil {
 					return win.onExec(word)
 				}
+			} else if ev.Buttons() == tcell.Button2 { // Right-click (10) -> Search
+				word := win.tag.buffer.GetWordAt(mx-win.tag.x, 0)
+				win.body.Search(word)
+				return false
 			}
 			return win.tag.HandleEvent(ev)
 		} else if my >= win.body.y && my < win.body.y+win.body.h {
-			if ev.Buttons() == tcell.Button2 { // Middle-click
+			if ev.Buttons() == tcell.Button3 { // Middle-click (100) -> Execute
 				word := win.body.buffer.GetWordAt(mx-win.body.x, my-win.body.y+win.body.scroll)
 				if win.onExec != nil {
 					return win.onExec(word)
 				}
+			} else if ev.Buttons() == tcell.Button2 { // Right-click (10) -> Search
+				word := win.body.buffer.GetWordAt(mx-win.body.x, my-win.body.y+win.body.scroll)
+				win.body.Search(word)
+				return false
 			}
 			return win.body.HandleEvent(ev)
 		}
@@ -131,6 +141,26 @@ type Body struct {
 	w, h   int
 	style  tcell.Style
 	scroll int
+}
+
+func (b *Body) Search(word string) {
+	if word == "" {
+		return
+	}
+	// Simple search from current cursor down
+	startX := b.buffer.cursor.x + 1
+	startY := b.buffer.cursor.y
+
+	for y := startY; y < len(b.buffer.lines); y++ {
+		line := string(b.buffer.lines[y])
+		x := strings.Index(line[startX:], word)
+		if x != -1 {
+			b.buffer.cursor.y = y
+			b.buffer.cursor.x = startX + x
+			return
+		}
+		startX = 0
+	}
 }
 
 func (b *Body) Draw(s tcell.Screen) {

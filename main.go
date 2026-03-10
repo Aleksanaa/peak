@@ -15,6 +15,7 @@ type Editor struct {
 }
 
 func (e *Editor) Init() {
+	initDebug()
 	s, err := tcell.NewScreen()
 	if err != nil {
 		log.Fatalf("%+v", err)
@@ -67,6 +68,8 @@ func (e *Editor) HandleEvent(ev tcell.Event) bool {
 		}
 	case *tcell.EventMouse:
 		mx, my := ev.Position()
+		buttons := ev.Buttons()
+		logDebug("Mouse Event: x=%d y=%d buttons=%b", mx, my, buttons)
 		var clickedCol *Column
 		for _, col := range e.columns {
 			if mx >= col.x && mx < col.x+col.w && my >= col.y && my < col.y+col.h {

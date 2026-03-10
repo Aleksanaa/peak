@@ -80,7 +80,7 @@ func (c *Column) HandleEvent(ev tcell.Event) bool {
 	case *tcell.EventMouse:
 		mx, my := ev.Position()
 		if my == c.tag.y {
-			if ev.Buttons() == tcell.Button2 {
+			if ev.Buttons() == tcell.Button3 { // Middle-click
 				word := c.tag.buffer.GetWordAt(mx-c.x, 0)
 				return c.onExec(word)
 			}
