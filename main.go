@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 )
@@ -19,6 +20,11 @@ type Editor struct {
 	dragWin     *Window
 	dragCol     *Column
 	focusedView *TextView
+
+	scrollWin       *Window
+	scrollAmount    int
+	scrollDir       int
+	scrollStartTime time.Time
 }
 
 // Init sets up the initial editor state with two columns.
@@ -58,20 +64,36 @@ func (e *Editor) Init() {
 
 // Run enters the main event loop.
 func (e *Editor) Run() {
+	events := make(chan tcell.Event)
+	go func() {
+		for {
+			events <- e.screen.PollEvent()
+		}
+	}()
+
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
 	for {
 		e.Draw()
-		ev := e.screen.PollEvent()
-		if ev == nil {
-			continue
-		}
-		switch ev := ev.(type) {
-		case *tcell.EventInterrupt:
-			if f, ok := ev.Data().(func()); ok {
-				f()
-			}
-		default:
-			if e.HandleEvent(ev) {
+		select {
+		case ev := <-events:
+			if ev == nil {
 				return
+			}
+			switch ev := ev.(type) {
+			case *tcell.EventInterrupt:
+				if f, ok := ev.Data().(func()); ok {
+					f()
+				}
+			default:
+				if e.HandleEvent(ev) {
+					return
+				}
+			}
+		case <-ticker.C:
+			if e.scrollWin != nil && time.Since(e.scrollStartTime) > 200*time.Millisecond {
+				e.scrollWin.body.Scroll(e.scrollDir * e.scrollAmount)
 			}
 		}
 	}
@@ -98,6 +120,10 @@ func (e *Editor) HandleEvent(ev tcell.Event) bool {
 	case *tcell.EventMouse:
 		mx, my := ev.Position()
 		buttons := ev.Buttons()
+
+		if buttons == tcell.ButtonNone {
+			e.scrollWin = nil
+		}
 
 		if e.dragCol != nil {
 			if buttons&tcell.Button1 != 0 {

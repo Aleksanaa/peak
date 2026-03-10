@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"strings"
+	"time"
 
 	"github.com/atotto/clipboard"
 	"github.com/gdamore/tcell/v2"
@@ -16,23 +17,26 @@ type VisualLine struct {
 }
 
 type TextView struct {
-	buffer     *Buffer
-	x, y, w, h int
-	style      tcell.Style
-	scroll     int
-	drag       bool
-	singleLine bool
-	scrollable bool
-	layout     []VisualLine
+	buffer      *Buffer
+	x, y, w, h  int
+	style       tcell.Style
+	scroll      int
+	drag        bool
+	singleLine  bool
+	scrollable  bool
+	layout      []VisualLine
+	lastWidth   int
+	lastVersion int
 }
 
 func NewTextView(text string, x, y, w, h int, style tcell.Style, singleLine, scrollable bool) *TextView {
 	tv := &TextView{
 		buffer: NewBuffer(text),
 		x:      x, y: y, w: w, h: h,
-		style:      style,
-		singleLine: singleLine,
-		scrollable: scrollable,
+		style:       style,
+		singleLine:  singleLine,
+		scrollable:  scrollable,
+		lastVersion: -1,
 	}
 	tv.UpdateLayout()
 	return tv
@@ -42,6 +46,11 @@ func (tv *TextView) UpdateLayout() {
 	if tv.w <= 0 {
 		return
 	}
+	if len(tv.layout) > 0 && tv.w == tv.lastWidth && tv.buffer.version == tv.lastVersion {
+		return
+	}
+	tv.lastWidth = tv.w
+	tv.lastVersion = tv.buffer.version
 	tv.layout = nil
 	for i, line := range tv.buffer.lines {
 		if len(line) == 0 {
@@ -64,6 +73,18 @@ func (tv *TextView) UpdateLayout() {
 			visualPos += width
 		}
 		tv.layout = append(tv.layout, VisualLine{i, start, len(line)})
+	}
+}
+
+func (tv *TextView) Scroll(n int) {
+	tv.UpdateLayout()
+	tv.scroll += n
+	limit := len(tv.layout) - 1
+	if tv.scroll > limit {
+		tv.scroll = limit
+	}
+	if tv.scroll < 0 {
+		tv.scroll = 0
 	}
 }
 
@@ -412,16 +433,53 @@ func (win *Window) tagHeight() int {
 	return h
 }
 
-func (win *Window) Draw(s tcell.Screen) {
+func (win *Window) layout() {
 	th := win.tagHeight()
-	win.tag.h, win.body.y, win.body.h = th, win.y+th, win.h-th
+	win.tag.h = th
+	win.body.y = win.y + th
+	win.body.h = win.h - th
 	if win.body.h < 0 {
 		win.body.h = 0
 	}
+}
+
+func (win *Window) Draw(s tcell.Screen) {
+	win.layout()
 	handleStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x89dceb)).Foreground(tcell.ColorBlack)
-	for i := 0; i < th; i++ {
+	for i := 0; i < win.tag.h; i++ {
 		s.SetContent(win.x, win.y+i, ' ', nil, handleStyle)
 	}
+
+	// Draw scrollbar/handle for the body
+	if win.body.h > 0 {
+		win.body.UpdateLayout() // Ensure layout is fresh for scroll calculation
+		total := len(win.body.layout)
+		visible := win.body.h
+
+		thumbStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x45475a))
+		gutterStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x181926))
+
+		thumbStart, thumbHeight := -1, -1
+		if total > visible {
+			thumbHeight = (visible * visible) / total
+			if thumbHeight < 1 {
+				thumbHeight = 1
+			}
+			thumbStart = (win.body.scroll * visible) / total
+			if thumbStart+thumbHeight > visible {
+				thumbStart = visible - thumbHeight
+			}
+		}
+
+		for i := 0; i < visible; i++ {
+			style := gutterStyle
+			if i >= thumbStart && i < thumbStart+thumbHeight {
+				style = thumbStyle
+			}
+			s.SetContent(win.x, win.body.y+i, ' ', nil, style)
+		}
+	}
+
 	win.tag.Draw(s)
 	win.body.Draw(s)
 }
@@ -429,13 +487,52 @@ func (win *Window) Draw(s tcell.Screen) {
 func (win *Window) Resize(x, y, w, h int) {
 	win.x, win.y, win.w, win.h = x, y, w, h
 	win.tag.Resize(x+1, y, w-1, win.tagHeight())
-	win.body.Resize(x+1, win.body.y, w-1, win.h-win.tagHeight())
+	win.layout()
+	win.body.Resize(x+1, win.body.y, w-1, win.body.h)
 }
 
 func (win *Window) HandleEvent(ev tcell.Event) bool {
 	if me, ok := ev.(*tcell.EventMouse); ok {
-		_, my := me.Position()
+		mx, my := me.Position()
+		win.tag.UpdateLayout()
+		win.body.UpdateLayout()
 		th := win.tagHeight()
+
+		if mx == win.x && my >= win.y+th {
+			// Scrolling speed based on distance from top: closer = slower
+			amount := (my - (win.y + th)) + 1
+			if me.Buttons()&tcell.Button1 != 0 {
+				if win.editor.scrollWin == nil {
+					win.body.Scroll(-amount)
+					win.editor.scrollStartTime = time.Now()
+				}
+				win.editor.scrollWin, win.editor.scrollAmount, win.editor.scrollDir = win, amount, -1
+			} else if me.Buttons()&tcell.Button2 != 0 {
+				if win.editor.scrollWin == nil {
+					win.body.Scroll(amount)
+					win.editor.scrollStartTime = time.Now()
+				}
+				win.editor.scrollWin, win.editor.scrollAmount, win.editor.scrollDir = win, amount, 1
+			} else if me.Buttons()&tcell.Button3 != 0 {
+				// Middle-click: Align top of scrollbar (thumb) with click position
+				visible := win.body.h
+				win.body.UpdateLayout()
+				total := len(win.body.layout)
+				if visible > 0 && total > 0 {
+					yClick := my - (win.y + th)
+					// Use ceiling division (a + b - 1) / b to ensure the thumb aligns with the click
+					win.body.scroll = (yClick*total + visible - 1) / visible
+					win.body.Scroll(0) // Apply bounds check
+				}
+			}
+			return false
+		}
+
+		// If click was on the vertical separator (handle area), stop here
+		if mx == win.x {
+			return false
+		}
+
 		target := win.body
 		if my < win.y+th {
 			target = win.tag
@@ -449,11 +546,11 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 			if word == "" {
 				return false
 			}
-			if me.Buttons() == tcell.Button3 {
+			if me.Buttons() == tcell.Button3 { // Middle-click (Execute)
 				if win.onExec != nil {
 					return win.onExec(win.parent, win, word)
 				}
-			} else {
+			} else { // Right-click (Look/Search)
 				fullPath := ""
 				if win.editor != nil {
 					fullPath = win.editor.resolvePathWithContext(win, word)

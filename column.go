@@ -116,10 +116,10 @@ func (c *Column) HandleEvent(ev tcell.Event) bool {
 	switch ev := ev.(type) {
 	case *tcell.EventMouse:
 		mx, my := ev.Position()
-		if mx == c.x {
-			return false
-		}
 		if my == c.tag.y {
+			if mx == c.x {
+				return false
+			}
 			if ev.Buttons() == tcell.Button3 { // Middle-click
 				word := c.tag.buffer.GetSelectedText()
 				if word == "" {

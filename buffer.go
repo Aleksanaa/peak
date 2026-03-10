@@ -22,6 +22,7 @@ type Buffer struct {
 	selectionEnd   *Cursor
 	history        []bufferState
 	redoStack      []bufferState
+	version        int
 }
 
 // NewBuffer initializes a buffer with the given string content.
@@ -33,6 +34,7 @@ func NewBuffer(content string) *Buffer {
 	// NewBuffer should probably not have an initial undo state for the very first load
 	b.history = nil
 	b.redoStack = nil
+	b.version = 0
 	return b
 }
 
@@ -48,6 +50,7 @@ func (b *Buffer) copyLines() [][]rune {
 func (b *Buffer) saveState() {
 	b.history = append(b.history, bufferState{lines: b.copyLines(), cursor: b.cursor})
 	b.redoStack = nil // This is where we clear the redo branch
+	b.version++
 }
 
 func (b *Buffer) Undo() {
@@ -64,6 +67,7 @@ func (b *Buffer) Undo() {
 	b.lines = last.lines
 	b.cursor = last.cursor
 	b.ClearSelection()
+	b.version++
 }
 
 func (b *Buffer) Redo() {
@@ -80,6 +84,7 @@ func (b *Buffer) Redo() {
 	b.lines = next.lines
 	b.cursor = next.cursor
 	b.ClearSelection()
+	b.version++
 }
 
 func (b *Buffer) ClearSelection() {
@@ -179,6 +184,7 @@ func (b *Buffer) SetText(content string) {
 	}
 	b.cursor = Cursor{0, 0}
 	b.ClearSelection()
+	b.version++
 }
 
 func (b *Buffer) DeleteLine() {
