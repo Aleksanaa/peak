@@ -315,7 +315,9 @@ type Window struct {
 }
 
 func NewWindow(tag, body string, parent *Column, editor *Editor, x, y, w, h int, onExec func(*Column, *Window, string) bool) *Window {
-	tagStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x1e1e2e)).Foreground(tcell.NewHexColor(0x89b4fa))
+	// Window menu: #1e1e2e, menu Text: #89dceb
+	tagStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x1e1e2e)).Foreground(tcell.NewHexColor(0x89dceb))
+	// Text background: #313244, Text: #cdd6f4
 	bodyStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x313244)).Foreground(tcell.NewHexColor(0xcdd6f4))
 	return &Window{
 		tag:    NewTextView(tag, x+1, y, w-1, 1, tagStyle, false, false),

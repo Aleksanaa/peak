@@ -36,8 +36,8 @@ func (e *Editor) Init() {
 	e.screen.EnableMouse()
 	e.width, e.height = e.screen.Size()
 
-	// Top menu: #11111b, menu Text: #89b4fa
-	tagStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x11111b)).Foreground(tcell.NewHexColor(0x89b4fa))
+	// Top menu: #11111b, menu Text: #89dceb
+	tagStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x11111b)).Foreground(tcell.NewHexColor(0x89dceb))
 	e.tag = NewTextView(" NewCol Exit ", 0, 0, e.width, 1, tagStyle, true, false)
 	e.focusedView = e.tag
 
