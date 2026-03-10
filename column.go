@@ -148,12 +148,14 @@ func (c *Column) HandleEvent(ev tcell.Event) bool {
 			if mx == c.x {
 				return false
 			}
-			if ev.Buttons() == tcell.Button3 { // Middle-click
-				word := c.tag.buffer.GetSelectedText()
-				if word == "" {
-					word = c.tag.buffer.GetWordAt(mx-c.tag.x, 0)
+			word := c.tag.GetClickWord(mx, my)
+			if word != "" {
+				if ev.Buttons() == tcell.Button3 { // Middle-click
+					return c.onExec(c, nil, word)
 				}
-				return c.onExec(c, nil, word)
+				if ev.Buttons() == tcell.Button2 { // Right-click
+					return c.editor.Plumb(nil, word)
+				}
 			}
 			return c.tag.HandleEvent(ev)
 		}

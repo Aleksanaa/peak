@@ -152,12 +152,14 @@ func (e *Editor) HandleEvent(ev tcell.Event) bool {
 
 		// Global Tag clicks
 		if my == 0 {
-			if buttons == tcell.Button3 {
-				word := e.tag.buffer.GetSelectedText()
-				if word == "" {
-					word = e.tag.buffer.GetWordAt(mx, 0)
+			word := e.tag.GetClickWord(mx, my)
+			if word != "" {
+				if buttons == tcell.Button3 { // Middle-click
+					return e.Execute(nil, nil, word)
 				}
-				return e.Execute(nil, nil, word)
+				if buttons == tcell.Button2 { // Right-click
+					return e.Plumb(nil, word)
+				}
 			}
 			if buttons == tcell.Button1 {
 				e.dragView, e.focusedView = e.tag, e.tag

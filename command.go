@@ -5,82 +5,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"unicode"
 
 	"github.com/atotto/clipboard"
 	"github.com/gdamore/tcell/v2"
 )
-
-// GetWordAt returns the word under the given x, y buffer coordinates.
-func (b *Buffer) GetWordAt(x, y int) string {
-	if y < 0 || y >= len(b.lines) {
-		return ""
-	}
-	line := b.lines[y]
-	if x < 0 || x >= len(line) {
-		return ""
-	}
-
-	start, end := x, x
-	for start > 0 && isWordChar(line[start-1]) {
-		start--
-	}
-	for end < len(line) && isWordChar(line[end]) {
-		end++
-	}
-	return string(line[start:end])
-}
-
-func isWordChar(r rune) bool {
-	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '/' || r == '.' || r == '-' || r == '~'
-}
-
-// resolvePath returns an absolute path, expanding ~ and handling relative segments.
-func resolvePath(path string) string {
-	if path == "" {
-		return ""
-	}
-	if strings.HasPrefix(path, "~") {
-		home, _ := os.UserHomeDir()
-		if path == "~" {
-			return home
-		}
-		return filepath.Join(home, path[1:])
-	}
-	abs, _ := filepath.Abs(path)
-	return abs
-}
-
-// resolvePathWithContext resolves a path relative to a window's directory or CWD.
-func (e *Editor) resolvePathWithContext(win *Window, path string) string {
-	if path == "" {
-		return ""
-	}
-	if filepath.IsAbs(path) || strings.HasPrefix(path, "~") {
-		return resolvePath(path)
-	}
-
-	dir, _ := os.Getwd()
-	target := win
-	if target == nil {
-		target = e.active
-	}
-	if target != nil {
-		fn := target.GetFilename()
-		if strings.HasSuffix(fn, "+Errors") {
-			// Base directory is the part before +Errors
-			dir = filepath.Dir(fn)
-		} else {
-			absFn := resolvePath(fn)
-			if info, err := os.Stat(absFn); err == nil && info.IsDir() {
-				dir = absFn
-			} else {
-				dir = filepath.Dir(absFn)
-			}
-		}
-	}
-	return filepath.Join(dir, path)
-}
 
 // Execute parses and runs internal or external commands.
 func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
@@ -160,14 +88,8 @@ func (e *Editor) cmdGet(win *Window) {
 		return
 	}
 	path := e.resolvePathWithContext(win, win.GetFilename())
-	if info, err := os.Stat(path); err == nil {
-		if info.IsDir() {
-			if content, err := e.listDir(path); err == nil {
-				win.body.buffer.SetText(content)
-			}
-		} else if data, err := os.ReadFile(path); err == nil {
-			win.body.buffer.SetText(string(data))
-		}
+	if content, err := e.readFileOrDir(path); err == nil {
+		win.body.buffer.SetText(content)
 	}
 }
 
@@ -277,57 +199,16 @@ func (e *Editor) cmdRedo(win *Window) {
 }
 
 func (e *Editor) cmdLook(win *Window, cmd string) {
-	path := strings.TrimSpace(strings.TrimPrefix(cmd, "Look"))
-	full := e.resolvePathWithContext(win, path)
-
-	for _, c := range e.columns {
-		for _, w := range c.windows {
-			if e.resolvePathWithContext(nil, w.GetFilename()) == full {
-				e.active, e.focusedView = w, w.body
-				return
-			}
-		}
-	}
-
-	info, err := os.Stat(full)
-	if err != nil {
+	word := strings.TrimSpace(strings.TrimPrefix(cmd, "Look"))
+	if word == "" {
 		return
 	}
-
-	var content string
-	if info.IsDir() {
-		if c, err := e.listDir(full); err == nil {
-			content = c
-		}
-	} else {
-		if data, err := os.ReadFile(full); err == nil {
-			content = string(data)
-		}
+	target := win
+	if target == nil {
+		target = e.active
 	}
-
-	target := e.getTargetColumn(nil, win)
 	if target != nil {
-		tagPath := full // Default abspath
-		if win != nil {
-			parentFn := win.GetFilename()
-			if strings.HasPrefix(parentFn, "~") {
-				if home, _ := os.UserHomeDir(); strings.HasPrefix(full, home) {
-					tagPath = "~" + full[len(home):]
-				}
-			} else if !filepath.IsAbs(parentFn) {
-				cwd, _ := os.Getwd()
-				if rel, err := filepath.Rel(cwd, full); err == nil {
-					if !strings.HasPrefix(rel, ".") && !strings.HasPrefix(rel, "/") {
-						tagPath = "./" + rel
-					} else {
-						tagPath = rel
-					}
-				}
-			}
-		}
-		newWin := target.AddWindow(" "+tagPath+" Get Put Snarf Zerox Del ", content)
-		e.active, e.focusedView = newWin, newWin.body
-		target.Resize(target.x, target.y, target.w, target.h)
+		target.body.Search(word)
 	}
 }
 

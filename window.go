@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"strings"
 	"time"
 
@@ -86,6 +85,29 @@ func (tv *TextView) Scroll(n int) {
 	if tv.scroll < 0 {
 		tv.scroll = 0
 	}
+}
+
+func (tv *TextView) GotoLine(lineNum int) {
+	if lineNum < 0 {
+		lineNum = 0
+	}
+	if lineNum >= len(tv.buffer.lines) {
+		lineNum = len(tv.buffer.lines) - 1
+	}
+	if lineNum < 0 {
+		return
+	}
+	tv.buffer.cursor = Cursor{0, lineNum}
+	tv.buffer.ClearSelection()
+	tv.UpdateLayout()
+	// Find the visual line for this buffer line and scroll to it
+	for i, vl := range tv.layout {
+		if vl.BufferLine == lineNum {
+			tv.scroll = i
+			break
+		}
+	}
+	tv.SyncScroll()
 }
 
 // bufferToVisual translates a buffer position to visual coordinates (vx, vrow).
@@ -173,6 +195,15 @@ func (tv *TextView) Draw(s tcell.Screen) {
 			s.SetContent(tv.x+col, tv.y+vrow, ' ', nil, tv.style)
 		}
 	}
+}
+
+func (tv *TextView) GetClickWord(mx, my int) string {
+	word := strings.TrimSpace(tv.buffer.GetSelectedText())
+	if word != "" {
+		return word
+	}
+	bx, by := tv.visualToBuffer(mx-tv.x, my-tv.y+tv.scroll)
+	return strings.TrimSpace(tv.buffer.GetWordAt(bx, by))
 }
 
 func (tv *TextView) ShowCursor(s tcell.Screen) {
@@ -539,30 +570,15 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 		}
 		target.HandleEvent(ev)
 		if me.Buttons() == tcell.Button3 || me.Buttons() == tcell.Button2 {
-			word := strings.TrimSpace(target.buffer.GetSelectedText())
-			if word == "" {
-				word = strings.TrimSpace(target.buffer.GetWordAt(target.buffer.cursor.x, target.buffer.cursor.y))
-			}
-			if word == "" {
-				return false
-			}
-			if me.Buttons() == tcell.Button3 { // Middle-click (Execute)
-				if win.onExec != nil {
-					return win.onExec(win.parent, win, word)
-				}
-			} else { // Right-click (Look/Search)
-				fullPath := ""
-				if win.editor != nil {
-					fullPath = win.editor.resolvePathWithContext(win, word)
-				} else {
-					fullPath = resolvePath(word)
-				}
-				if _, err := os.Stat(fullPath); err == nil {
+			word := target.GetClickWord(mx, my)
+			if word != "" {
+				if me.Buttons() == tcell.Button3 { // Middle-click (Execute)
 					if win.onExec != nil {
-						return win.onExec(win.parent, win, "Look "+word)
+						return win.onExec(win.parent, win, word)
 					}
+				} else { // Right-click (Plumb)
+					return win.editor.Plumb(win, word)
 				}
-				win.body.Search(word)
 			}
 		}
 	}
