@@ -7,8 +7,76 @@ type Cursor struct {
 }
 
 type Buffer struct {
-	lines  [][]rune
-	cursor Cursor
+	lines          [][]rune
+	cursor         Cursor
+	selectionStart *Cursor
+	selectionEnd   *Cursor
+}
+
+func (b *Buffer) ClearSelection() {
+	b.selectionStart = nil
+	b.selectionEnd = nil
+}
+
+func (b *Buffer) SetSelection(start, end Cursor) {
+	s := start
+	e := end
+	b.selectionStart = &s
+	b.selectionEnd = &e
+}
+
+func (b *Buffer) GetSelectedText() string {
+	if b.selectionStart == nil || b.selectionEnd == nil {
+		return ""
+	}
+	start, end := *b.selectionStart, *b.selectionEnd
+	if start.y > end.y || (start.y == end.y && start.x > end.x) {
+		start, end = end, start
+	}
+
+	var sb strings.Builder
+	for y := start.y; y <= end.y; y++ {
+		line := b.lines[y]
+		x1, x2 := 0, len(line)
+		if y == start.y {
+			x1 = start.x
+		}
+		if y == end.y {
+			x2 = end.x
+		}
+		if x1 < 0 { x1 = 0 }
+		if x2 > len(line) { x2 = len(line) }
+		if x1 < x2 {
+			sb.WriteString(string(line[x1:x2]))
+		}
+		if y < end.y {
+			sb.WriteRune('\n')
+		}
+	}
+	return sb.String()
+}
+
+func (b *Buffer) IsSelected(x, y int) bool {
+	if b.selectionStart == nil || b.selectionEnd == nil {
+		return false
+	}
+	start, end := *b.selectionStart, *b.selectionEnd
+	if start.y > end.y || (start.y == end.y && start.x > end.x) {
+		start, end = end, start
+	}
+	if y < start.y || y > end.y {
+		return false
+	}
+	if y == start.y && y == end.y {
+		return x >= start.x && x < end.x
+	}
+	if y == start.y {
+		return x >= start.x
+	}
+	if y == end.y {
+		return x < end.x
+	}
+	return true
 }
 
 func NewBuffer(content string) *Buffer {
