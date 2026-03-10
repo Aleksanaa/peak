@@ -1,11 +1,15 @@
 package main
 
-import "strings"
+import (
+	"strings"
+)
 
+// Cursor represents a 2D position in the text buffer.
 type Cursor struct {
 	x, y int
 }
 
+// Buffer handles the raw text data and selection state.
 type Buffer struct {
 	lines          [][]rune
 	cursor         Cursor
@@ -13,26 +17,34 @@ type Buffer struct {
 	selectionEnd   *Cursor
 }
 
+// NewBuffer initializes a buffer with the given string content.
+func NewBuffer(content string) *Buffer {
+	b := &Buffer{
+		lines: [][]rune{{}},
+	}
+	b.SetText(content)
+	return b
+}
+
+// ClearSelection removes any active text selection.
 func (b *Buffer) ClearSelection() {
 	b.selectionStart = nil
 	b.selectionEnd = nil
 }
 
+// SetSelection explicitly sets the selection range.
 func (b *Buffer) SetSelection(start, end Cursor) {
-	s := start
-	e := end
+	s, e := start, end
 	b.selectionStart = &s
 	b.selectionEnd = &e
 }
 
+// GetSelectedText returns the string content of the current selection.
 func (b *Buffer) GetSelectedText() string {
 	if b.selectionStart == nil || b.selectionEnd == nil {
 		return ""
 	}
-	start, end := *b.selectionStart, *b.selectionEnd
-	if start.y > end.y || (start.y == end.y && start.x > end.x) {
-		start, end = end, start
-	}
+	start, end := b.orderedSelection()
 
 	var sb strings.Builder
 	for y := start.y; y <= end.y; y++ {
@@ -44,8 +56,10 @@ func (b *Buffer) GetSelectedText() string {
 		if y == end.y {
 			x2 = end.x
 		}
+		
 		if x1 < 0 { x1 = 0 }
 		if x2 > len(line) { x2 = len(line) }
+		
 		if x1 < x2 {
 			sb.WriteString(string(line[x1:x2]))
 		}
@@ -56,14 +70,13 @@ func (b *Buffer) GetSelectedText() string {
 	return sb.String()
 }
 
+// IsSelected returns true if the given character position is within the selection.
 func (b *Buffer) IsSelected(x, y int) bool {
 	if b.selectionStart == nil || b.selectionEnd == nil {
 		return false
 	}
-	start, end := *b.selectionStart, *b.selectionEnd
-	if start.y > end.y || (start.y == end.y && start.x > end.x) {
-		start, end = end, start
-	}
+	start, end := b.orderedSelection()
+	
 	if y < start.y || y > end.y {
 		return false
 	}
@@ -79,22 +92,15 @@ func (b *Buffer) IsSelected(x, y int) bool {
 	return true
 }
 
-func NewBuffer(content string) *Buffer {
-	b := &Buffer{
-		lines: [][]rune{{}},
+func (b *Buffer) orderedSelection() (Cursor, Cursor) {
+	start, end := *b.selectionStart, *b.selectionEnd
+	if start.y > end.y || (start.y == end.y && start.x > end.x) {
+		return end, start
 	}
-	// Initial population from string
-	for _, r := range content {
-		if r == '\n' {
-			b.lines = append(b.lines, []rune{})
-		} else {
-			last := len(b.lines) - 1
-			b.lines[last] = append(b.lines[last], r)
-		}
-	}
-	return b
+	return start, end
 }
 
+// GetText returns the entire buffer content as a string.
 func (b *Buffer) GetText() string {
 	var sb strings.Builder
 	for i, line := range b.lines {
@@ -106,6 +112,7 @@ func (b *Buffer) GetText() string {
 	return sb.String()
 }
 
+// SetText replaces the buffer content and resets the cursor.
 func (b *Buffer) SetText(content string) {
 	b.lines = [][]rune{{}}
 	for _, r := range content {
@@ -117,6 +124,7 @@ func (b *Buffer) SetText(content string) {
 		}
 	}
 	b.cursor = Cursor{0, 0}
+	b.ClearSelection()
 }
 
 func (b *Buffer) DeleteLine() {
@@ -138,56 +146,45 @@ func (b *Buffer) DeleteWordBefore() {
 		return
 	}
 	line := b.lines[b.cursor.y]
-	
-	// Skip trailing spaces
 	end := b.cursor.x
-	for end > 0 && line[end-1] == ' ' {
-		end--
-	}
-	// Find start of word
+	for end > 0 && line[end-1] == ' ' { end-- }
 	start := end
-	for start > 0 && line[start-1] != ' ' {
-		start--
-	}
-	
-	// Remove from start to original cursor
+	for start > 0 && line[start-1] != ' ' { start-- }
 	newLine := append(line[:start], line[b.cursor.x:]...)
 	b.lines[b.cursor.y] = newLine
 	b.cursor.x = start
 }
 
+// Insert adds a rune at the current cursor position.
 func (b *Buffer) Insert(r rune) {
 	line := b.lines[b.cursor.y]
-	// Insert at cursor position
 	newLine := append(line[:b.cursor.x], append([]rune{r}, line[b.cursor.x:]...)...)
 	b.lines[b.cursor.y] = newLine
 	b.cursor.x++
 }
 
+// NewLine splits the current line at the cursor.
 func (b *Buffer) NewLine() {
 	line := b.lines[b.cursor.y]
 	remaining := line[b.cursor.x:]
 	b.lines[b.cursor.y] = line[:b.cursor.x]
-	
-	// Insert new line after current one
+
 	newLines := make([][]rune, 0, len(b.lines)+1)
 	newLines = append(newLines, b.lines[:b.cursor.y+1]...)
 	newLines = append(newLines, remaining)
 	newLines = append(newLines, b.lines[b.cursor.y+1:]...)
 	b.lines = newLines
-	
+
 	b.cursor.y++
 	b.cursor.x = 0
 }
 
+// DeleteSelection removes the selected text.
 func (b *Buffer) DeleteSelection() {
 	if b.selectionStart == nil || b.selectionEnd == nil {
 		return
 	}
-	start, end := *b.selectionStart, *b.selectionEnd
-	if start.y > end.y || (start.y == end.y && start.x > end.x) {
-		start, end = end, start
-	}
+	start, end := b.orderedSelection()
 
 	if start.y == end.y {
 		line := b.lines[start.y]
@@ -197,7 +194,7 @@ func (b *Buffer) DeleteSelection() {
 		firstLine := b.lines[start.y][:start.x]
 		lastLine := b.lines[end.y][end.x:]
 		newFirstLine := append(firstLine, lastLine...)
-		
+
 		newLines := append(b.lines[:start.y], newFirstLine)
 		newLines = append(newLines, b.lines[end.y+1:]...)
 		b.lines = newLines
@@ -207,6 +204,7 @@ func (b *Buffer) DeleteSelection() {
 	b.ClearSelection()
 }
 
+// Backspace deletes the selection or the character before the cursor.
 func (b *Buffer) Backspace() {
 	if b.selectionStart != nil && b.selectionEnd != nil {
 		b.DeleteSelection()
@@ -217,20 +215,17 @@ func (b *Buffer) Backspace() {
 		b.lines[b.cursor.y] = append(line[:b.cursor.x-1], line[b.cursor.x:]...)
 		b.cursor.x--
 	} else if b.cursor.y > 0 {
-		// Join with previous line
 		prevLine := b.lines[b.cursor.y-1]
 		currentLine := b.lines[b.cursor.y]
 		newX := len(prevLine)
-		
 		b.lines[b.cursor.y-1] = append(prevLine, currentLine...)
-		// Remove current line
 		b.lines = append(b.lines[:b.cursor.y], b.lines[b.cursor.y+1:]...)
-		
 		b.cursor.y--
 		b.cursor.x = newX
 	}
 }
 
+// Cursor movement methods
 func (b *Buffer) MoveLeft() {
 	if b.cursor.x > 0 {
 		b.cursor.x--

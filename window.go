@@ -8,6 +8,13 @@ import (
 	"github.com/gdamore/tcell/v2"
 )
 
+// VisualLine maps a screen row to a segment of a buffer line.
+type VisualLine struct {
+	BufferLine int
+	Start, End int
+}
+
+// TextView provides a rendered, scrollable, and editable view of a Buffer.
 type TextView struct {
 	buffer     *Buffer
 	x, y, w, h int
@@ -16,69 +23,67 @@ type TextView struct {
 	drag       bool
 	singleLine bool
 	scrollable bool
+	layout     []VisualLine
 }
 
-func NewTextView(text string, x, y, w, h int, style tcell.Style, singleLine bool, scrollable bool) *TextView {
-	return &TextView{
+func NewTextView(text string, x, y, w, h int, style tcell.Style, singleLine, scrollable bool) *TextView {
+	tv := &TextView{
 		buffer:     NewBuffer(text),
-		x:          x,
-		y:          y,
-		w:          w,
-		h:          h,
+		x:          x, y: y, w: w, h: h,
 		style:      style,
 		singleLine: singleLine,
 		scrollable: scrollable,
 	}
+	tv.UpdateLayout()
+	return tv
+}
+
+// UpdateLayout recalculates the visual lines based on current width and buffer content.
+func (tv *TextView) UpdateLayout() {
+	if tv.w <= 0 {
+		return
+	}
+	tv.layout = nil
+	for i, line := range tv.buffer.lines {
+		if len(line) == 0 {
+			tv.layout = append(tv.layout, VisualLine{i, 0, 0})
+			continue
+		}
+		for start := 0; start < len(line); start += tv.w {
+			end := start + tv.w
+			if end > len(line) { end = len(line) }
+			tv.layout = append(tv.layout, VisualLine{i, start, end})
+		}
+	}
 }
 
 func (tv *TextView) Draw(s tcell.Screen) {
+	tv.UpdateLayout()
+	if !tv.scrollable { tv.scroll = 0 }
+
 	selStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x6e738d)).Foreground(tcell.ColorWhite)
-	
-	if !tv.scrollable {
-		tv.scroll = 0
-	}
-
 	vrow := 0
-	skip := tv.scroll
 	
-	for i, line := range tv.buffer.lines {
-		visualLines := 1
-		if tv.w > 0 && len(line) > 0 {
-			visualLines = (len(line) + tv.w - 1) / tv.w
+	for layoutIdx := tv.scroll; layoutIdx < len(tv.layout) && vrow < tv.h; layoutIdx++ {
+		vl := tv.layout[layoutIdx]
+		line := tv.buffer.lines[vl.BufferLine]
+		
+		for col := 0; col < tv.w; col++ {
+			char := ' '
+			style := tv.style
+			bx := vl.Start + col
+			
+			if tv.buffer.IsSelected(bx, vl.BufferLine) {
+				style = selStyle
+			}
+			if bx < vl.End {
+				char = line[bx]
+			}
+			s.SetContent(tv.x+col, tv.y+vrow, char, nil, style)
 		}
-		if len(line) == 0 { visualLines = 1 }
-
-		for vl := 0; vl < visualLines; vl++ {
-			if skip > 0 {
-				skip--
-				continue
-			}
-			if vrow >= tv.h {
-				goto done
-			}
-
-			start := vl * tv.w
-			end := start + tv.w
-			if end > len(line) { end = len(line) }
-
-			for col := 0; col < tv.w; col++ {
-				char := ' '
-				style := tv.style
-				bx := start + col
-				
-				if tv.buffer.IsSelected(bx, i) {
-					style = selStyle
-				}
-
-				if bx < end {
-					char = line[bx]
-				}
-				s.SetContent(tv.x+col, tv.y+vrow, char, nil, style)
-			}
-			vrow++
-		}
+		vrow++
 	}
-done:
+	// Clear remaining space
 	for ; vrow < tv.h; vrow++ {
 		for col := 0; col < tv.w; col++ {
 			s.SetContent(tv.x+col, tv.y+vrow, ' ', nil, tv.style)
@@ -88,415 +93,224 @@ done:
 
 func (tv *TextView) ShowCursor(s tcell.Screen) {
 	vrow := 0
-	for i, line := range tv.buffer.lines {
-		visualLines := 1
-		if tv.w > 0 && len(line) > 0 {
-			visualLines = (len(line) + tv.w - 1) / tv.w
-		}
-		if len(line) == 0 { visualLines = 1 }
-
-		if i == tv.buffer.cursor.y {
-			vl := 0
-			cx := 0
-			if tv.w > 0 {
-				vl = tv.buffer.cursor.x / tv.w
-				cx = tv.buffer.cursor.x % tv.w
+	for lidx, vl := range tv.layout {
+		if vl.BufferLine == tv.buffer.cursor.y && tv.buffer.cursor.x >= vl.Start && tv.buffer.cursor.x <= vl.End {
+			// Special case: cursor at end of a full line should appear on next visual line if available
+			if tv.buffer.cursor.x == vl.End && vl.End-vl.Start == tv.w && lidx+1 < len(tv.layout) && tv.layout[lidx+1].BufferLine == vl.BufferLine {
+				vrow++
+				continue
 			}
 			
-			realVRow := vrow + vl
-			if realVRow >= tv.scroll && realVRow < tv.scroll+tv.h {
-				s.ShowCursor(tv.x+cx, tv.y+(realVRow-tv.scroll))
+			if lidx >= tv.scroll && lidx < tv.scroll+tv.h {
+				cx := tv.x + (tv.buffer.cursor.x - vl.Start)
+				cy := tv.y + (lidx - tv.scroll)
+				s.ShowCursor(cx, cy)
 			}
 			return
 		}
-		vrow += visualLines
+		vrow++
 	}
 }
 
 func (tv *TextView) Resize(x, y, w, h int) {
 	tv.x, tv.y, tv.w, tv.h = x, y, w, h
+	tv.UpdateLayout()
 }
 
 func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 	switch ev := ev.(type) {
 	case *tcell.EventKey:
-		logDebug("Key Event: key=%v rune=%v mod=%v", ev.Key(), ev.Rune(), ev.Modifiers())
 		switch ev.Key() {
 		case tcell.KeyCtrlC:
-			text := tv.buffer.GetSelectedText()
-			if text != "" {
-				clipboard.WriteAll(text)
-			}
-			return false
+			if text := tv.buffer.GetSelectedText(); text != "" { clipboard.WriteAll(text) }
 		case tcell.KeyCtrlX:
-			text := tv.buffer.GetSelectedText()
-			if text != "" {
+			if text := tv.buffer.GetSelectedText(); text != "" {
 				clipboard.WriteAll(text)
 				tv.buffer.DeleteSelection()
 			}
-			return false
 		case tcell.KeyCtrlV:
-			text, err := clipboard.ReadAll()
-			if err == nil {
-				if tv.buffer.selectionStart != nil {
-					tv.buffer.DeleteSelection()
-				}
+			if text, err := clipboard.ReadAll(); err == nil {
+				if tv.buffer.selectionStart != nil { tv.buffer.DeleteSelection() }
 				for _, r := range text {
-					if r == '\n' {
-						if !tv.singleLine {
-							tv.buffer.NewLine()
-						}
-					} else {
-						tv.buffer.Insert(r)
-					}
+					if r == '\n' { if !tv.singleLine { tv.buffer.NewLine() } } else { tv.buffer.Insert(r) }
 				}
 			}
-			return false
-		case tcell.KeyCtrlU:
-			tv.buffer.ClearSelection()
-			tv.buffer.DeleteLine()
-		case tcell.KeyCtrlW:
-			tv.buffer.ClearSelection()
-			tv.buffer.DeleteWordBefore()
-		case tcell.KeyCtrlH, tcell.KeyBackspace, tcell.KeyBackspace2:
-			tv.buffer.Backspace()
-		case tcell.KeyDelete:
-			if tv.buffer.selectionStart != nil {
-				tv.buffer.DeleteSelection()
-			}
+		case tcell.KeyCtrlU: tv.buffer.ClearSelection(); tv.buffer.DeleteLine()
+		case tcell.KeyCtrlW: tv.buffer.ClearSelection(); tv.buffer.DeleteWordBefore()
+		case tcell.KeyCtrlH, tcell.KeyBackspace, tcell.KeyBackspace2: tv.buffer.Backspace()
+		case tcell.KeyDelete: if tv.buffer.selectionStart != nil { tv.buffer.DeleteSelection() }
 		case tcell.KeyUp:
 			tv.buffer.ClearSelection()
-			if !tv.singleLine {
-				tv.buffer.MoveUp()
-			}
+			if !tv.singleLine { tv.buffer.MoveUp() }
 		case tcell.KeyDown:
 			tv.buffer.ClearSelection()
-			if !tv.singleLine {
-				tv.buffer.MoveDown()
-			}
-		case tcell.KeyLeft:
-			tv.buffer.ClearSelection()
-			tv.buffer.MoveLeft()
-		case tcell.KeyRight:
-			tv.buffer.ClearSelection()
-			tv.buffer.MoveRight()
+			if !tv.singleLine { tv.buffer.MoveDown() }
+		case tcell.KeyLeft: tv.buffer.ClearSelection(); tv.buffer.MoveLeft()
+		case tcell.KeyRight: tv.buffer.ClearSelection(); tv.buffer.MoveRight()
 		case tcell.KeyEnter:
 			tv.buffer.ClearSelection()
-			if !tv.singleLine {
-				tv.buffer.NewLine()
-			}
+			if !tv.singleLine { tv.buffer.NewLine() }
 		case tcell.KeyRune:
-			if tv.buffer.selectionStart != nil {
-				tv.buffer.DeleteSelection()
-			}
+			if tv.buffer.selectionStart != nil { tv.buffer.DeleteSelection() }
 			tv.buffer.Insert(ev.Rune())
 		}
-		
-		if tv.scrollable {
-			vrow := 0
-			for i := 0; i < tv.buffer.cursor.y; i++ {
-				vl := 1
-				if tv.w > 0 && len(tv.buffer.lines[i]) > 0 {
-					vl = (len(tv.buffer.lines[i]) + tv.w - 1) / tv.w
-				}
-				vrow += vl
-			}
-			cvl := 0
-			if tv.w > 0 {
-				cvl = tv.buffer.cursor.x / tv.w
-			}
-			vrow += cvl
-			
-			if vrow < tv.scroll {
-				tv.scroll = vrow
-			} else if vrow >= tv.scroll+tv.h {
-				tv.scroll = vrow - tv.h + 1
-			}
-		} else {
-			tv.scroll = 0
-		}
+		tv.UpdateLayout()
+		tv.SyncScroll()
 		return false
+
 	case *tcell.EventMouse:
 		buttons := ev.Buttons()
 		if tv.scrollable {
-			if buttons&tcell.WheelUp != 0 {
-				if tv.scroll > 0 {
-					tv.scroll--
-				}
-				return false
-			}
-			if buttons&tcell.WheelDown != 0 {
-				totalVRows := 0
-				for _, line := range tv.buffer.lines {
-					vl := 1
-					if tv.w > 0 && len(line) > 0 {
-						vl = (len(line) + tv.w - 1) / tv.w
-					}
-					totalVRows += vl
-				}
-				if tv.scroll < totalVRows-1 {
-					tv.scroll++
-				}
-				return false
-			}
+			if buttons&tcell.WheelUp != 0 { if tv.scroll > 0 { tv.scroll-- }; return false }
+			if buttons&tcell.WheelDown != 0 { if tv.scroll < len(tv.layout)-1 { tv.scroll++ }; return false }
 		}
 
 		mx, my := ev.Position()
 		if buttons != tcell.ButtonNone {
-			targetVRow := my - tv.y + tv.scroll
-			currVRow := 0
-			found := false
-			for i, line := range tv.buffer.lines {
-				vl := 1
-				if tv.w > 0 && len(line) > 0 {
-					vl = (len(line) + tv.w - 1) / tv.w
-				}
-				if targetVRow >= currVRow && targetVRow < currVRow+vl {
-					offset := targetVRow - currVRow
-					bx := offset * tv.w + (mx - tv.x)
-					if bx > len(line) { bx = len(line) }
-					if bx < 0 { bx = 0 }
-					
-					if buttons == tcell.Button1 && !tv.drag && !tv.buffer.IsSelected(bx, i) {
-						tv.buffer.ClearSelection()
-					}
+			vidx := my - tv.y + tv.scroll
+			if vidx < 0 { vidx = 0 }
+			if vidx >= len(tv.layout) { vidx = len(tv.layout) - 1 }
+			
+			vl := tv.layout[vidx]
+			bx := mx - tv.x + vl.Start
+			if bx < vl.Start { bx = vl.Start }
+			if bx > vl.End { bx = vl.End }
 
-					if buttons == tcell.Button1 {
-						if !tv.drag {
-							tv.drag = true
-							if !tv.buffer.IsSelected(bx, i) {
-								tv.buffer.cursor.y = i
-								tv.buffer.cursor.x = bx
-								tv.buffer.SetSelection(tv.buffer.cursor, tv.buffer.cursor)
-							}
-						} else {
-							tv.buffer.cursor.y = i
-							tv.buffer.cursor.x = bx
-							tv.buffer.selectionEnd = &Cursor{bx, i}
-						}
-					} else {
-						if tv.buffer.selectionStart == nil {
-							tv.buffer.cursor.y = i
-							tv.buffer.cursor.x = bx
-						}
-					}
-					found = true
-					break
-				}
-				currVRow += vl
+			if buttons == tcell.Button1 && !tv.drag && !tv.buffer.IsSelected(bx, vl.BufferLine) {
+				tv.buffer.ClearSelection()
 			}
-			if !found && targetVRow >= currVRow {
-				lastLine := len(tv.buffer.lines) - 1
-				if lastLine < 0 { lastLine = 0 }
-				bx := len(tv.buffer.lines[lastLine])
-				
-				if buttons == tcell.Button1 && !tv.drag && !tv.buffer.IsSelected(bx, lastLine) {
-					tv.buffer.ClearSelection()
-				}
 
-				if buttons == tcell.Button1 {
-					if !tv.drag {
-						tv.drag = true
-						if !tv.buffer.IsSelected(bx, lastLine) {
-							tv.buffer.cursor.y = lastLine
-							tv.buffer.cursor.x = bx
-							tv.buffer.SetSelection(tv.buffer.cursor, tv.buffer.cursor)
-						}
-					} else {
-						tv.buffer.cursor.y = lastLine
-						tv.buffer.cursor.x = bx
-						tv.buffer.selectionEnd = &Cursor{bx, lastLine}
+			if buttons == tcell.Button1 {
+				if !tv.drag {
+					tv.drag = true
+					if !tv.buffer.IsSelected(bx, vl.BufferLine) {
+						tv.buffer.cursor = Cursor{bx, vl.BufferLine}
+						tv.buffer.SetSelection(tv.buffer.cursor, tv.buffer.cursor)
 					}
 				} else {
-					if tv.buffer.selectionStart == nil {
-						tv.buffer.cursor.y = lastLine
-						tv.buffer.cursor.x = bx
-					}
+					tv.buffer.cursor = Cursor{bx, vl.BufferLine}
+					tv.buffer.selectionEnd = &Cursor{bx, vl.BufferLine}
+				}
+			} else {
+				if tv.buffer.selectionStart == nil {
+					tv.buffer.cursor = Cursor{bx, vl.BufferLine}
 				}
 			}
 		} else {
 			tv.drag = false
 			if tv.buffer.selectionStart != nil && tv.buffer.selectionEnd != nil {
-				if *tv.buffer.selectionStart == *tv.buffer.selectionEnd {
-					tv.buffer.ClearSelection()
-				}
+				if *tv.buffer.selectionStart == *tv.buffer.selectionEnd { tv.buffer.ClearSelection() }
 			}
 		}
 	}
 	return false
 }
 
+func (tv *TextView) SyncScroll() {
+	if !tv.scrollable { return }
+	vrow := -1
+	for i, vl := range tv.layout {
+		if vl.BufferLine == tv.buffer.cursor.y && tv.buffer.cursor.x >= vl.Start && tv.buffer.cursor.x <= vl.End {
+			vrow = i
+			if tv.buffer.cursor.x < vl.End || i+1 == len(tv.layout) || tv.layout[i+1].BufferLine != tv.buffer.cursor.y { break }
+		}
+	}
+	if vrow != -1 {
+		if vrow < tv.scroll { tv.scroll = vrow } else if vrow >= tv.scroll+tv.h { tv.scroll = vrow - tv.h + 1 }
+	}
+}
+
+func (tv *TextView) Search(word string) {
+	word = strings.TrimSpace(word)
+	if word == "" { return }
+	startX, startY := tv.buffer.cursor.x+1, tv.buffer.cursor.y
+	for y := startY; y < len(tv.buffer.lines); y++ {
+		line := string(tv.buffer.lines[y])
+		if startX >= len(line) { startX = 0; continue }
+		if x := strings.Index(line[startX:], word); x != -1 {
+			tv.buffer.cursor = Cursor{startX + x, y}
+			tv.buffer.ClearSelection()
+			return
+		}
+		startX = 0
+	}
+}
+
+// Window container logic
 type Window struct {
 	tag            *TextView
 	body           *TextView
 	parent         *Column
 	editor         *Editor
-	x, y           int
-	w, h           int
+	x, y, w, h     int
 	onExec         func(*Column, *Window, string) bool
 	explicitHeight int
 }
 
-func NewWindow(tagText, bodyText string, parent *Column, editor *Editor, x, y, w, h int, onExec func(*Column, *Window, string) bool) *Window {
-	tagStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x1e2030)).Foreground(tcell.NewHexColor(0x91d7e3))
-	bodyStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x24273a)).Foreground(tcell.NewHexColor(0xcad3f5))
-
-	tag := NewTextView(tagText, x+1, y, w-1, 1, tagStyle, false, false)
-	body := NewTextView(bodyText, x+1, y+1, w-1, h-1, bodyStyle, false, true)
-
+func NewWindow(tag, body string, parent *Column, editor *Editor, x, y, w, h int, onExec func(*Column, *Window, string) bool) *Window {
+	tagStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x1e1e2e)).Foreground(tcell.NewHexColor(0x89b4fa))
+	bodyStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x313244)).Foreground(tcell.NewHexColor(0xcdd6f4))
 	return &Window{
-		tag:    tag,
-		body:   body,
-		parent: parent,
-		editor: editor,
-		x:      x,
-		y:      y,
-		w:      w,
-		h:      h,
-		onExec: onExec,
+		tag:    NewTextView(tag, x+1, y, w-1, 1, tagStyle, false, false),
+		body:   NewTextView(body, x+1, y+1, w-1, h-1, bodyStyle, false, true),
+		parent: parent, editor: editor, x: x, y: y, w: w, h: h, onExec: onExec,
 	}
 }
 
 func (win *Window) GetFilename() string {
-	if len(win.tag.buffer.lines) == 0 {
-		return ""
-	}
-	line := string(win.tag.buffer.lines[0])
-	fields := strings.Fields(line)
-	if len(fields) > 0 {
-		return fields[0]
-	}
+	if len(win.tag.buffer.lines) == 0 { return "" }
+	fields := strings.Fields(string(win.tag.buffer.lines[0]))
+	if len(fields) > 0 { return fields[0] }
 	return ""
 }
 
 func (win *Window) tagHeight() int {
-	totalVRows := 0
-	for _, line := range win.tag.buffer.lines {
-		if win.tag.w > 0 && len(line) > 0 {
-			totalVRows += (len(line) + win.tag.w - 1) / win.tag.w
-		} else {
-			totalVRows++
-		}
-	}
-	if totalVRows < 1 { return 1 }
-	return totalVRows
+	h := len(win.tag.layout)
+	if h < 1 { return 1 }
+	return h
 }
 
 func (win *Window) Draw(s tcell.Screen) {
 	th := win.tagHeight()
-	win.tag.h = th
-	win.body.y = win.y + th
-	win.body.h = win.h - th
-	if win.body.h < 0 {
-		win.body.h = 0
-	}
+	win.tag.h, win.body.y, win.body.h = th, win.y+th, win.h-th
+	if win.body.h < 0 { win.body.h = 0 }
 
-	handleStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0xb7bdf8)).Foreground(tcell.ColorBlack)
-	for i := 0; i < th; i++ {
-		s.SetContent(win.x, win.y+i, ' ', nil, handleStyle)
-	}
+	handleStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x89dceb)).Foreground(tcell.ColorBlack)
+	for i := 0; i < th; i++ { s.SetContent(win.x, win.y+i, ' ', nil, handleStyle) }
 	win.tag.Draw(s)
 	win.body.Draw(s)
 }
 
 func (win *Window) Resize(x, y, w, h int) {
 	win.x, win.y, win.w, win.h = x, y, w, h
-	th := win.tagHeight()
-	win.tag.Resize(x+1, y, w-1, th)
-	win.body.Resize(x+1, y+th, w-1, h-th)
+	win.tag.Resize(x+1, y, w-1, win.tagHeight())
+	win.body.Resize(x+1, win.body.y, w-1, win.h-win.tagHeight())
 }
 
 func (win *Window) HandleEvent(ev tcell.Event) bool {
-	th := win.tagHeight()
-	switch ev := ev.(type) {
-	case *tcell.EventMouse:
-		_, my := ev.Position()
-		if my >= win.y && my < win.y+th {
-			win.tag.HandleEvent(ev)
-			if ev.Buttons() == tcell.Button3 {
-				word := win.tag.buffer.GetSelectedText()
-				if word == "" {
-					word = win.tag.buffer.GetWordAt(win.tag.buffer.cursor.x, win.tag.buffer.cursor.y)
-				}
-				if win.onExec != nil {
-					return win.onExec(win.parent, win, word)
-				}
-			} else if ev.Buttons() == tcell.Button2 {
-				word := win.tag.buffer.GetSelectedText()
-				if word == "" {
-					word = win.tag.buffer.GetWordAt(win.tag.buffer.cursor.x, win.tag.buffer.cursor.y)
-				}
-				// Plumb check
+	if me, ok := ev.(*tcell.EventMouse); ok {
+		_, my := me.Position()
+		th := win.tagHeight()
+		target := win.body
+		if my < win.y+th { target = win.tag }
+		
+		target.HandleEvent(ev)
+		if me.Buttons() == tcell.Button3 || me.Buttons() == tcell.Button2 {
+			word := strings.TrimSpace(target.buffer.GetSelectedText())
+			if word == "" { word = strings.TrimSpace(target.buffer.GetWordAt(target.buffer.cursor.x, target.buffer.cursor.y)) }
+			if word == "" { return false }
+
+			if me.Buttons() == tcell.Button3 {
+				if win.onExec != nil { return win.onExec(win.parent, win, word) }
+			} else {
 				fullPath := ""
-				if win.editor != nil {
-					fullPath = win.editor.resolvePathWithContext(win, word)
-				} else {
-					fullPath = resolvePath(word)
-				}
-				logDebug("Plumb check (tag): word='%s' full='%s'", word, fullPath)
-				if info, err := os.Stat(fullPath); err == nil {
-					logDebug("Plumb match! isDir=%v", info.IsDir())
-					if win.onExec != nil {
-						return win.onExec(win.parent, win, "Look "+word)
-					}
+				if win.editor != nil { fullPath = win.editor.resolvePathWithContext(win, word) } else { fullPath = resolvePath(word) }
+				if _, err := os.Stat(fullPath); err == nil {
+					if win.onExec != nil { return win.onExec(win.parent, win, "Look "+word) }
 				}
 				win.body.Search(word)
-				return false
 			}
-			return false
-		} else if my >= win.y+th && my < win.y+win.h {
-			win.body.HandleEvent(ev)
-			if ev.Buttons() == tcell.Button3 {
-				word := win.body.buffer.GetSelectedText()
-				if word == "" {
-					word = win.body.buffer.GetWordAt(win.body.buffer.cursor.x, win.body.buffer.cursor.y)
-				}
-				if win.onExec != nil {
-					return win.onExec(win.parent, win, word)
-				}
-			} else if ev.Buttons() == tcell.Button2 {
-				word := win.body.buffer.GetSelectedText()
-				if word == "" {
-					word = win.body.buffer.GetWordAt(win.body.buffer.cursor.x, win.body.buffer.cursor.y)
-				}
-				// Plumb check
-				fullPath := ""
-				if win.editor != nil {
-					fullPath = win.editor.resolvePathWithContext(win, word)
-				} else {
-					fullPath = resolvePath(word)
-				}
-				logDebug("Plumb check (body): word='%s' full='%s'", word, fullPath)
-				if info, err := os.Stat(fullPath); err == nil {
-					logDebug("Plumb match! isDir=%v", info.IsDir())
-					if win.onExec != nil {
-						return win.onExec(win.parent, win, "Look "+word)
-					}
-				}
-				win.body.Search(word)
-				return false
-			}
-			return false
 		}
 	}
 	return false
-}
-
-func (tv *TextView) Search(word string) {
-	if word == "" {
-		return
-	}
-	startX := tv.buffer.cursor.x + 1
-	startY := tv.buffer.cursor.y
-	for y := startY; y < len(tv.buffer.lines); y++ {
-		line := string(tv.buffer.lines[y])
-		x := strings.Index(line[startX:], word)
-		if x != -1 {
-			tv.buffer.cursor.y = y
-			tv.buffer.cursor.x = startX + x
-			tv.buffer.ClearSelection()
-			return
-		}
-		startX = 0
-	}
 }
