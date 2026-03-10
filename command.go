@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"unicode"
 )
@@ -28,7 +29,20 @@ func (b *Buffer) GetWordAt(x, y int) string {
 }
 
 func isWordChar(r rune) bool {
-	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '/' || r == '.' || r == '-'
+	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '/' || r == '.' || r == '-' || r == '~'
+}
+
+func resolvePath(path string) string {
+	if strings.HasPrefix(path, "~/") || path == "~" {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			if path == "~" {
+				return home
+			}
+			return filepath.Join(home, path[2:])
+		}
+	}
+	return path
 }
 
 func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
@@ -45,7 +59,7 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 
 	case "Get":
 		if win != nil {
-			filename := win.GetFilename()
+			filename := resolvePath(win.GetFilename())
 			logDebug("Action: Get, file='%s'", filename)
 			if filename != "" {
 				content, err := os.ReadFile(filename)
@@ -59,7 +73,7 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 
 	case "Put":
 		if win != nil {
-			filename := win.GetFilename()
+			filename := resolvePath(win.GetFilename())
 			logDebug("Action: Put, file='%s'", filename)
 			if filename != "" {
 				content := win.body.buffer.GetText()
