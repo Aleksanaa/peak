@@ -35,20 +35,10 @@ func (c *Column) AddWindow(tagText, bodyText string) *Window {
 	if tagText == "" {
 		tagText = " [No Name] Get Put Snarf Zerox Del "
 	}
-	// Simple vertical tiling for now
-	h := (c.h - 1)
-	if len(c.windows) > 0 {
-		h /= (len(c.windows) + 1)
-		// Resize existing windows
-		yOffset := c.y + 1
-		for _, win := range c.windows {
-			win.Resize(c.x, yOffset, c.w, h)
-			yOffset += h
-		}
-	}
-
-	newWin := NewWindow(tagText, bodyText, c, c.editor, c.x, c.y+c.h-h, c.w, h, c.onExec)
+	
+	newWin := NewWindow(tagText, bodyText, c, c.editor, c.x, c.y, c.w, 0, c.onExec)
 	c.windows = append(c.windows, newWin)
+	// After adding, we rely on Resize to set heights
 	return newWin
 }
 
@@ -74,18 +64,41 @@ func (c *Column) Draw(s tcell.Screen) {
 
 func (c *Column) Resize(x, y, w, h int) {
 	c.x, c.y, c.w, c.h = x, y, w, h
-	c.tag.Resize(x+1, y, w-1, 1) // Offset by 1 for separator
-	if len(c.windows) > 0 {
-		winH := (h - 1) / len(c.windows)
-		yOffset := y + 1
-		for i, win := range c.windows {
-			actualH := winH
-			if i == len(c.windows)-1 {
-				actualH = (y + h) - yOffset
-			}
-			win.Resize(x, yOffset, w, actualH)
-			yOffset += actualH
+	c.tag.Resize(x+1, y, w-1, 1)
+	if len(c.windows) == 0 { return }
+
+	yOffset := y + 1
+	availableH := h - 1
+	
+	totalExplicit := 0
+	numAuto := 0
+	for _, win := range c.windows {
+		if win.explicitHeight > 0 {
+			totalExplicit += win.explicitHeight
+		} else {
+			numAuto++
 		}
+	}
+
+	autoH := 0
+	if numAuto > 0 {
+		autoH = (availableH - totalExplicit) / numAuto
+		if autoH < 2 { autoH = 2 }
+	}
+
+	for i, win := range c.windows {
+		winH := win.explicitHeight
+		if winH <= 0 {
+			winH = autoH
+		}
+		
+		if i == len(c.windows)-1 {
+			winH = (y + h) - yOffset
+		}
+		
+		if winH < 1 { winH = 1 }
+		win.Resize(x, yOffset, w, winH)
+		yOffset += winH
 	}
 }
 
@@ -112,7 +125,6 @@ func (c *Column) HandleEvent(ev tcell.Event) bool {
 			}
 		}
 	case *tcell.EventKey:
-		// Forward to active win if any, or just first one
 		if len(c.windows) > 0 {
 			return c.windows[0].HandleEvent(ev)
 		}

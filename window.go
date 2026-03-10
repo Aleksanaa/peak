@@ -327,13 +327,14 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 }
 
 type Window struct {
-	tag    *TextView
-	body   *TextView
-	parent *Column
-	editor *Editor
-	x, y   int
-	w, h   int
-	onExec func(*Column, *Window, string) bool
+	tag            *TextView
+	body           *TextView
+	parent         *Column
+	editor         *Editor
+	x, y           int
+	w, h           int
+	onExec         func(*Column, *Window, string) bool
+	explicitHeight int
 }
 
 func NewWindow(tagText, bodyText string, parent *Column, editor *Editor, x, y, w, h int, onExec func(*Column, *Window, string) bool) *Window {
