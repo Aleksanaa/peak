@@ -64,10 +64,7 @@ func (e *Editor) getArg(win *Window, cmd string) string {
 		}
 	}
 
-	target := win
-	if target == nil {
-		target = e.active
-	}
+	target := e.getTargetWindow(win)
 	if target != nil {
 		if sel := target.body.buffer.GetSelectedText(); sel != "" {
 			return sel
@@ -77,6 +74,13 @@ func (e *Editor) getArg(win *Window, cmd string) string {
 		}
 	}
 	return ""
+}
+
+func (e *Editor) getTargetWindow(win *Window) *Window {
+	if win != nil {
+		return win
+	}
+	return e.active
 }
 
 func (e *Editor) listDir(path string) (string, error) {
@@ -112,10 +116,7 @@ func (e *Editor) getTargetColumn(col *Column, win *Window) *Column {
 }
 
 func (e *Editor) cmdGet(win *Window, cmd string) {
-	target := win
-	if target == nil {
-		target = e.active
-	}
+	target := e.getTargetWindow(win)
 	if target == nil {
 		return
 	}
@@ -130,10 +131,7 @@ func (e *Editor) cmdGet(win *Window, cmd string) {
 }
 
 func (e *Editor) cmdPut(win *Window, cmd string) {
-	target := win
-	if target == nil {
-		target = e.active
-	}
+	target := e.getTargetWindow(win)
 	if target == nil {
 		return
 	}
@@ -148,15 +146,16 @@ func (e *Editor) cmdPut(win *Window, cmd string) {
 }
 
 func (e *Editor) cmdDel(win *Window) {
-	if win == nil {
+	target := e.getTargetWindow(win)
+	if target == nil {
 		return
 	}
-	col := win.parent
+	col := target.parent
 	for i, w := range col.windows {
-		if w == win {
+		if w == target {
 			col.windows = append(col.windows[:i], col.windows[i+1:]...)
 			col.Resize(col.x, col.y, col.w, col.h)
-			if e.active == win {
+			if e.active == target {
 				if len(col.windows) > 0 {
 					e.active = col.windows[0]
 				} else {
@@ -186,8 +185,8 @@ func (e *Editor) cmdDelcol(col *Column, win *Window) {
 func (e *Editor) cmdNewCol() {
 	nc := NewColumn(e.width, 1, 0, e.height-1, e, e.Execute)
 	e.columns = append(e.columns, nc)
-	e.active = nc.AddWindow("", "")
-	e.focusedView = e.active.body
+	win := nc.AddWindow("", "")
+	e.ActivateWindow(win)
 	e.Resize()
 }
 
@@ -202,28 +201,24 @@ func (e *Editor) cmdNew(col *Column, win *Window, cmd string) {
 		path := e.resolvePathWithContext(win, arg)
 		if content, err := e.readFileOrDir(path); err == nil {
 			newWin := targetCol.AddWindow(path+" Get Put Del ", content)
-			e.active = newWin
-			e.focusedView = newWin.body
+			e.ActivateWindow(newWin)
 			targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
 			return
 		}
 	}
 
-	e.active = targetCol.AddWindow("", "")
-	e.focusedView = e.active.body
+	newWin := targetCol.AddWindow("", "")
+	e.ActivateWindow(newWin)
 	targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
 }
 
 func (e *Editor) cmdZerox(col *Column, win *Window) {
-	target := win
-	if target == nil {
-		target = e.active
-	}
+	target := e.getTargetWindow(win)
 	if target != nil {
 		newWin := target.parent.AddWindow(target.tag.buffer.GetText(), target.body.buffer.GetText())
 		newWin.body.scroll = target.body.scroll
 		newWin.body.buffer.cursor = target.body.buffer.cursor
-		e.active, e.focusedView = newWin, newWin.body
+		e.ActivateWindow(newWin)
 		target.parent.Resize(target.parent.x, target.parent.y, target.parent.w, target.parent.h)
 	}
 }
@@ -237,30 +232,21 @@ func (e *Editor) cmdSnarf() {
 }
 
 func (e *Editor) cmdUndo(win *Window) {
-	target := win
-	if target == nil {
-		target = e.active
-	}
+	target := e.getTargetWindow(win)
 	if target != nil {
 		target.body.buffer.Undo()
 	}
 }
 
 func (e *Editor) cmdRedo(win *Window) {
-	target := win
-	if target == nil {
-		target = e.active
-	}
+	target := e.getTargetWindow(win)
 	if target != nil {
 		target.body.buffer.Redo()
 	}
 }
 
 func (e *Editor) cmdLook(win *Window, cmd string) {
-	target := win
-	if target == nil {
-		target = e.active
-	}
+	target := e.getTargetWindow(win)
 	if target == nil {
 		return
 	}
@@ -319,7 +305,7 @@ func (e *Editor) runExternal(col *Column, win *Window, cmd string) {
 				target := e.getTargetColumn(col, win)
 				if target != nil {
 					newWin := target.AddWindow(" "+filepath.Join(dir, "+Errors")+" Get Put Del ", string(out))
-					e.active, e.focusedView = newWin, newWin.body
+					e.ActivateWindow(newWin)
 					target.Resize(target.x, target.y, target.w, target.h)
 				}
 			}))
@@ -334,7 +320,7 @@ func (e *Editor) RemoveColumn(c *Column) {
 			e.Resize()
 			if len(e.columns) > 0 {
 				if len(e.columns[0].windows) > 0 {
-					e.active, e.focusedView = e.columns[0].windows[0], e.columns[0].windows[0].body
+					e.ActivateWindow(e.columns[0].windows[0])
 				} else {
 					e.active, e.focusedView = nil, e.columns[0].tag
 				}

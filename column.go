@@ -141,33 +141,21 @@ func (c *Column) Contains(x, y int) bool {
 }
 
 func (c *Column) HandleEvent(ev tcell.Event) bool {
-	switch ev := ev.(type) {
-	case *tcell.EventMouse:
-		mx, my := ev.Position()
-		if my == c.tag.y {
-			if mx == c.x {
-				return false
-			}
-			word := c.tag.GetClickWord(mx, my)
-			if word != "" {
-				if ev.Buttons() == tcell.Button3 { // Middle-click
-					return c.onExec(c, nil, word)
-				}
-				if ev.Buttons() == tcell.Button2 { // Right-click
-					return c.editor.Plumb(nil, word)
-				}
-			}
-			return c.tag.HandleEvent(ev)
+	if me, ok := ev.(*tcell.EventMouse); ok {
+		mx, my := me.Position()
+		if my != c.tag.y || mx == c.x {
+			return false
 		}
-		for _, win := range c.windows {
-			if win.Contains(mx, my) {
-				return win.HandleEvent(ev)
+		word := c.tag.GetClickWord(mx, my)
+		if word != "" {
+			if me.Buttons() == tcell.Button3 { // Middle-click
+				return c.onExec(c, nil, word)
+			}
+			if me.Buttons() == tcell.Button2 { // Right-click
+				return c.editor.Plumb(nil, word)
 			}
 		}
-	case *tcell.EventKey:
-		if len(c.windows) > 0 {
-			return c.windows[0].HandleEvent(ev)
-		}
+		return c.tag.HandleEvent(ev)
 	}
 	return false
 }

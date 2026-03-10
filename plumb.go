@@ -117,7 +117,7 @@ func (e *Editor) Plumb(win *Window, word string) bool {
 	for _, c := range e.columns {
 		for _, w := range c.windows {
 			if e.resolvePathWithContext(nil, w.GetFilename()) == full {
-				e.active, e.focusedView = w, w.body
+				e.ActivateWindow(w)
 				if lineNum >= 0 {
 					w.body.GotoLine(lineNum)
 				}
@@ -150,7 +150,7 @@ func (e *Editor) Plumb(win *Window, word string) bool {
 				}
 			}
 			newWin := target.AddWindow(" "+tagPath+" Get Put Undo Redo Snarf Zerox Del ", content)
-			e.active, e.focusedView = newWin, newWin.body
+			e.ActivateWindow(newWin)
 			if lineNum >= 0 {
 				newWin.body.GotoLine(lineNum)
 			}

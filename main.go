@@ -57,7 +57,7 @@ func (e *Editor) Init() {
 
 	dir, _ := os.Getwd()
 	win := colRight.AddWindow(" "+dir+" Get Put Undo Redo Snarf Zerox Del ", "")
-	e.active, e.focusedView = win, win.body
+	e.ActivateWindow(win)
 
 	// Initial directory listing
 	e.Execute(colRight, win, "Get")
@@ -196,17 +196,18 @@ func (e *Editor) HandleEvent(ev tcell.Event) bool {
 					if win.Contains(mx, my) {
 						if buttons == tcell.Button1 {
 							if mx == win.x && my >= win.y && my < win.y+win.tagHeight() {
-								e.dragWin, e.active, e.focusedView = win, win, win.tag
+								e.dragWin = win
+								e.ActivateWindow(win)
+								e.focusedView = win.tag
 								return false
 							}
-							e.active = win
+							e.ActivateWindow(win)
 							if my < win.y+win.tagHeight() {
-								e.dragView, e.focusedView = win.tag, win.tag
-							} else {
-								e.dragView, e.focusedView = win.body, win.body
+								e.focusedView = win.tag
 							}
+							e.dragView = e.focusedView
 						}
-						return col.HandleEvent(ev)
+						return win.HandleEvent(ev)
 					}
 				}
 				return col.HandleEvent(ev)
@@ -218,6 +219,14 @@ func (e *Editor) HandleEvent(ev tcell.Event) bool {
 		e.screen.Sync()
 	}
 	return false
+}
+
+func (e *Editor) ActivateWindow(win *Window) {
+	if win == nil {
+		return
+	}
+	e.active = win
+	e.focusedView = win.body
 }
 
 func (e *Editor) moveColumnTo(col *Column, mx int) {
