@@ -302,7 +302,7 @@ func (e *Editor) cmdLook(win *Window, cmd string) {
 				}
 			}
 		}
-		newWin := target.AddWindow(tagPath+" Get Put Snarf Zerox Del ", content)
+		newWin := target.AddWindow(" "+tagPath+" Get Put Snarf Zerox Del ", content)
 		e.active, e.focusedView = newWin, newWin.body
 		target.Resize(target.x, target.y, target.w, target.h)
 	}
@@ -349,7 +349,7 @@ func (e *Editor) runExternal(col *Column, win *Window, cmd string) {
 					}
 				}
 				if target != nil {
-					newWin := target.AddWindow(filepath.Join(dir, "+Errors")+" Get Put Del ", string(out))
+					newWin := target.AddWindow(" "+filepath.Join(dir, "+Errors")+" Get Put Del ", string(out))
 					e.active, e.focusedView = newWin, newWin.body
 					target.Resize(target.x, target.y, target.w, target.h)
 				}

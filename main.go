@@ -49,7 +49,7 @@ func (e *Editor) Init() {
 	e.columns = append(e.columns, colRight)
 
 	dir, _ := os.Getwd()
-	win := colRight.AddWindow(dir+" Get Put Snarf Zerox Del ", "")
+	win := colRight.AddWindow(" "+dir+" Get Put Snarf Zerox Del ", "")
 	e.active, e.focusedView = win, win.body
 
 	// Initial directory listing
