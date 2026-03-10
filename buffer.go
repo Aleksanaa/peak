@@ -9,12 +9,19 @@ type Cursor struct {
 	x, y int
 }
 
+type bufferState struct {
+	lines  [][]rune
+	cursor Cursor
+}
+
 // Buffer handles the raw text data and selection state.
 type Buffer struct {
 	lines          [][]rune
 	cursor         Cursor
 	selectionStart *Cursor
 	selectionEnd   *Cursor
+	history        []bufferState
+	redoStack      []bufferState
 }
 
 // NewBuffer initializes a buffer with the given string content.
@@ -23,29 +30,80 @@ func NewBuffer(content string) *Buffer {
 		lines: [][]rune{{}},
 	}
 	b.SetText(content)
+	// NewBuffer should probably not have an initial undo state for the very first load
+	b.history = nil
+	b.redoStack = nil
 	return b
 }
 
-// ClearSelection removes any active text selection.
+func (b *Buffer) saveState() {
+	// Deep copy lines
+	newLines := make([][]rune, len(b.lines))
+	for i := range b.lines {
+		newLines[i] = make([]rune, len(b.lines[i]))
+		copy(newLines[i], b.lines[i])
+	}
+	b.history = append(b.history, bufferState{lines: newLines, cursor: b.cursor})
+	b.redoStack = nil // This is where we clear the redo branch
+}
+
+func (b *Buffer) Undo() {
+	if len(b.history) == 0 {
+		return
+	}
+
+	// Save current state to redo stack
+	currentLines := make([][]rune, len(b.lines))
+	for i := range b.lines {
+		currentLines[i] = make([]rune, len(b.lines[i]))
+		copy(currentLines[i], b.lines[i])
+	}
+	b.redoStack = append(b.redoStack, bufferState{lines: currentLines, cursor: b.cursor})
+
+	// Restore last state
+	last := b.history[len(b.history)-1]
+	b.history = b.history[:len(b.history)-1]
+	b.lines = last.lines
+	b.cursor = last.cursor
+	b.ClearSelection()
+}
+
+func (b *Buffer) Redo() {
+	if len(b.redoStack) == 0 {
+		return
+	}
+
+	// Save current state back to history
+	currentLines := make([][]rune, len(b.lines))
+	for i := range b.lines {
+		currentLines[i] = make([]rune, len(b.lines[i]))
+		copy(currentLines[i], b.lines[i])
+	}
+	b.history = append(b.history, bufferState{lines: currentLines, cursor: b.cursor})
+
+	// Restore from redo stack
+	next := b.redoStack[len(b.redoStack)-1]
+	b.redoStack = b.redoStack[:len(b.redoStack)-1]
+	b.lines = next.lines
+	b.cursor = next.cursor
+	b.ClearSelection()
+}
+
 func (b *Buffer) ClearSelection() {
 	b.selectionStart = nil
 	b.selectionEnd = nil
 }
 
-// SetSelection explicitly sets the selection range.
 func (b *Buffer) SetSelection(start, end Cursor) {
 	s, e := start, end
-	b.selectionStart = &s
-	b.selectionEnd = &e
+	b.selectionStart, b.selectionEnd = &s, &e
 }
 
-// GetSelectedText returns the string content of the current selection.
 func (b *Buffer) GetSelectedText() string {
 	if b.selectionStart == nil || b.selectionEnd == nil {
 		return ""
 	}
 	start, end := b.orderedSelection()
-
 	var sb strings.Builder
 	for y := start.y; y <= end.y; y++ {
 		line := b.lines[y]
@@ -56,14 +114,12 @@ func (b *Buffer) GetSelectedText() string {
 		if y == end.y {
 			x2 = end.x
 		}
-
 		if x1 < 0 {
 			x1 = 0
 		}
 		if x2 > len(line) {
 			x2 = len(line)
 		}
-
 		if x1 < x2 {
 			sb.WriteString(string(line[x1:x2]))
 		}
@@ -74,13 +130,11 @@ func (b *Buffer) GetSelectedText() string {
 	return sb.String()
 }
 
-// IsSelected returns true if the given character position is within the selection.
 func (b *Buffer) IsSelected(x, y int) bool {
 	if b.selectionStart == nil || b.selectionEnd == nil {
 		return false
 	}
 	start, end := b.orderedSelection()
-
 	if y < start.y || y > end.y {
 		return false
 	}
@@ -104,7 +158,6 @@ func (b *Buffer) orderedSelection() (Cursor, Cursor) {
 	return start, end
 }
 
-// GetText returns the entire buffer content as a string.
 func (b *Buffer) GetText() string {
 	var sb strings.Builder
 	for i, line := range b.lines {
@@ -116,8 +169,12 @@ func (b *Buffer) GetText() string {
 	return sb.String()
 }
 
-// SetText replaces the buffer content and resets the cursor.
 func (b *Buffer) SetText(content string) {
+	// Only save state if there is actual content or history already exists
+	if len(b.history) > 0 || len(b.lines) > 1 || len(b.lines[0]) > 0 {
+		b.saveState()
+	}
+
 	b.lines = [][]rune{{}}
 	for _, r := range content {
 		if r == '\n' {
@@ -132,6 +189,7 @@ func (b *Buffer) SetText(content string) {
 }
 
 func (b *Buffer) DeleteLine() {
+	b.saveState()
 	if len(b.lines) <= 1 {
 		b.lines = [][]rune{{}}
 		b.cursor = Cursor{0, 0}
@@ -145,8 +203,19 @@ func (b *Buffer) DeleteLine() {
 }
 
 func (b *Buffer) DeleteWordBefore() {
+	if b.cursor.x == 0 && b.cursor.y == 0 {
+		return
+	}
+	b.saveState()
 	if b.cursor.x == 0 {
-		b.Backspace()
+		// Just perform backspace but don't double-save state
+		// (saveState already called, so we can manually join lines)
+		prevLine := b.lines[b.cursor.y-1]
+		currLine := b.lines[b.cursor.y]
+		b.cursor.x = len(prevLine)
+		b.lines[b.cursor.y-1] = append(prevLine, currLine...)
+		b.lines = append(b.lines[:b.cursor.y], b.lines[b.cursor.y+1:]...)
+		b.cursor.y--
 		return
 	}
 	line := b.lines[b.cursor.y]
@@ -158,36 +227,68 @@ func (b *Buffer) DeleteWordBefore() {
 	for start > 0 && line[start-1] != ' ' {
 		start--
 	}
-	newLine := append(line[:start], line[b.cursor.x:]...)
-	b.lines[b.cursor.y] = newLine
+	b.lines[b.cursor.y] = append(line[:start], line[b.cursor.x:]...)
 	b.cursor.x = start
 }
 
-// Insert adds a rune at the current cursor position.
 func (b *Buffer) Insert(r rune) {
+	b.saveState()
 	line := b.lines[b.cursor.y]
-	newLine := append(line[:b.cursor.x], append([]rune{r}, line[b.cursor.x:]...)...)
-	b.lines[b.cursor.y] = newLine
+	b.lines[b.cursor.y] = append(line[:b.cursor.x], append([]rune{r}, line[b.cursor.x:]...)...)
 	b.cursor.x++
 }
 
-// NewLine splits the current line at the cursor.
 func (b *Buffer) NewLine() {
+	b.saveState()
 	line := b.lines[b.cursor.y]
 	remaining := line[b.cursor.x:]
 	b.lines[b.cursor.y] = line[:b.cursor.x]
-
 	newLines := make([][]rune, 0, len(b.lines)+1)
 	newLines = append(newLines, b.lines[:b.cursor.y+1]...)
 	newLines = append(newLines, remaining)
 	newLines = append(newLines, b.lines[b.cursor.y+1:]...)
 	b.lines = newLines
-
 	b.cursor.y++
 	b.cursor.x = 0
 }
 
-// DeleteSelection removes the selected text.
+func (b *Buffer) DeleteSelection() {
+	b.saveState()
+	start, end := b.orderedSelection()
+	if start.y == end.y {
+		b.lines[start.y] = append(b.lines[start.y][:start.x], b.lines[start.y][end.x:]...)
+	} else {
+		newFirstLine := append(b.lines[start.y][:start.x], b.lines[end.y][end.x:]...)
+		newLines := append(b.lines[:start.y], newFirstLine)
+		newLines = append(newLines, b.lines[end.y+1:]...)
+		b.lines = newLines
+	}
+	b.cursor = start
+	b.ClearSelection()
+}
+
+func (b *Buffer) Backspace() {
+	if b.selectionStart != nil && b.selectionEnd != nil {
+		b.DeleteSelection()
+		return
+	}
+	if b.cursor.x == 0 && b.cursor.y == 0 {
+		return
+	}
+	b.saveState()
+	if b.cursor.x > 0 {
+		b.lines[b.cursor.y] = append(b.lines[b.cursor.y][:b.cursor.x-1], b.lines[b.cursor.y][b.cursor.x:]...)
+		b.cursor.x--
+	} else {
+		prevLine := b.lines[b.cursor.y-1]
+		newX := len(prevLine)
+		b.lines[b.cursor.y-1] = append(prevLine, b.lines[b.cursor.y]...)
+		b.lines = append(b.lines[:b.cursor.y], b.lines[b.cursor.y+1:]...)
+		b.cursor.y--
+		b.cursor.x = newX
+	}
+}
+
 func (b *Buffer) Delete() {
 	if b.selectionStart != nil && b.selectionEnd != nil {
 		b.DeleteSelection()
@@ -195,81 +296,27 @@ func (b *Buffer) Delete() {
 	}
 	line := b.lines[b.cursor.y]
 	if b.cursor.x < len(line) {
+		b.saveState()
 		b.lines[b.cursor.y] = append(line[:b.cursor.x], line[b.cursor.x+1:]...)
 	} else if b.cursor.y < len(b.lines)-1 {
-		// Join with next line
-		nextLine := b.lines[b.cursor.y+1]
-		b.lines[b.cursor.y] = append(line, nextLine...)
+		b.saveState()
+		b.lines[b.cursor.y] = append(line, b.lines[b.cursor.y+1]...)
 		b.lines = append(b.lines[:b.cursor.y+1], b.lines[b.cursor.y+2:]...)
 	}
 }
 
-func (b *Buffer) DeleteSelection() {
-	if b.selectionStart == nil || b.selectionEnd == nil {
-		return
-	}
-	start, end := b.orderedSelection()
-
-	if start.y == end.y {
-		line := b.lines[start.y]
-		newLine := append(line[:start.x], line[end.x:]...)
-		b.lines[start.y] = newLine
-	} else {
-		firstLine := b.lines[start.y][:start.x]
-		lastLine := b.lines[end.y][end.x:]
-		newFirstLine := append(firstLine, lastLine...)
-
-		newLines := append(b.lines[:start.y], newFirstLine)
-		newLines = append(newLines, b.lines[end.y+1:]...)
-		b.lines = newLines
-	}
-
-	b.cursor = start
-	b.ClearSelection()
-}
-
-// Backspace deletes the selection or the character before the cursor.
-func (b *Buffer) Backspace() {
-	if b.selectionStart != nil && b.selectionEnd != nil {
-		b.DeleteSelection()
-		return
-	}
-	if b.cursor.x > 0 {
-		line := b.lines[b.cursor.y]
-		b.lines[b.cursor.y] = append(line[:b.cursor.x-1], line[b.cursor.x:]...)
-		b.cursor.x--
-	} else if b.cursor.y > 0 {
-		prevLine := b.lines[b.cursor.y-1]
-		currentLine := b.lines[b.cursor.y]
-		newX := len(prevLine)
-		b.lines[b.cursor.y-1] = append(prevLine, currentLine...)
-		b.lines = append(b.lines[:b.cursor.y], b.lines[b.cursor.y+1:]...)
-		b.cursor.y--
-		b.cursor.x = newX
-	}
-}
-
-// Cursor movement methods
-func (b *Buffer) MoveHome() {
-	b.cursor.x = 0
-}
-
-func (b *Buffer) MoveEnd() {
-	b.cursor.x = len(b.lines[b.cursor.y])
-}
+func (b *Buffer) MoveHome() { b.cursor.x = 0 }
+func (b *Buffer) MoveEnd()  { b.cursor.x = len(b.lines[b.cursor.y]) }
 
 func (b *Buffer) MoveWordLeft() {
 	if b.cursor.x == 0 {
 		b.MoveLeft()
 		return
 	}
-	line := b.lines[b.cursor.y]
-	x := b.cursor.x
-	// Skip current spaces
+	line, x := b.lines[b.cursor.y], b.cursor.x
 	for x > 0 && line[x-1] == ' ' {
 		x--
 	}
-	// Find start of word
 	for x > 0 && line[x-1] != ' ' {
 		x--
 	}
@@ -277,17 +324,14 @@ func (b *Buffer) MoveWordLeft() {
 }
 
 func (b *Buffer) MoveWordRight() {
-	line := b.lines[b.cursor.y]
-	if b.cursor.x >= len(line) {
+	line, x := b.lines[b.cursor.y], b.cursor.x
+	if x >= len(line) {
 		b.MoveRight()
 		return
 	}
-	x := b.cursor.x
-	// Skip current word chars
 	for x < len(line) && line[x] != ' ' {
 		x++
 	}
-	// Skip following spaces
 	for x < len(line) && line[x] == ' ' {
 		x++
 	}

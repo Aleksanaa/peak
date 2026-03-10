@@ -170,6 +170,14 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 	switch ev := ev.(type) {
 	case *tcell.EventKey:
 		switch ev.Key() {
+		case tcell.KeyCtrlZ:
+			if ev.Modifiers()&tcell.ModShift != 0 {
+				tv.buffer.Redo()
+			} else {
+				tv.buffer.Undo()
+			}
+		case tcell.KeyCtrlY:
+			tv.buffer.Redo()
 		case tcell.KeyCtrlC:
 			if txt := tv.buffer.GetSelectedText(); txt != "" {
 				clipboard.WriteAll(txt)

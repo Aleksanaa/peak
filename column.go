@@ -34,7 +34,7 @@ func NewColumn(x, y, w, h int, editor *Editor, onExec func(*Column, *Window, str
 
 func (c *Column) AddWindow(tagText, bodyText string) *Window {
 	if tagText == "" {
-		tagText = " ./untitled.txt Get Put Snarf Zerox Del "
+		tagText = " ./untitled.txt Get Put Undo Redo Snarf Zerox Del "
 	}
 
 	newWin := NewWindow(tagText, bodyText, c, c.editor, c.x, c.y, c.w, 0, c.onExec)

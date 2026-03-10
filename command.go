@@ -113,6 +113,10 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 		e.cmdZerox(col, win)
 	case "Snarf":
 		e.cmdSnarf()
+	case "Undo":
+		e.cmdUndo(win)
+	case "Redo":
+		e.cmdRedo(win)
 	case "Look":
 		e.cmdLook(win, cmd)
 	default:
@@ -236,6 +240,26 @@ func (e *Editor) cmdSnarf() {
 		if text := e.focusedView.buffer.GetSelectedText(); text != "" {
 			clipboard.WriteAll(text)
 		}
+	}
+}
+
+func (e *Editor) cmdUndo(win *Window) {
+	target := win
+	if target == nil {
+		target = e.active
+	}
+	if target != nil {
+		target.body.buffer.Undo()
+	}
+}
+
+func (e *Editor) cmdRedo(win *Window) {
+	target := win
+	if target == nil {
+		target = e.active
+	}
+	if target != nil {
+		target.body.buffer.Redo()
 	}
 }
 
