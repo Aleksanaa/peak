@@ -15,6 +15,7 @@ type Editor struct {
 	height      int
 	dragView    *TextView
 	dragWin     *Window
+	dragCol     *Column
 	focusedView *TextView
 }
 
@@ -32,6 +33,7 @@ func (e *Editor) Init() {
 	e.screen.EnableMouse()
 	e.width, e.height = e.screen.Size()
 
+	// Catppuccin Macchiato Crust: #181926, Sky: #91d7e3
 	tagStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x181926)).Foreground(tcell.NewHexColor(0x91d7e3))
 	e.tag = NewTextView(" NewCol Exit ", 0, 0, e.width, 1, tagStyle, true, false)
 	e.focusedView = e.tag
@@ -42,7 +44,7 @@ func (e *Editor) Init() {
 
 	// Add initial window
 	win := col.AddWindow(" /home/user/peak/main.go Get Put Snarf Zerox Del ",
-		"Welcome to Peak\nAcme-style resizing implemented.\nDrag a window handle to adjust heights or swap windows.")
+		"Welcome to Peak\nWindow and Column resizing implemented.\nDrag column handles (top-left of column) horizontally.\nDrag window handles (left of tag) vertically.")
 	e.active = win
 	e.focusedView = win.body
 	e.Resize()
@@ -90,6 +92,16 @@ func (e *Editor) HandleEvent(ev tcell.Event) bool {
 		mx, my := ev.Position()
 		buttons := ev.Buttons()
 
+		if e.dragCol != nil {
+			if buttons&tcell.Button1 != 0 {
+				e.moveColumnTo(e.dragCol, mx)
+				return false
+			} else {
+				e.dragCol = nil
+				return false
+			}
+		}
+
 		if e.dragWin != nil {
 			if buttons&tcell.Button1 != 0 {
 				e.moveWindowTo(e.dragWin, mx, my)
@@ -134,7 +146,10 @@ func (e *Editor) HandleEvent(ev tcell.Event) bool {
 		if clickedCol != nil {
 			if my == clickedCol.tag.y {
 				if mx == clickedCol.x && buttons == tcell.Button1 {
-					// Column dragging could be implemented here
+					e.dragCol = clickedCol
+					e.active = nil
+					e.focusedView = clickedCol.tag
+					return false
 				} else if mx > clickedCol.x {
 					if buttons == tcell.Button1 {
 						e.dragView = clickedCol.tag
@@ -147,7 +162,8 @@ func (e *Editor) HandleEvent(ev tcell.Event) bool {
 			for _, win := range clickedCol.windows {
 				if mx >= win.x && mx < win.x+win.w && my >= win.y && my < win.y+win.h {
 					if buttons == tcell.Button1 {
-						if mx == win.x && my >= win.y && my < win.y+win.tagHeight() {
+						th := win.tagHeight()
+						if mx == win.x && my >= win.y && my < win.y+th {
 							e.dragWin = win
 							e.active = win
 							e.focusedView = win.tag
@@ -155,7 +171,7 @@ func (e *Editor) HandleEvent(ev tcell.Event) bool {
 						}
 						
 						e.active = win
-						if my >= win.y && my < win.y+win.tagHeight() {
+						if my >= win.y && my < win.y+th {
 							e.dragView = win.tag
 							e.focusedView = win.tag
 						} else {
@@ -174,6 +190,34 @@ func (e *Editor) HandleEvent(ev tcell.Event) bool {
 		e.screen.Sync()
 	}
 	return false
+}
+
+func (e *Editor) moveColumnTo(col *Column, mx int) {
+	idx := -1
+	for i, c := range e.columns {
+		if c == col { idx = i; break }
+	}
+	if idx == -1 { return }
+
+	if idx == 0 {
+		if len(e.columns) > 1 && mx > e.columns[1].x + e.columns[1].w/2 {
+			e.columns[0], e.columns[1] = e.columns[1], e.columns[0]
+			e.columns[0].explicitWidth = 0
+			e.columns[1].explicitWidth = 0
+		}
+	} else {
+		prevCol := e.columns[idx-1]
+		if mx < prevCol.x + 2 {
+			e.columns[idx], e.columns[idx-1] = e.columns[idx-1], e.columns[idx]
+			e.columns[idx].explicitWidth = 0
+			e.columns[idx-1].explicitWidth = 0
+		} else {
+			newPrevW := mx - prevCol.x
+			if newPrevW < 5 { newPrevW = 5 }
+			prevCol.explicitWidth = newPrevW
+		}
+	}
+	e.Resize()
 }
 
 func (e *Editor) moveWindowTo(win *Window, mx, my int) {
@@ -237,13 +281,29 @@ func (e *Editor) moveWindowTo(win *Window, mx, my int) {
 func (e *Editor) Resize() {
 	if len(e.columns) == 0 { return }
 	e.tag.Resize(0, 0, e.width, 1)
-	colW := e.width / len(e.columns)
+	
 	xOffset := 0
+	availableW := e.width
+	
+	totalExplicit := 0
+	numAuto := 0
+	for _, col := range e.columns {
+		if col.explicitWidth > 0 { totalExplicit += col.explicitWidth } else { numAuto++ }
+	}
+
+	autoW := 0
+	if numAuto > 0 {
+		autoW = (availableW - totalExplicit) / numAuto
+		if autoW < 5 { autoW = 5 }
+	}
+
 	for i, col := range e.columns {
-		actualW := colW
-		if i == len(e.columns)-1 { actualW = e.width - xOffset }
-		col.Resize(xOffset, 1, actualW, e.height-1)
-		xOffset += actualW
+		colW := col.explicitWidth
+		if colW <= 0 { colW = autoW }
+		if i == len(e.columns)-1 { colW = e.width - xOffset }
+		if colW < 1 { colW = 1 }
+		col.Resize(xOffset, 1, colW, e.height-1)
+		xOffset += colW
 	}
 }
 

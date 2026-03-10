@@ -5,12 +5,13 @@ import (
 )
 
 type Column struct {
-	tag     *TextView
-	windows []*Window
-	editor  *Editor
-	x, y    int
-	w, h    int
-	onExec  func(*Column, *Window, string) bool
+	tag           *TextView
+	windows       []*Window
+	editor        *Editor
+	x, y          int
+	w, h          int
+	onExec        func(*Column, *Window, string) bool
+	explicitWidth int
 }
 
 func NewColumn(x, y, w, h int, editor *Editor, onExec func(*Column, *Window, string) bool) *Column {
