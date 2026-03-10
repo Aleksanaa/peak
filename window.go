@@ -26,6 +26,7 @@ type TextView struct {
 	layout      []VisualLine
 	lastWidth   int
 	lastVersion int
+	theme       *Theme
 }
 
 func NewTextView(text string, x, y, w, h int, style tcell.Style, singleLine, scrollable bool) *TextView {
@@ -163,7 +164,11 @@ func (tv *TextView) Draw(s tcell.Screen) {
 	if !tv.scrollable {
 		tv.scroll = 0
 	}
-	selStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x6e738d)).Foreground(tcell.ColorWhite)
+	selStyle := tcell.StyleDefault.Background(tcell.ColorSilver).Foreground(tcell.ColorBlack)
+	if tv.theme != nil {
+		selStyle = tcell.StyleDefault.Background(tv.theme.SelectionBG).Foreground(tv.theme.SelectionFG)
+	}
+
 	vrow := 0
 	for lidx := tv.scroll; lidx < len(tv.layout) && vrow < tv.h; lidx++ {
 		vl := tv.layout[lidx]
@@ -482,13 +487,16 @@ type Window struct {
 }
 
 func NewWindow(tag, body string, parent *Column, editor *Editor, x, y, w, h int, onExec func(*Column, *Window, string) bool) *Window {
-	tagStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x1e1e2e)).Foreground(tcell.NewHexColor(0x89dceb))
-	bodyStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x313244)).Foreground(tcell.NewHexColor(0xcdd6f4))
-	return &Window{
+	tagStyle := tcell.StyleDefault.Background(editor.theme.TagBG).Foreground(editor.theme.TagFG)
+	bodyStyle := tcell.StyleDefault.Background(editor.theme.BodyBG).Foreground(editor.theme.BodyFG)
+	win := &Window{
 		tag:    NewTextView(tag, x+1, y, w-1, 1, tagStyle, false, false),
 		body:   NewTextView(body, x+1, y+1, w-1, h-1, bodyStyle, false, true),
 		parent: parent, editor: editor, x: x, y: y, w: w, h: h, onExec: onExec,
 	}
+	win.tag.theme = &editor.theme
+	win.body.theme = &editor.theme
+	return win
 }
 
 func (win *Window) GetFilename() string {
@@ -526,7 +534,7 @@ func (win *Window) layout() {
 
 func (win *Window) Draw(s tcell.Screen) {
 	win.layout()
-	handleStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x89dceb)).Foreground(tcell.ColorBlack)
+	handleStyle := tcell.StyleDefault.Background(win.editor.theme.Handle).Foreground(tcell.ColorBlack)
 	for i := 0; i < win.tag.h; i++ {
 		s.SetContent(win.x, win.y+i, ' ', nil, handleStyle)
 	}
@@ -537,8 +545,8 @@ func (win *Window) Draw(s tcell.Screen) {
 		total := len(win.body.layout)
 		visible := win.body.h
 
-		thumbStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x45475a))
-		gutterStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x181926))
+		thumbStyle := tcell.StyleDefault.Background(win.editor.theme.ScrollThumb)
+		gutterStyle := tcell.StyleDefault.Background(win.editor.theme.ScrollGutter)
 
 		thumbStart, thumbHeight := -1, -1
 		if total > visible {

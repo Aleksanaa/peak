@@ -16,9 +16,9 @@ type Column struct {
 }
 
 func NewColumn(x, y, w, h int, editor *Editor, onExec func(*Column, *Window, string) bool) *Column {
-	// Column menu: #181825, menu Text: #89dceb
-	tagStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x181825)).Foreground(tcell.NewHexColor(0x89dceb))
+	tagStyle := tcell.StyleDefault.Background(editor.theme.ColTagBG).Foreground(editor.theme.ColTagFG)
 	tag := NewTextView(" New Zerox Delcol ", x+1, y, w-1, 1, tagStyle, true, false)
+	tag.theme = &editor.theme
 
 	c := &Column{
 		tag:    tag,
@@ -44,9 +44,8 @@ func (c *Column) AddWindow(tagText, bodyText string) *Window {
 }
 
 func (c *Column) Draw(s tcell.Screen) {
-	// Catppuccin Macchiato Crust: #181926, Blue: #8aadf4
-	sepStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x181926)).Foreground(tcell.NewHexColor(0x8aadf4))
-	cornerStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x8aadf4)).Foreground(tcell.ColorBlack)
+	sepStyle := tcell.StyleDefault.Background(c.editor.theme.ScrollGutter).Foreground(c.editor.theme.Corner)
+	cornerStyle := tcell.StyleDefault.Background(c.editor.theme.Corner).Foreground(tcell.ColorBlack)
 
 	// Draw vertical separator
 	for y := c.y; y < c.y+c.h; y++ {

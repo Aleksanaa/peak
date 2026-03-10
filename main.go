@@ -8,6 +8,33 @@ import (
 	"github.com/gdamore/tcell/v2"
 )
 
+type Theme struct {
+	TagBG, TagFG                      tcell.Color
+	BodyBG, BodyFG                    tcell.Color
+	ColTagBG, ColTagFG                tcell.Color
+	GlobalTagBG, GlobalTagFG          tcell.Color
+	Handle, ScrollThumb, ScrollGutter tcell.Color
+	SelectionBG, SelectionFG          tcell.Color
+	Corner                            tcell.Color
+}
+
+var defaultTheme = Theme{
+	GlobalTagBG:  tcell.NewHexColor(0x11111b),
+	GlobalTagFG:  tcell.NewHexColor(0x89dceb),
+	ColTagBG:     tcell.NewHexColor(0x181825),
+	ColTagFG:     tcell.NewHexColor(0x89dceb),
+	TagBG:        tcell.NewHexColor(0x1e1e2e),
+	TagFG:        tcell.NewHexColor(0x89dceb),
+	BodyBG:       tcell.NewHexColor(0x313244),
+	BodyFG:       tcell.NewHexColor(0xcdd6f4),
+	Handle:       tcell.NewHexColor(0x89dceb),
+	ScrollThumb:  tcell.NewHexColor(0x45475a),
+	ScrollGutter: tcell.NewHexColor(0x181825),
+	SelectionBG:  tcell.NewHexColor(0x585b70),
+	SelectionFG:  tcell.NewHexColor(0xbac2de),
+	Corner:       tcell.NewHexColor(0xb4befe),
+}
+
 // Editor is the main application state.
 type Editor struct {
 	screen      tcell.Screen
@@ -27,10 +54,12 @@ type Editor struct {
 	scrollStartTime time.Time
 	lastWidth       int
 	lastClickY      int
+	theme           Theme
 }
 
 // Init sets up the initial editor state with two columns.
 func (e *Editor) Init() {
+	e.theme = defaultTheme
 	s, err := tcell.NewScreen()
 	if err != nil {
 		log.Fatalf("%+v", err)
@@ -43,9 +72,9 @@ func (e *Editor) Init() {
 	e.screen.EnableMouse()
 	e.width, e.height = e.screen.Size()
 
-	// Top menu: #11111b, menu Text: #89dceb
-	tagStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x11111b)).Foreground(tcell.NewHexColor(0x89dceb))
+	tagStyle := tcell.StyleDefault.Background(e.theme.GlobalTagBG).Foreground(e.theme.GlobalTagFG)
 	e.tag = NewTextView(" NewCol Exit ", 0, 0, e.width, 1, tagStyle, true, false)
+	e.tag.theme = &e.theme
 	e.focusedView = e.tag
 
 	// Start with two columns
