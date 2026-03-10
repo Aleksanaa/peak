@@ -34,9 +34,9 @@ func NewColumn(x, y, w, h int, editor *Editor, onExec func(*Column, *Window, str
 
 func (c *Column) AddWindow(tagText, bodyText string) *Window {
 	if tagText == "" {
-		tagText = " untitled.txt Get Put Snarf Zerox Del "
+		tagText = " ./untitled.txt Get Put Snarf Zerox Del "
 	}
-	
+
 	newWin := NewWindow(tagText, bodyText, c, c.editor, c.x, c.y, c.w, 0, c.onExec)
 	c.windows = append(c.windows, newWin)
 	// After adding, we rely on Resize to set heights
@@ -66,11 +66,13 @@ func (c *Column) Draw(s tcell.Screen) {
 func (c *Column) Resize(x, y, w, h int) {
 	c.x, c.y, c.w, c.h = x, y, w, h
 	c.tag.Resize(x+1, y, w-1, 1)
-	if len(c.windows) == 0 { return }
+	if len(c.windows) == 0 {
+		return
+	}
 
 	yOffset := y + 1
 	availableH := h - 1
-	
+
 	totalExplicit := 0
 	numAuto := 0
 	for _, win := range c.windows {
@@ -84,7 +86,9 @@ func (c *Column) Resize(x, y, w, h int) {
 	autoH := 0
 	if numAuto > 0 {
 		autoH = (availableH - totalExplicit) / numAuto
-		if autoH < 2 { autoH = 2 }
+		if autoH < 2 {
+			autoH = 2
+		}
 	}
 
 	for i, win := range c.windows {
@@ -92,12 +96,14 @@ func (c *Column) Resize(x, y, w, h int) {
 		if winH <= 0 {
 			winH = autoH
 		}
-		
+
 		if i == len(c.windows)-1 {
 			winH = (y + h) - yOffset
 		}
-		
-		if winH < 1 { winH = 1 }
+
+		if winH < 1 {
+			winH = 1
+		}
 		win.Resize(x, yOffset, w, winH)
 		yOffset += winH
 	}

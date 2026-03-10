@@ -13,13 +13,21 @@ import (
 
 // GetWordAt returns the word under the given x, y buffer coordinates.
 func (b *Buffer) GetWordAt(x, y int) string {
-	if y < 0 || y >= len(b.lines) { return "" }
+	if y < 0 || y >= len(b.lines) {
+		return ""
+	}
 	line := b.lines[y]
-	if x < 0 || x >= len(line) { return "" }
+	if x < 0 || x >= len(line) {
+		return ""
+	}
 
 	start, end := x, x
-	for start > 0 && isWordChar(line[start-1]) { start-- }
-	for end < len(line) && isWordChar(line[end]) { end++ }
+	for start > 0 && isWordChar(line[start-1]) {
+		start--
+	}
+	for end < len(line) && isWordChar(line[end]) {
+		end++
+	}
 	return string(line[start:end])
 }
 
@@ -29,10 +37,14 @@ func isWordChar(r rune) bool {
 
 // resolvePath returns an absolute path, expanding ~ and handling relative segments.
 func resolvePath(path string) string {
-	if path == "" { return "" }
+	if path == "" {
+		return ""
+	}
 	if strings.HasPrefix(path, "~") {
 		home, _ := os.UserHomeDir()
-		if path == "~" { return home }
+		if path == "~" {
+			return home
+		}
 		return filepath.Join(home, path[1:])
 	}
 	abs, _ := filepath.Abs(path)
@@ -41,14 +53,18 @@ func resolvePath(path string) string {
 
 // resolvePathWithContext resolves a path relative to a window's directory or CWD.
 func (e *Editor) resolvePathWithContext(win *Window, path string) string {
-	if path == "" { return "" }
+	if path == "" {
+		return ""
+	}
 	if filepath.IsAbs(path) || strings.HasPrefix(path, "~") {
 		return resolvePath(path)
 	}
 
 	dir, _ := os.Getwd()
 	target := win
-	if target == nil { target = e.active }
+	if target == nil {
+		target = e.active
+	}
 	if target != nil {
 		fn := target.GetFilename()
 		if strings.HasSuffix(fn, "+Errors") {
@@ -69,31 +85,46 @@ func (e *Editor) resolvePathWithContext(win *Window, path string) string {
 // Execute parses and runs internal or external commands.
 func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 	cmd = strings.TrimSpace(cmd)
-	if cmd == "" { return false }
-	
+	if cmd == "" {
+		return false
+	}
+
 	fields := strings.Fields(cmd)
 	root := fields[0]
-	
+
 	logDebug("Execute: root='%s' full='%s'", root, cmd)
 
 	switch root {
-	case "Exit": return true
-	case "Get": e.cmdGet(win)
-	case "Put": e.cmdPut(win)
-	case "Del": e.cmdDel(win)
-	case "Delcol": e.cmdDelcol(col, win)
-	case "NewCol": e.cmdNewCol()
-	case "New": e.cmdNew(col, win)
-	case "Zerox": e.cmdZerox(col, win)
-	case "Snarf": e.cmdSnarf()
-	case "Look": e.cmdLook(win, cmd)
-	default: e.runExternal(col, win, cmd)
+	case "Exit":
+		return true
+	case "Get":
+		e.cmdGet(win)
+	case "Put":
+		e.cmdPut(win)
+	case "Del":
+		e.cmdDel(win)
+	case "Delcol":
+		e.cmdDelcol(col, win)
+	case "NewCol":
+		e.cmdNewCol()
+	case "New":
+		e.cmdNew(col, win)
+	case "Zerox":
+		e.cmdZerox(col, win)
+	case "Snarf":
+		e.cmdSnarf()
+	case "Look":
+		e.cmdLook(win, cmd)
+	default:
+		e.runExternal(col, win, cmd)
 	}
 	return false
 }
 
 func (e *Editor) cmdGet(win *Window) {
-	if win == nil { return }
+	if win == nil {
+		return
+	}
 	path := e.resolvePathWithContext(win, win.GetFilename())
 	if info, err := os.Stat(path); err == nil {
 		if info.IsDir() {
@@ -101,7 +132,9 @@ func (e *Editor) cmdGet(win *Window) {
 				var sb strings.Builder
 				for _, entry := range entries {
 					name := entry.Name()
-					if entry.IsDir() { name += "/" }
+					if entry.IsDir() {
+						name += "/"
+					}
 					sb.WriteString(name + "\n")
 				}
 				win.body.buffer.SetText(sb.String())
@@ -113,7 +146,9 @@ func (e *Editor) cmdGet(win *Window) {
 }
 
 func (e *Editor) cmdPut(win *Window) {
-	if win == nil { return }
+	if win == nil {
+		return
+	}
 	path := e.resolvePathWithContext(win, win.GetFilename())
 	if path != "" && !strings.HasSuffix(path, "/") {
 		os.WriteFile(path, []byte(win.body.buffer.GetText()), 0644)
@@ -121,15 +156,25 @@ func (e *Editor) cmdPut(win *Window) {
 }
 
 func (e *Editor) cmdDel(win *Window) {
-	if win == nil { return }
+	if win == nil {
+		return
+	}
 	col := win.parent
 	for i, w := range col.windows {
 		if w == win {
 			col.windows = append(col.windows[:i], col.windows[i+1:]...)
 			col.Resize(col.x, col.y, col.w, col.h)
 			if e.active == win {
-				if len(col.windows) > 0 { e.active = col.windows[0] } else { e.active = nil }
-				if e.active != nil { e.focusedView = e.active.body } else { e.focusedView = col.tag }
+				if len(col.windows) > 0 {
+					e.active = col.windows[0]
+				} else {
+					e.active = nil
+				}
+				if e.active != nil {
+					e.focusedView = e.active.body
+				} else {
+					e.focusedView = col.tag
+				}
 			}
 			return
 		}
@@ -138,8 +183,12 @@ func (e *Editor) cmdDel(win *Window) {
 
 func (e *Editor) cmdDelcol(col *Column, win *Window) {
 	target := col
-	if target == nil && win != nil { target = win.parent }
-	if target != nil { e.RemoveColumn(target) }
+	if target == nil && win != nil {
+		target = win.parent
+	}
+	if target != nil {
+		e.RemoveColumn(target)
+	}
 }
 
 func (e *Editor) cmdNewCol() {
@@ -152,9 +201,15 @@ func (e *Editor) cmdNewCol() {
 
 func (e *Editor) cmdNew(col *Column, win *Window) {
 	target := col
-	if target == nil && win != nil { target = win.parent }
-	if target == nil && e.active != nil { target = e.active.parent }
-	if target == nil && len(e.columns) > 0 { target = e.columns[0] }
+	if target == nil && win != nil {
+		target = win.parent
+	}
+	if target == nil && e.active != nil {
+		target = e.active.parent
+	}
+	if target == nil && len(e.columns) > 0 {
+		target = e.columns[0]
+	}
 	if target != nil {
 		e.active = target.AddWindow("", "")
 		e.focusedView = e.active.body
@@ -164,7 +219,9 @@ func (e *Editor) cmdNew(col *Column, win *Window) {
 
 func (e *Editor) cmdZerox(col *Column, win *Window) {
 	target := win
-	if target == nil { target = e.active }
+	if target == nil {
+		target = e.active
+	}
 	if target != nil {
 		newWin := target.parent.AddWindow(target.tag.buffer.GetText(), target.body.buffer.GetText())
 		newWin.body.scroll = target.body.scroll
@@ -176,14 +233,16 @@ func (e *Editor) cmdZerox(col *Column, win *Window) {
 
 func (e *Editor) cmdSnarf() {
 	if e.focusedView != nil {
-		if text := e.focusedView.buffer.GetSelectedText(); text != "" { clipboard.WriteAll(text) }
+		if text := e.focusedView.buffer.GetSelectedText(); text != "" {
+			clipboard.WriteAll(text)
+		}
 	}
 }
 
 func (e *Editor) cmdLook(win *Window, cmd string) {
 	path := strings.TrimSpace(strings.TrimPrefix(cmd, "Look"))
 	full := e.resolvePathWithContext(win, path)
-	
+
 	for _, c := range e.columns {
 		for _, w := range c.windows {
 			if e.resolvePathWithContext(nil, w.GetFilename()) == full {
@@ -194,7 +253,9 @@ func (e *Editor) cmdLook(win *Window, cmd string) {
 	}
 
 	info, err := os.Stat(full)
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 
 	var content string
 	if info.IsDir() {
@@ -202,13 +263,17 @@ func (e *Editor) cmdLook(win *Window, cmd string) {
 			var sb strings.Builder
 			for _, entry := range entries {
 				name := entry.Name()
-				if entry.IsDir() { name += "/" }
+				if entry.IsDir() {
+					name += "/"
+				}
 				sb.WriteString(name + "\n")
 			}
 			content = sb.String()
 		}
 	} else {
-		if data, err := os.ReadFile(full); err == nil { content = string(data) }
+		if data, err := os.ReadFile(full); err == nil {
+			content = string(data)
+		}
 	}
 
 	var target *Column
@@ -217,7 +282,7 @@ func (e *Editor) cmdLook(win *Window, cmd string) {
 	} else if len(e.columns) > 0 {
 		target = e.columns[0]
 	}
-	
+
 	if target != nil {
 		tagPath := full // Default abspath
 		if win != nil {
@@ -231,7 +296,9 @@ func (e *Editor) cmdLook(win *Window, cmd string) {
 				if rel, err := filepath.Rel(cwd, full); err == nil {
 					if !strings.HasPrefix(rel, ".") && !strings.HasPrefix(rel, "/") {
 						tagPath = "./" + rel
-					} else { tagPath = rel }
+					} else {
+						tagPath = rel
+					}
 				}
 			}
 		}
@@ -246,7 +313,11 @@ func (e *Editor) runExternal(col *Column, win *Window, cmd string) {
 	if win != nil {
 		if f := e.resolvePathWithContext(win, win.GetFilename()); f != "" {
 			if info, err := os.Stat(f); err == nil {
-				if info.IsDir() { dir = f } else { dir = filepath.Dir(f) }
+				if info.IsDir() {
+					dir = f
+				} else {
+					dir = filepath.Dir(f)
+				}
 			}
 		}
 	}
@@ -256,8 +327,12 @@ func (e *Editor) runExternal(col *Column, win *Window, cmd string) {
 		if err == nil && len(out) > 0 {
 			e.screen.PostEvent(tcell.NewEventInterrupt(func() {
 				var reuse *Window
-				if win != nil && strings.HasSuffix(win.GetFilename(), "+Errors") { reuse = win }
-				if reuse == nil && e.active != nil && strings.HasSuffix(e.active.GetFilename(), "+Errors") { reuse = e.active }
+				if win != nil && strings.HasSuffix(win.GetFilename(), "+Errors") {
+					reuse = win
+				}
+				if reuse == nil && e.active != nil && strings.HasSuffix(e.active.GetFilename(), "+Errors") {
+					reuse = e.active
+				}
 
 				if reuse != nil {
 					reuse.body.buffer.SetText(string(out))
@@ -267,7 +342,11 @@ func (e *Editor) runExternal(col *Column, win *Window, cmd string) {
 
 				target := col
 				if target == nil {
-					if e.active != nil { target = e.active.parent } else if len(e.columns) > 0 { target = e.columns[0] }
+					if e.active != nil {
+						target = e.active.parent
+					} else if len(e.columns) > 0 {
+						target = e.columns[0]
+					}
 				}
 				if target != nil {
 					newWin := target.AddWindow(filepath.Join(dir, "+Errors")+" Get Put Del ", string(out))

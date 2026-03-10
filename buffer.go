@@ -56,10 +56,14 @@ func (b *Buffer) GetSelectedText() string {
 		if y == end.y {
 			x2 = end.x
 		}
-		
-		if x1 < 0 { x1 = 0 }
-		if x2 > len(line) { x2 = len(line) }
-		
+
+		if x1 < 0 {
+			x1 = 0
+		}
+		if x2 > len(line) {
+			x2 = len(line)
+		}
+
 		if x1 < x2 {
 			sb.WriteString(string(line[x1:x2]))
 		}
@@ -76,7 +80,7 @@ func (b *Buffer) IsSelected(x, y int) bool {
 		return false
 	}
 	start, end := b.orderedSelection()
-	
+
 	if y < start.y || y > end.y {
 		return false
 	}
@@ -147,9 +151,13 @@ func (b *Buffer) DeleteWordBefore() {
 	}
 	line := b.lines[b.cursor.y]
 	end := b.cursor.x
-	for end > 0 && line[end-1] == ' ' { end-- }
+	for end > 0 && line[end-1] == ' ' {
+		end--
+	}
 	start := end
-	for start > 0 && line[start-1] != ' ' { start-- }
+	for start > 0 && line[start-1] != ' ' {
+		start--
+	}
 	newLine := append(line[:start], line[b.cursor.x:]...)
 	b.lines[b.cursor.y] = newLine
 	b.cursor.x = start
