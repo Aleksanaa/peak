@@ -50,6 +50,14 @@ func (tv *TextView) Draw(s tcell.Screen) {
 	}
 }
 
+func (tv *TextView) ShowCursor(s tcell.Screen) {
+	if tv.buffer.cursor.y >= tv.scroll && tv.buffer.cursor.y < tv.scroll+tv.h {
+		cx := tv.x + tv.buffer.cursor.x
+		cy := tv.y + tv.buffer.cursor.y - tv.scroll
+		s.ShowCursor(cx, cy)
+	}
+}
+
 func (tv *TextView) Resize(x, y, w, h int) {
 	tv.x, tv.y, tv.w, tv.h = x, y, w, h
 }
@@ -129,7 +137,6 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 			}
 			tv.buffer.Insert(ev.Rune())
 		}
-		// Adjust scroll
 		if tv.buffer.cursor.y < tv.scroll {
 			tv.scroll = tv.buffer.cursor.y
 		} else if tv.buffer.cursor.y >= tv.scroll+tv.h {
@@ -157,7 +164,6 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 		bx := mx - tv.x
 		by := my - tv.y + tv.scroll
 
-		// Clamp coordinates to TextView boundaries for internal logic
 		if bx < 0 { bx = 0 }
 		if bx >= tv.w { bx = tv.w - 1 }
 		if by < 0 { by = 0 }
@@ -166,9 +172,9 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 		if buttons == tcell.Button1 {
 			if !tv.drag {
 				tv.drag = true
+				tv.buffer.ClearSelection()
 				tv.buffer.cursor.y = by
 				tv.buffer.cursor.x = bx
-				// Further clamp to actual line length
 				if tv.buffer.cursor.x > len(tv.buffer.lines[tv.buffer.cursor.y]) {
 					tv.buffer.cursor.x = len(tv.buffer.lines[tv.buffer.cursor.y])
 				}
@@ -194,13 +200,12 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 }
 
 type Window struct {
-	tag      *TextView
-	body     *TextView
-	parent   *Column
-	x, y     int
-	w, h     int
-	onExec   func(*Column, *Window, string) bool
-	focusTag bool
+	tag    *TextView
+	body   *TextView
+	parent *Column
+	x, y   int
+	w, h   int
+	onExec func(*Column, *Window, string) bool
 }
 
 func NewWindow(tagText, bodyText string, parent *Column, x, y, w, h int, onExec func(*Column, *Window, string) bool) *Window {
@@ -243,23 +248,9 @@ func (win *Window) GetFilename() string {
 
 func (win *Window) Draw(s tcell.Screen) {
 	handleStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0xb7bdf8)).Foreground(tcell.ColorBlack)
-	if win.focusTag {
-		handleStyle = tcell.StyleDefault.Background(tcell.NewHexColor(0x91d7e3)).Foreground(tcell.ColorBlack)
-	}
 	s.SetContent(win.x, win.tag.y, ' ', nil, handleStyle)
-
 	win.tag.Draw(s)
 	win.body.Draw(s)
-
-	if win.focusTag {
-		s.ShowCursor(win.tag.x+win.tag.buffer.cursor.x, win.tag.y)
-	} else {
-		if win.body.buffer.cursor.y >= win.body.scroll && win.body.buffer.cursor.y < win.body.scroll+win.body.h {
-			cx := win.body.x + win.body.buffer.cursor.x
-			cy := win.body.y + win.body.buffer.cursor.y - win.body.scroll
-			s.ShowCursor(cx, cy)
-		}
-	}
 }
 
 func (win *Window) Resize(x, y, w, h int) {
@@ -273,9 +264,6 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 	case *tcell.EventMouse:
 		mx, my := ev.Position()
 		if my == win.tag.y {
-			if ev.Buttons() == tcell.Button1 {
-				win.focusTag = true
-			}
 			if ev.Buttons() == tcell.Button3 {
 				word := win.tag.buffer.GetSelectedText()
 				if word == "" {
@@ -294,9 +282,6 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 			}
 			return win.tag.HandleEvent(ev)
 		} else if my >= win.body.y && my < win.body.y+win.body.h {
-			if ev.Buttons() == tcell.Button1 {
-				win.focusTag = false
-			}
 			if ev.Buttons() == tcell.Button3 {
 				word := win.body.buffer.GetSelectedText()
 				if word == "" {
@@ -315,11 +300,6 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 			}
 			return win.body.HandleEvent(ev)
 		}
-	case *tcell.EventKey:
-		if win.focusTag {
-			return win.tag.HandleEvent(ev)
-		}
-		return win.body.HandleEvent(ev)
 	}
 	return false
 }

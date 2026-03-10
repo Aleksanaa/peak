@@ -7,13 +7,14 @@ import (
 )
 
 type Editor struct {
-	screen   tcell.Screen
-	tag      *TextView
-	columns  []*Column
-	active   *Window
-	width    int
-	height   int
-	dragView *TextView
+	screen      tcell.Screen
+	tag         *TextView
+	columns     []*Column
+	active      *Window
+	width       int
+	height      int
+	dragView    *TextView
+	focusedView *TextView
 }
 
 func (e *Editor) Init() {
@@ -30,9 +31,9 @@ func (e *Editor) Init() {
 	e.screen.EnableMouse()
 	e.width, e.height = e.screen.Size()
 
-	// Catppuccin Macchiato Crust: #181926, Sky: #91d7e3
 	tagStyle := tcell.StyleDefault.Background(tcell.NewHexColor(0x181926)).Foreground(tcell.NewHexColor(0x91d7e3))
 	e.tag = NewTextView(" NewCol Exit ", 0, 0, e.width, 1, tagStyle, true)
+	e.focusedView = e.tag
 
 	// Initial Column
 	col := NewColumn(0, 1, e.width, e.height-1, e.Execute)
@@ -40,8 +41,9 @@ func (e *Editor) Init() {
 
 	// Add initial window
 	win := col.AddWindow(" /home/user/peak/main.go Get Put Del ",
-		"Welcome to Peak\nSelection now captures the mouse.\nDrag selection outside the window - it stays focused on the original text area.")
+		"Welcome to Peak\nCursor and focus are now unified.\nClicking anywhere sets the cursor and focus for keyboard input.")
 	e.active = win
+	e.focusedView = win.body
 	e.Resize()
 }
 
@@ -61,20 +63,25 @@ func (e *Editor) Draw() {
 	for _, col := range e.columns {
 		col.Draw(e.screen)
 	}
+	if e.focusedView != nil {
+		e.focusedView.ShowCursor(e.screen)
+	}
 	e.screen.Show()
 }
 
 func (e *Editor) HandleEvent(ev tcell.Event) bool {
 	switch ev := ev.(type) {
 	case *tcell.EventKey:
-		if e.active != nil {
-			return e.active.HandleEvent(ev)
+		if ev.Key() == tcell.KeyCtrlC && e.focusedView == nil {
+			return true // Fallback for exiting if no focus
+		}
+		if e.focusedView != nil {
+			return e.focusedView.HandleEvent(ev)
 		}
 	case *tcell.EventMouse:
 		mx, my := ev.Position()
 		buttons := ev.Buttons()
 
-		// If we are currently dragging, redirect all mouse events to that view
 		if e.dragView != nil {
 			e.dragView.HandleEvent(ev)
 			if buttons == tcell.ButtonNone {
@@ -83,7 +90,6 @@ func (e *Editor) HandleEvent(ev tcell.Event) bool {
 			return false
 		}
 
-		// Handle Global Tag
 		if my == 0 {
 			if buttons == tcell.Button3 {
 				word := e.tag.buffer.GetSelectedText()
@@ -94,11 +100,11 @@ func (e *Editor) HandleEvent(ev tcell.Event) bool {
 			}
 			if buttons == tcell.Button1 {
 				e.dragView = e.tag
+				e.focusedView = e.tag
 			}
 			return e.tag.HandleEvent(ev)
 		}
 
-		// Find component under mouse
 		var clickedCol *Column
 		for _, col := range e.columns {
 			if mx >= col.x && mx < col.x+col.w && my >= col.y && my < col.y+col.h {
@@ -108,24 +114,24 @@ func (e *Editor) HandleEvent(ev tcell.Event) bool {
 		}
 
 		if clickedCol != nil {
-			// Check if column tag was clicked
 			if my == clickedCol.tag.y && mx > clickedCol.x {
 				if buttons == tcell.Button1 {
 					e.dragView = clickedCol.tag
+					e.focusedView = clickedCol.tag
 				}
 				return clickedCol.HandleEvent(ev)
 			}
 
-			// Focus and Window logic
 			for _, win := range clickedCol.windows {
 				if mx >= win.x && mx < win.x+win.w && my >= win.y && my < win.y+win.h {
 					if buttons == tcell.Button1 {
 						e.active = win
-						// Determine if tag or body was clicked to set dragView
 						if my == win.tag.y {
 							e.dragView = win.tag
+							e.focusedView = win.tag
 						} else {
 							e.dragView = win.body
+							e.focusedView = win.body
 						}
 					}
 					return clickedCol.HandleEvent(ev)
