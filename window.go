@@ -359,19 +359,12 @@ func (win *Window) GetFilename() string {
 	if len(win.tag.buffer.lines) == 0 {
 		return ""
 	}
-	line := win.tag.buffer.lines[0]
-	start := 0
-	for start < len(line) && (line[start] == ' ' || line[start] == '\t') {
-		start++
+	line := string(win.tag.buffer.lines[0])
+	fields := strings.Fields(line)
+	if len(fields) > 0 {
+		return fields[0]
 	}
-	if start >= len(line) {
-		return ""
-	}
-	end := start
-	for end < len(line) && isWordChar(line[end]) {
-		end++
-	}
-	return string(line[start:end])
+	return ""
 }
 
 func (win *Window) tagHeight() int {

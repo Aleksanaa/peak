@@ -51,8 +51,18 @@ func (e *Editor) Run() {
 	for {
 		e.Draw()
 		ev := e.screen.PollEvent()
-		if e.HandleEvent(ev) {
-			break
+		if ev == nil {
+			continue
+		}
+		switch ev := ev.(type) {
+		case *tcell.EventInterrupt:
+			if f, ok := ev.Data().(func()); ok {
+				f()
+			}
+		default:
+			if e.HandleEvent(ev) {
+				return
+			}
 		}
 	}
 }
