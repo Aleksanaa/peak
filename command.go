@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +29,8 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 		e.cmdGet(win, cmd)
 	case "Put":
 		e.cmdPut(win, cmd)
+	case "Edit":
+		e.cmdEdit(col, win, cmd)
 	case "Del":
 		e.cmdDel(win)
 	case "Delcol":
@@ -251,22 +255,166 @@ func (e *Editor) cmdLook(win *Window, cmd string) {
 		return
 	}
 
-	word := e.getArg(target, cmd)
-	if word == "" {
+	arg := e.getArg(target, cmd)
+	if arg == "" {
 		return
 	}
 
-	foundLine := target.body.Search(word)
-	if foundLine != -1 {
-		// Align found line near the clicking point
-		vrow := e.lastClickY - target.body.y
-		if vrow < 0 {
-			vrow = 0
+	res, err := SregxCompile(arg, io.Discard)
+	if err != nil {
+		// Literal search fallback
+		foundLine := target.body.Search(arg)
+		if foundLine != -1 {
+			e.alignWindow(target, foundLine)
 		}
-		if vrow >= target.body.h {
-			vrow = target.body.h / 2
+		return
+	}
+
+	start, end, found := e.resolveAddress(target.body.buffer, res)
+	if found {
+		target.body.buffer.cursor = end
+		target.body.buffer.ClearSelection()
+		target.body.buffer.SetSelection(start, end)
+		e.alignWindow(target, end.y)
+	} else if res.AddrType == 0 {
+		// Try literal search if it wasn't an explicit address
+		foundLine := target.body.Search(arg)
+		if foundLine != -1 {
+			e.alignWindow(target, foundLine)
 		}
-		target.body.ShowLineAt(foundLine, vrow)
+	}
+}
+
+func (e *Editor) resolveAddress(buf *Buffer, res *SregxResult) (Cursor, Cursor, bool) {
+	text := []byte(buf.GetText())
+	dotStart := buf.CursorToByteOffset(buf.cursor)
+	dotEnd := dotStart
+	if buf.selectionStart != nil && buf.selectionEnd != nil {
+		s, end := buf.orderedSelection()
+		dotStart = buf.CursorToByteOffset(s)
+		dotEnd = buf.CursorToByteOffset(end)
+	}
+
+	if res.AddrType == 0 {
+		return Cursor{}, Cursor{}, false
+	}
+
+	s, end, found := res.ResolveAddr(text, [2]int{dotStart, dotEnd})
+	if !found {
+		return Cursor{}, Cursor{}, false
+	}
+
+	return buf.ByteOffsetToCursor(s), buf.ByteOffsetToCursor(end), true
+}
+
+func (e *Editor) alignWindow(target *Window, line int) {
+	vrow := e.lastClickY - target.body.y
+	if vrow < 0 {
+		vrow = 0
+	} else if vrow >= target.body.h {
+		vrow = target.body.h / 2
+	}
+	target.body.ShowLineAt(line, vrow)
+}
+
+func (e *Editor) cmdEdit(col *Column, win *Window, cmd string) {
+	target := e.getTargetWindow(win)
+	if target == nil {
+		return
+	}
+
+	arg := e.getArg(target, cmd)
+	if arg == "" {
+		return
+	}
+
+	var pOut bytes.Buffer
+	res, err := SregxCompile(arg, &pOut)
+	if err != nil {
+		e.showError(col, target, "", err.Error())
+		return
+	}
+
+	buf := target.body.buffer
+	start, end, found := e.resolveAddress(buf, res)
+	if !found {
+		if res.AddrType == 0 {
+			// Default to selection or dot if no address given
+			if buf.selectionStart != nil && buf.selectionEnd != nil {
+				start, end = buf.orderedSelection()
+			} else {
+				start, end = buf.cursor, buf.cursor
+			}
+		} else {
+			return // Address specified but not found
+		}
+	}
+
+	buf.SetSelection(start, end)
+	buf.cursor = end
+
+	if _, ok := res.Cmd.(None); ok {
+		// Jump/select only if no command
+		if res.AddrType == addrId {
+			e.alignWindow(target, end.y)
+		}
+		return
+	}
+
+	oldText := buf.GetTextInRange(start, end)
+	newText := string(res.Cmd.Evaluate([]byte(oldText)))
+
+	if newText != oldText {
+		if res.AddrType == commaId && start.y == 0 && start.x == 0 &&
+			end.y == len(buf.lines)-1 && end.x == len(buf.lines[end.y]) {
+			buf.SetText(newText)
+			buf.SetSelection(Cursor{0, 0}, Cursor{len(buf.lines[len(buf.lines)-1]), len(buf.lines) - 1})
+		} else {
+			newEnd := buf.SetTextInRange(start, end, newText)
+			buf.SetSelection(start, newEnd)
+		}
+	}
+
+	if pOut.Len() > 0 {
+		e.showError(col, target, "", pOut.String())
+	}
+}
+
+func (e *Editor) showError(col *Column, win *Window, dir, msg string) {
+	if dir == "" {
+		dir, _ = os.Getwd()
+		if win != nil {
+			if f := e.resolvePathWithContext(win, win.GetFilename()); f != "" {
+				if info, err := os.Stat(f); err == nil {
+					if info.IsDir() {
+						dir = f
+					} else {
+						dir = filepath.Dir(f)
+					}
+				}
+			}
+		}
+	}
+
+	var reuse *Window
+	if win != nil && strings.HasSuffix(win.GetFilename(), "+Errors") {
+		reuse = win
+	}
+	if reuse == nil && e.active != nil && strings.HasSuffix(e.active.GetFilename(), "+Errors") {
+		reuse = e.active
+	}
+
+	if reuse != nil {
+		reuse.body.buffer.SetText(msg)
+		e.focusedView = reuse.body
+		return
+	}
+
+	targetCol := e.getTargetColumn(col, win)
+	if targetCol != nil {
+		newWin := targetCol.AddWindow(" "+filepath.Join(dir, "+Errors")+" Get Put Del ", msg)
+		e.ActivateWindow(newWin)
+		targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
 	}
 }
 
@@ -285,29 +433,10 @@ func (e *Editor) runExternal(col *Column, win *Window, cmd string) {
 	}
 
 	go func() {
-		out, err := exec.Command("sh", "-c", cmd).CombinedOutput()
-		if err == nil && len(out) > 0 {
+		out, _ := exec.Command("sh", "-c", cmd).CombinedOutput()
+		if len(out) > 0 {
 			e.screen.PostEvent(tcell.NewEventInterrupt(func() {
-				var reuse *Window
-				if win != nil && strings.HasSuffix(win.GetFilename(), "+Errors") {
-					reuse = win
-				}
-				if reuse == nil && e.active != nil && strings.HasSuffix(e.active.GetFilename(), "+Errors") {
-					reuse = e.active
-				}
-
-				if reuse != nil {
-					reuse.body.buffer.SetText(string(out))
-					e.focusedView = reuse.body
-					return
-				}
-
-				target := e.getTargetColumn(col, win)
-				if target != nil {
-					newWin := target.AddWindow(" "+filepath.Join(dir, "+Errors")+" Get Put Del ", string(out))
-					e.ActivateWindow(newWin)
-					target.Resize(target.x, target.y, target.w, target.h)
-				}
+				e.showError(col, win, dir, string(out))
 			}))
 		}
 	}()

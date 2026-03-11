@@ -409,23 +409,18 @@ func (tv *TextView) Search(word string) int {
 	if word == "" {
 		return -1
 	}
-	startRX, startRY := tv.buffer.cursor.x+1, tv.buffer.cursor.y
 
-	// Ensure we don't go out of bounds if buffer was changed
+	// For now, literal search. We will integrate with sregx addressing soon.
+	startRX, startRY := tv.buffer.cursor.x+1, tv.buffer.cursor.y
 	if startRY >= len(tv.buffer.lines) {
-		startRY = 0
-		startRX = 0
+		startRY, startRX = 0, 0
 	}
 
-	// 1. Search from cursor to end
 	for y := startRY; y < len(tv.buffer.lines); y++ {
 		line := string(tv.buffer.lines[y])
 		sx := 0
 		if y == startRY {
 			sx = startRX
-		}
-		if sx >= len(line) {
-			continue
 		}
 		if x := strings.Index(line[sx:], word); x != -1 {
 			tv.buffer.cursor = Cursor{sx + x + len(word), y}
@@ -435,15 +430,11 @@ func (tv *TextView) Search(word string) int {
 		}
 	}
 
-	// 2. Wrap: search from top to cursor
 	for y := 0; y <= startRY; y++ {
 		line := string(tv.buffer.lines[y])
 		limit := len(line)
 		if y == startRY {
 			limit = startRX
-		}
-		if limit > len(line) {
-			limit = len(line)
 		}
 		if x := strings.Index(line[:limit], word); x != -1 {
 			tv.buffer.cursor = Cursor{x + len(word), y}

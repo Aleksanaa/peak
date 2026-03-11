@@ -2,6 +2,7 @@ package main
 
 import (
 	"strings"
+	"unicode/utf8"
 )
 
 // Cursor represents a 2D position in the text buffer.
@@ -31,7 +32,6 @@ func NewBuffer(content string) *Buffer {
 		lines: [][]rune{{}},
 	}
 	b.SetText(content)
-	// NewBuffer should probably not have an initial undo state for the very first load
 	b.history = nil
 	b.redoStack = nil
 	b.version = 0
@@ -39,17 +39,15 @@ func NewBuffer(content string) *Buffer {
 }
 
 func (b *Buffer) copyLines() [][]rune {
-	newLines := make([][]rune, len(b.lines))
-	for i := range b.lines {
-		newLines[i] = make([]rune, len(b.lines[i]))
-		copy(newLines[i], b.lines[i])
-	}
-	return newLines
+	// Shallow copy: only copy the slice of line pointers.
+	// We must ensure that we never modify the contents of a line in-place
+	// if it might be shared with a state in history.
+	return append([][]rune{}, b.lines...)
 }
 
 func (b *Buffer) saveState() {
 	b.history = append(b.history, bufferState{lines: b.copyLines(), cursor: b.cursor})
-	b.redoStack = nil // This is where we clear the redo branch
+	b.redoStack = nil
 	b.version++
 }
 
@@ -57,11 +55,7 @@ func (b *Buffer) Undo() {
 	if len(b.history) == 0 {
 		return
 	}
-
-	// Save current state to redo stack
 	b.redoStack = append(b.redoStack, bufferState{lines: b.copyLines(), cursor: b.cursor})
-
-	// Restore last state
 	last := b.history[len(b.history)-1]
 	b.history = b.history[:len(b.history)-1]
 	b.lines = last.lines
@@ -74,11 +68,7 @@ func (b *Buffer) Redo() {
 	if len(b.redoStack) == 0 {
 		return
 	}
-
-	// Save current state back to history
 	b.history = append(b.history, bufferState{lines: b.copyLines(), cursor: b.cursor})
-
-	// Restore from redo stack
 	next := b.redoStack[len(b.redoStack)-1]
 	b.redoStack = b.redoStack[:len(b.redoStack)-1]
 	b.lines = next.lines
@@ -102,6 +92,10 @@ func (b *Buffer) GetSelectedText() string {
 		return ""
 	}
 	start, end := b.orderedSelection()
+	return b.GetTextInRange(start, end)
+}
+
+func (b *Buffer) GetTextInRange(start, end Cursor) string {
 	var sb strings.Builder
 	for y := start.y; y <= end.y; y++ {
 		line := b.lines[y]
@@ -111,12 +105,6 @@ func (b *Buffer) GetSelectedText() string {
 		}
 		if y == end.y {
 			x2 = end.x
-		}
-		if x1 < 0 {
-			x1 = 0
-		}
-		if x2 > len(line) {
-			x2 = len(line)
 		}
 		if x1 < x2 {
 			sb.WriteString(string(line[x1:x2]))
@@ -168,11 +156,9 @@ func (b *Buffer) GetText() string {
 }
 
 func (b *Buffer) SetText(content string) {
-	// Only save state if there is actual content or history already exists
 	if len(b.history) > 0 || len(b.lines) > 1 || len(b.lines[0]) > 0 {
 		b.saveState()
 	}
-
 	b.lines = [][]rune{{}}
 	for _, r := range content {
 		if r == '\n' {
@@ -187,6 +173,42 @@ func (b *Buffer) SetText(content string) {
 	b.version++
 }
 
+func (b *Buffer) replace(start, end Cursor, content string) Cursor {
+	// Split content into lines.
+	var mid [][]rune
+	for _, l := range strings.Split(content, "\n") {
+		mid = append(mid, []rune(l))
+	}
+
+	// Preserve prefix and suffix.
+	prefix := append([]rune{}, b.lines[start.y][:start.x]...)
+	suffix := append([]rune{}, b.lines[end.y][end.x:]...)
+
+	mid[0] = append(prefix, mid[0]...)
+	mid[len(mid)-1] = append(mid[len(mid)-1], suffix...)
+
+	// Construct final lines.
+	final := make([][]rune, 0, start.y+len(mid)+(len(b.lines)-end.y-1))
+	final = append(final, b.lines[:start.y]...)
+	final = append(final, mid...)
+	final = append(final, b.lines[end.y+1:]...)
+
+	b.lines = final
+	newEnd := Cursor{
+		y: start.y + len(mid) - 1,
+		x: len(mid[len(mid)-1]) - len(suffix),
+	}
+	b.cursor = newEnd
+	b.ClearSelection()
+	b.version++
+	return newEnd
+}
+
+func (b *Buffer) SetTextInRange(start, end Cursor, content string) Cursor {
+	b.saveState()
+	return b.replace(start, end, content)
+}
+
 func (b *Buffer) DeleteLine() {
 	b.saveState()
 	if len(b.lines) <= 1 {
@@ -194,7 +216,7 @@ func (b *Buffer) DeleteLine() {
 		b.cursor = Cursor{0, 0}
 		return
 	}
-	b.lines = append(b.lines[:b.cursor.y], b.lines[b.cursor.y+1:]...)
+	b.lines = append(append([][]rune{}, b.lines[:b.cursor.y]...), b.lines[b.cursor.y+1:]...)
 	if b.cursor.y >= len(b.lines) {
 		b.cursor.y = len(b.lines) - 1
 	}
@@ -206,64 +228,36 @@ func (b *Buffer) DeleteWordBefore() {
 		return
 	}
 	b.saveState()
-	if b.cursor.x == 0 {
-		// Just perform backspace but don't double-save state
-		// (saveState already called, so we can manually join lines)
-		prevLine := b.lines[b.cursor.y-1]
-		currLine := b.lines[b.cursor.y]
-		b.cursor.x = len(prevLine)
-		b.lines[b.cursor.y-1] = append(prevLine, currLine...)
-		b.lines = append(b.lines[:b.cursor.y], b.lines[b.cursor.y+1:]...)
-		b.cursor.y--
-		return
+	start := b.cursor
+	if start.x == 0 {
+		start.y--
+		start.x = len(b.lines[start.y])
+	} else {
+		line := b.lines[start.y]
+		for start.x > 0 && line[start.x-1] == ' ' {
+			start.x--
+		}
+		for start.x > 0 && line[start.x-1] != ' ' {
+			start.x--
+		}
 	}
-	line := b.lines[b.cursor.y]
-	end := b.cursor.x
-	for end > 0 && line[end-1] == ' ' {
-		end--
-	}
-	start := end
-	for start > 0 && line[start-1] != ' ' {
-		start--
-	}
-	b.lines[b.cursor.y] = append(line[:start], line[b.cursor.x:]...)
-	b.cursor.x = start
+	b.replace(start, b.cursor, "")
 }
 
 func (b *Buffer) Insert(r rune) {
 	b.saveState()
-	line := b.lines[b.cursor.y]
-	b.lines[b.cursor.y] = append(line[:b.cursor.x], append([]rune{r}, line[b.cursor.x:]...)...)
-	b.cursor.x++
+	b.replace(b.cursor, b.cursor, string(r))
 }
 
 func (b *Buffer) NewLine() {
 	b.saveState()
-	line := b.lines[b.cursor.y]
-	remaining := line[b.cursor.x:]
-	b.lines[b.cursor.y] = line[:b.cursor.x]
-	newLines := make([][]rune, 0, len(b.lines)+1)
-	newLines = append(newLines, b.lines[:b.cursor.y+1]...)
-	newLines = append(newLines, remaining)
-	newLines = append(newLines, b.lines[b.cursor.y+1:]...)
-	b.lines = newLines
-	b.cursor.y++
-	b.cursor.x = 0
+	b.replace(b.cursor, b.cursor, "\n")
 }
 
 func (b *Buffer) DeleteSelection() {
 	b.saveState()
 	start, end := b.orderedSelection()
-	if start.y == end.y {
-		b.lines[start.y] = append(b.lines[start.y][:start.x], b.lines[start.y][end.x:]...)
-	} else {
-		newFirstLine := append(b.lines[start.y][:start.x], b.lines[end.y][end.x:]...)
-		newLines := append(b.lines[:start.y], newFirstLine)
-		newLines = append(newLines, b.lines[end.y+1:]...)
-		b.lines = newLines
-	}
-	b.cursor = start
-	b.ClearSelection()
+	b.replace(start, end, "")
 }
 
 func (b *Buffer) Backspace() {
@@ -275,17 +269,14 @@ func (b *Buffer) Backspace() {
 		return
 	}
 	b.saveState()
-	if b.cursor.x > 0 {
-		b.lines[b.cursor.y] = append(b.lines[b.cursor.y][:b.cursor.x-1], b.lines[b.cursor.y][b.cursor.x:]...)
-		b.cursor.x--
+	start := b.cursor
+	if start.x > 0 {
+		start.x--
 	} else {
-		prevLine := b.lines[b.cursor.y-1]
-		newX := len(prevLine)
-		b.lines[b.cursor.y-1] = append(prevLine, b.lines[b.cursor.y]...)
-		b.lines = append(b.lines[:b.cursor.y], b.lines[b.cursor.y+1:]...)
-		b.cursor.y--
-		b.cursor.x = newX
+		start.y--
+		start.x = len(b.lines[start.y])
 	}
+	b.replace(start, b.cursor, "")
 }
 
 func (b *Buffer) Delete() {
@@ -293,15 +284,49 @@ func (b *Buffer) Delete() {
 		b.DeleteSelection()
 		return
 	}
-	line := b.lines[b.cursor.y]
-	if b.cursor.x < len(line) {
-		b.saveState()
-		b.lines[b.cursor.y] = append(line[:b.cursor.x], line[b.cursor.x+1:]...)
-	} else if b.cursor.y < len(b.lines)-1 {
-		b.saveState()
-		b.lines[b.cursor.y] = append(line, b.lines[b.cursor.y+1]...)
-		b.lines = append(b.lines[:b.cursor.y+1], b.lines[b.cursor.y+2:]...)
+	if b.cursor.y == len(b.lines)-1 && b.cursor.x == len(b.lines[b.cursor.y]) {
+		return
 	}
+	b.saveState()
+	end := b.cursor
+	if end.x < len(b.lines[end.y]) {
+		end.x++
+	} else {
+		end.y++
+		end.x = 0
+	}
+	b.replace(b.cursor, end, "")
+}
+
+func (b *Buffer) CursorToByteOffset(c Cursor) int {
+	offset := 0
+	for y := 0; y < c.y; y++ {
+		offset += len(string(b.lines[y])) + 1 // +1 for newline
+	}
+	// We must use string conversion to get byte length of runes
+	offset += len(string(b.lines[c.y][:c.x]))
+	return offset
+}
+
+func (b *Buffer) ByteOffsetToCursor(offset int) Cursor {
+	curr := 0
+	for y, line := range b.lines {
+		lineStr := string(line)
+		if offset <= curr+len(lineStr) {
+			// Find rune index within this line
+			rIdx := 0
+			byteIdx := 0
+			for byteIdx < offset-curr {
+				_, size := utf8.DecodeRuneInString(lineStr[byteIdx:])
+				byteIdx += size
+				rIdx++
+			}
+			return Cursor{rIdx, y}
+		}
+		curr += len(lineStr) + 1 // +1 for newline
+	}
+	lastY := len(b.lines) - 1
+	return Cursor{len(b.lines[lastY]), lastY}
 }
 
 func (b *Buffer) MoveHome() { b.cursor.x = 0 }
