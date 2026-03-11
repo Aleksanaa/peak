@@ -2,9 +2,7 @@ package main
 
 import (
 	"bytes"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -104,7 +102,7 @@ func (e *Editor) Open(win *Window, path string) *Window {
 	}
 
 	// 2. Try to open new window
-	if content, err := e.readFileOrDir(full); err == nil {
+	if content, err := readFileOrDir(full); err == nil {
 		target := e.getTargetColumn(nil, win)
 		if target != nil {
 			tagPath := e.formatPathForTag(win, full)
@@ -119,23 +117,9 @@ func (e *Editor) Open(win *Window, path string) *Window {
 
 func (e *Editor) formatPathForTag(contextWin *Window, fullPath string) string {
 	if contextWin == nil {
-		return fullPath
+		return formatPath(fullPath, "")
 	}
-	parentFn := contextWin.GetFilename()
-	if strings.HasPrefix(parentFn, "~") {
-		if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(fullPath, home) {
-			return "~" + fullPath[len(home):]
-		}
-	} else if !filepath.IsAbs(parentFn) {
-		cwd, _ := os.Getwd()
-		if rel, err := filepath.Rel(cwd, fullPath); err == nil {
-			if !strings.HasPrefix(rel, ".") && !strings.HasPrefix(rel, "/") {
-				return "./" + rel
-			}
-			return rel
-		}
-	}
-	return fullPath
+	return formatPath(fullPath, contextWin.GetFilename())
 }
 
 func (e *Editor) getTargetWindow(win *Window) *Window {
@@ -143,38 +127,6 @@ func (e *Editor) getTargetWindow(win *Window) *Window {
 		return win
 	}
 	return e.active
-}
-
-// readFileOrDir returns the content of a file or a listing if it's a directory.
-func (e *Editor) readFileOrDir(path string) (string, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return "", err
-	}
-	if info.IsDir() {
-		return e.listDir(path)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
-
-func (e *Editor) listDir(path string) (string, error) {
-	entries, err := os.ReadDir(path)
-	if err != nil {
-		return "", err
-	}
-	var sb strings.Builder
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() {
-			name += "/"
-		}
-		sb.WriteString(name + "\n")
-	}
-	return sb.String(), nil
 }
 
 func (e *Editor) getTargetColumn(col *Column, win *Window) *Column {
@@ -203,7 +155,7 @@ func (e *Editor) cmdGet(win *Window, cmd string) {
 		arg = target.GetFilename()
 	}
 	path := e.resolvePathWithContext(target, arg)
-	if content, err := e.readFileOrDir(path); err == nil {
+	if content, err := readFileOrDir(path); err == nil {
 		target.body.buffer.SetText(content)
 	}
 }
@@ -218,8 +170,8 @@ func (e *Editor) cmdPut(win *Window, cmd string) {
 		arg = target.GetFilename()
 	}
 	path := e.resolvePathWithContext(target, arg)
-	if path != "" && !strings.HasSuffix(path, "/") {
-		os.WriteFile(path, []byte(target.body.buffer.GetText()), 0644)
+	if path != "" && !isDir(path) {
+		writeFile(path, []byte(target.body.buffer.GetText()))
 	}
 }
 
@@ -444,7 +396,7 @@ func (e *Editor) showError(col *Column, win *Window, dir, msg string) {
 		if win != nil {
 			dir = win.GetDir()
 		} else {
-			dir, _ = os.Getwd()
+			dir = getwd()
 		}
 	}
 
@@ -464,7 +416,7 @@ func (e *Editor) showError(col *Column, win *Window, dir, msg string) {
 
 	targetCol := e.getTargetColumn(col, win)
 	if targetCol != nil {
-		newWin := targetCol.AddWindow(" "+filepath.Join(dir, "+Errors")+" Get Put Del ", msg)
+		newWin := targetCol.AddWindow(" "+join(dir, "+Errors")+" Get Put Del ", msg)
 		e.ActivateWindow(newWin)
 		targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
 	}
@@ -475,7 +427,7 @@ func (e *Editor) runExternal(col *Column, win *Window, cmd string) {
 	if win != nil {
 		dir = win.GetDir()
 	} else {
-		dir, _ = os.Getwd()
+		dir = getwd()
 	}
 
 	e.runAsync(cmd, dir, func(out string) {

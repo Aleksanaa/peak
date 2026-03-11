@@ -1,8 +1,6 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"unicode"
@@ -32,42 +30,16 @@ func isWordChar(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '/' || r == '.' || r == '-' || r == '~' || r == ':'
 }
 
-// resolvePath returns an absolute path, expanding ~ and handling relative segments.
-func resolvePath(path string) string {
-	if path == "" {
-		return ""
-	}
-	if strings.HasPrefix(path, "~") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return path
-		}
-		if path == "~" {
-			return home
-		}
-		return filepath.Join(home, path[1:])
-	}
-	abs, _ := filepath.Abs(path)
-	return abs
-}
-
 func (e *Editor) resolvePathWithContext(win *Window, path string) string {
-	if path == "" {
-		return ""
-	}
-	if filepath.IsAbs(path) || strings.HasPrefix(path, "~") {
-		return resolvePath(path)
-	}
-
 	dir := ""
 	if win != nil {
 		dir = win.GetDir()
 	} else if e.active != nil {
 		dir = e.active.GetDir()
 	} else {
-		dir, _ = os.Getwd()
+		dir = getwd()
 	}
-	return filepath.Join(dir, path)
+	return resolveWithContext(path, dir)
 }
 
 // Plumb attempts to handle a string (path or search).

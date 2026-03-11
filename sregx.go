@@ -8,7 +8,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"strings"
 
@@ -603,7 +602,7 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 			}
 			return addr, false
 		}
-		data, err := os.ReadFile(filename)
+		data, err := readFile(filename)
 		if err != nil {
 			if ctx.Out != nil {
 				ctx.Out.Write([]byte(err.Error() + "\n"))
@@ -765,9 +764,9 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 		if filename == "" {
 			filename = ctx.Window.GetFilename()
 		}
-		if filename != "" && !strings.HasSuffix(filename, "/") {
+		if filename != "" && !isDir(filename) {
 			textToWrite := string(runes[addr.q0:addr.q1])
-			err := os.WriteFile(filename, []byte(textToWrite), 0644)
+			err := writeFile(filename, []byte(textToWrite))
 			if err != nil && ctx.Out != nil {
 				ctx.Out.Write([]byte(err.Error() + "\n"))
 			}

@@ -2,7 +2,6 @@ package main
 
 import (
 	"log"
-	"os"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -84,7 +83,7 @@ func (e *Editor) Init() {
 	colRight := NewColumn(e.width/2, 1, e.width-e.width/2, e.height-1, e, e.Execute)
 	e.columns = append(e.columns, colRight)
 
-	dir, _ := os.Getwd()
+	dir := getwd()
 	win := colRight.AddWindow(" "+dir+" Get Put Undo Redo Snarf Zerox Del ", "")
 	e.ActivateWindow(win)
 

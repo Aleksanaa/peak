@@ -1,8 +1,6 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -490,19 +488,7 @@ func (win *Window) GetFilename() string {
 }
 
 func (win *Window) GetDir() string {
-	dir, _ := os.Getwd()
-	fn := win.GetFilename()
-	if fn == "" {
-		return dir
-	}
-	if strings.HasSuffix(fn, "+Errors") {
-		return filepath.Dir(fn)
-	}
-	absFn := resolvePath(fn)
-	if info, err := os.Stat(absFn); err == nil && info.IsDir() {
-		return absFn
-	}
-	return filepath.Dir(absFn)
+	return getPathDir(win.GetFilename())
 }
 
 func (win *Window) SetName(name string) {
