@@ -1,6 +1,6 @@
 # Peak - An Acme-inspired TUI Text Editor
 
-![](./screenshot.png)
+<img width="2423" height="1514" alt="Peak Screenshot" src="https://github.com/user-attachments/assets/914ec212-55ab-48ad-bbda-53e85e70912e" />
 
 ## What
 *   This is a replicate of Plan 9 Acme in a TUI environment. It doesn't aim to be a bit-by-bit clone but strives to be somewhat usable and potentially better than other simple terminal text editors.
