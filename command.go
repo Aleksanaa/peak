@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -260,28 +259,9 @@ func (e *Editor) cmdLook(win *Window, cmd string) {
 		return
 	}
 
-	res, err := SregxCompile(arg, io.Discard)
-	if err != nil {
-		// Literal search fallback
-		foundLine := target.body.Search(arg)
-		if foundLine != -1 {
-			e.alignWindow(target, foundLine)
-		}
-		return
-	}
-
-	start, end, found := e.resolveAddress(target.body.buffer, res)
-	if found {
-		target.body.buffer.cursor = end
-		target.body.buffer.ClearSelection()
-		target.body.buffer.SetSelection(start, end)
-		e.alignWindow(target, end.y)
-	} else if res.AddrType == 0 {
-		// Try literal search if it wasn't an explicit address
-		foundLine := target.body.Search(arg)
-		if foundLine != -1 {
-			e.alignWindow(target, foundLine)
-		}
+	foundLine := target.body.Search(arg)
+	if foundLine != -1 {
+		e.alignWindow(target, foundLine)
 	}
 }
 

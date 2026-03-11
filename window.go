@@ -410,7 +410,6 @@ func (tv *TextView) Search(word string) int {
 		return -1
 	}
 
-	// For now, literal search. We will integrate with sregx addressing soon.
 	startRX, startRY := tv.buffer.cursor.x+1, tv.buffer.cursor.y
 	if startRY >= len(tv.buffer.lines) {
 		startRY, startRX = 0, 0
