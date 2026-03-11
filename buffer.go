@@ -341,6 +341,11 @@ func (b *Buffer) ByteOffsetToCursor(offset int) Cursor {
 }
 
 func (b *Buffer) ReplaceRangeRunes(q0, q1 int, runes []rune) {
+	b.saveState()
+	b.replaceRangeRunesNoSave(q0, q1, runes)
+}
+
+func (b *Buffer) replaceRangeRunesNoSave(q0, q1 int, runes []rune) {
 	// Convert rune offsets to cursors
 	full := b.GetRunes()
 	if q0 < 0 {
@@ -358,7 +363,7 @@ func (b *Buffer) ReplaceRangeRunes(q0, q1 int, runes []rune) {
 
 	start := b.ByteOffsetToCursor(startByte)
 	end := b.ByteOffsetToCursor(endByte)
-	b.SetTextInRange(start, end, string(runes))
+	b.replace(start, end, string(runes))
 }
 
 func (b *Buffer) CursorToRuneOffset(c Cursor) int {

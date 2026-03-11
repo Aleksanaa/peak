@@ -290,11 +290,14 @@ func (e *Editor) cmdEdit(col *Column, win *Window, cmd string) {
 		dot = Range{buf.CursorToRuneOffset(s), buf.CursorToRuneOffset(end)}
 	}
 
-	ctx := &Context{Editor: e, Buffer: buf, Out: &pOut}
+	log := &Elog{}
+	ctx := &Context{Editor: e, Buffer: buf, Out: &pOut, Log: log}
 	newDot, ok := res.Cmd.Execute(ctx, dot)
 	if !ok {
 		return
 	}
+
+	log.Apply(buf)
 
 	// Update selection/cursor from newDot
 	start := buf.RuneOffsetToCursor(newDot.q0)

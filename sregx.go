@@ -43,10 +43,93 @@ type SregxResult struct {
 	Cmd *Cmd
 }
 
+type ElogType int
+
+const (
+	ElogInsert ElogType = iota
+	ElogDelete
+	ElogReplace
+)
+
+type ElogOp struct {
+	typ ElogType
+	q0  int
+	q1  int
+	r   []rune
+}
+
+type Elog struct {
+	ops []ElogOp
+}
+
+func (e *Elog) Insert(q0 int, r []rune) {
+	if len(r) == 0 {
+		return
+	}
+	e.ops = append(e.ops, ElogOp{typ: ElogInsert, q0: q0, r: r})
+}
+
+func (e *Elog) Delete(q0, q1 int) {
+	if q0 == q1 {
+		return
+	}
+	e.ops = append(e.ops, ElogOp{typ: ElogDelete, q0: q0, q1: q1})
+}
+
+func (e *Elog) Replace(q0, q1 int, r []rune) {
+	if q0 == q1 && len(r) == 0 {
+		return
+	}
+	e.ops = append(e.ops, ElogOp{typ: ElogReplace, q0: q0, q1: q1, r: r})
+}
+
+func (e *Elog) Apply(b *Buffer) {
+	if len(e.ops) == 0 {
+		return
+	}
+	// Sort by q0 descending to apply from back to front
+	// For simplicity, we just iterate backwards if they were added in order,
+	// but sregx adds them in various ways.
+	// edwood applies from back to front.
+
+	// peak's Buffer.ReplaceRangeRunes handles one change at a time.
+	// To make it transactional, we should probably add a way to group them.
+	// But for now, we can just call saveState once.
+	b.saveState()
+
+	// We need to apply changes in a way that doesn't invalidate subsequent offsets.
+	// Applying from highest q0 to lowest q0 is the standard way.
+
+	// Let's just use a copy of the ops and apply them.
+	// To be safe, we should sort them.
+	ops := append([]ElogOp{}, e.ops...)
+	// Simple bubble sort for now, as we don't have many ops usually
+	for i := 0; i < len(ops); i++ {
+		for j := i + 1; j < len(ops); j++ {
+			if ops[i].q0 < ops[j].q0 {
+				ops[i], ops[j] = ops[j], ops[i]
+			}
+		}
+	}
+
+	// Now apply without saving state for each one
+	for _, op := range ops {
+		switch op.typ {
+		case ElogInsert:
+			b.replaceRangeRunesNoSave(op.q0, op.q0, op.r)
+		case ElogDelete:
+			b.replaceRangeRunesNoSave(op.q0, op.q1, nil)
+		case ElogReplace:
+			b.replaceRangeRunesNoSave(op.q0, op.q1, op.r)
+		}
+	}
+}
+
 type Context struct {
 	Editor *Editor
 	Buffer *Buffer
 	Out    io.Writer
+	Log    *Elog
 }
 
 var lastpat string
@@ -453,32 +536,32 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 		}
 		return addr, true
 	case 'd':
-		ctx.Buffer.ReplaceRangeRunes(addr.q0, addr.q1, nil)
+		ctx.Log.Delete(addr.q0, addr.q1)
 		return Range{addr.q0, addr.q0}, true
 	case 'a':
-		ctx.Buffer.ReplaceRangeRunes(addr.q1, addr.q1, []rune(cmd.text))
+		ctx.Log.Insert(addr.q1, []rune(cmd.text))
 		return Range{addr.q1, addr.q1 + len([]rune(cmd.text))}, true
 	case 'i':
-		ctx.Buffer.ReplaceRangeRunes(addr.q0, addr.q0, []rune(cmd.text))
+		ctx.Log.Insert(addr.q0, []rune(cmd.text))
 		return Range{addr.q0, addr.q0 + len([]rune(cmd.text))}, true
 	case 'c':
-		ctx.Buffer.ReplaceRangeRunes(addr.q0, addr.q1, []rune(cmd.text))
+		ctx.Log.Replace(addr.q0, addr.q1, []rune(cmd.text))
 		return Range{addr.q0, addr.q0 + len([]rune(cmd.text))}, true
 	case 'm', 't':
 		addr2 := cmdaddress(cmd.mtaddr, dot, runes, 0)
 		text := append([]rune{}, runes[addr.q0:addr.q1]...)
 		if cmd.cmdc == 'm' {
 			if addr.q1 <= addr2.q0 {
-				ctx.Buffer.ReplaceRangeRunes(addr2.q1, addr2.q1, text)
-				ctx.Buffer.ReplaceRangeRunes(addr.q0, addr.q1, nil)
+				ctx.Log.Insert(addr2.q1, text)
+				ctx.Log.Delete(addr.q0, addr.q1)
 			} else if addr.q0 >= addr2.q1 {
-				ctx.Buffer.ReplaceRangeRunes(addr.q0, addr.q1, nil)
-				ctx.Buffer.ReplaceRangeRunes(addr2.q1, addr2.q1, text)
+				ctx.Log.Delete(addr.q0, addr.q1)
+				ctx.Log.Insert(addr2.q1, text)
 			} else {
 				// overlap, ignore as in Acme
 			}
 		} else {
-			ctx.Buffer.ReplaceRangeRunes(addr2.q1, addr2.q1, text)
+			ctx.Log.Insert(addr2.q1, text)
 		}
 		return addr, true
 	case 'x', 'y':
@@ -504,7 +587,7 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 			rp = append(rp, Range{addr.q0 + op, addr.q1})
 		}
 
-		for i := len(rp) - 1; i >= 0; i-- {
+		for i := 0; i < len(rp); i++ {
 			cmd.cmd.Execute(ctx, rp[i])
 		}
 		return addr, true
@@ -514,7 +597,7 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 			return addr, false
 		}
 		text := runes[addr.q0:addr.q1]
-		
+
 		var matches [][]int
 		all := re.FindForward(text, 0, -1, -1)
 		if len(all) >= cmd.num {
@@ -529,13 +612,12 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 			return addr, true
 		}
 
-		// Apply replacements from back to front to avoid offset issues
-		for i := len(matches) - 1; i >= 0; i-- {
+		for i := 0; i < len(matches); i++ {
 			m := matches[i]
 			expanded := expand(cmd.text, text, m)
 			q0 := addr.q0 + m[0]
 			q1 := addr.q0 + m[1]
-			ctx.Buffer.ReplaceRangeRunes(q0, q1, []rune(expanded))
+			ctx.Log.Replace(q0, q1, []rune(expanded))
 		}
 		return addr, true
 	case 'g', 'v':
@@ -558,13 +640,15 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 				filename := win.GetFilename()
 				match := re.MatchString(filename)
 				if (cmd.cmdc == 'X' && match) || (cmd.cmdc == 'Y' && !match) {
-					subCtx := &Context{Editor: ctx.Editor, Buffer: win.body.buffer, Out: ctx.Out}
+					subLog := &Elog{}
+					subCtx := &Context{Editor: ctx.Editor, Buffer: win.body.buffer, Out: ctx.Out, Log: subLog}
 					subDot := Range{win.body.buffer.CursorToRuneOffset(win.body.buffer.cursor), win.body.buffer.CursorToRuneOffset(win.body.buffer.cursor)}
 					if win.body.buffer.selectionStart != nil {
 						s, e := win.body.buffer.orderedSelection()
 						subDot = Range{win.body.buffer.CursorToRuneOffset(s), win.body.buffer.CursorToRuneOffset(e)}
 					}
 					cmd.cmd.Execute(subCtx, subDot)
+					subLog.Apply(win.body.buffer)
 				}
 			}
 		}
@@ -608,7 +692,7 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 			return addr, false
 		}
 		if cmd.cmdc == '|' || cmd.cmdc == '<' {
-			ctx.Buffer.ReplaceRangeRunes(addr.q0, addr.q1, []rune(out))
+			ctx.Log.Replace(addr.q0, addr.q1, []rune(out))
 			return Range{addr.q0, addr.q0 + len([]rune(out))}, true
 		}
 		if ctx.Out != nil && len(out) > 0 {
