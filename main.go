@@ -75,7 +75,7 @@ func (e *Editor) Init() {
 	e.width, e.height = e.screen.Size()
 
 	tagStyle := tcell.StyleDefault.Background(e.theme.GlobalTagBG).Foreground(e.theme.GlobalTagFG)
-	e.tag = NewTextView(" NewCol Exit ", 0, 0, e.width, 1, tagStyle, true, false)
+	e.tag = NewTextView(" NewCol Help Exit ", 0, 0, e.width, 1, tagStyle, true, false)
 	e.tag.theme = &e.theme
 	e.focusedView = e.tag
 

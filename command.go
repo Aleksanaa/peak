@@ -75,6 +75,8 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 		e.cmdRedo(win)
 	case "Look":
 		e.cmdLook(win, cmd)
+	case "Help":
+		e.Open(win, "/peak/doc/README.md")
 	default:
 		e.runExternal(col, win, cmd)
 	}
