@@ -13,20 +13,23 @@ type Theme struct {
 	ColTagBG, ColTagFG                tcell.Color
 	GlobalTagBG, GlobalTagFG          tcell.Color
 	Handle, ScrollThumb, ScrollGutter tcell.Color
+	HandleDirty, HandleError           tcell.Color
 	SelectionBG, SelectionFG          tcell.Color
 	Corner                            tcell.Color
 }
 
 var defaultTheme = Theme{
 	GlobalTagBG:  tcell.NewHexColor(0x11111b),
-	GlobalTagFG:  tcell.NewHexColor(0x89dceb),
+	GlobalTagFG:  tcell.NewHexColor(0xbac2de),
 	ColTagBG:     tcell.NewHexColor(0x181825),
-	ColTagFG:     tcell.NewHexColor(0x89dceb),
+	ColTagFG:     tcell.NewHexColor(0xbac2de),
 	TagBG:        tcell.NewHexColor(0x1e1e2e),
-	TagFG:        tcell.NewHexColor(0x89dceb),
+	TagFG:        tcell.NewHexColor(0xbac2de),
 	BodyBG:       tcell.NewHexColor(0x313244),
 	BodyFG:       tcell.NewHexColor(0xcdd6f4),
 	Handle:       tcell.NewHexColor(0x89dceb),
+	HandleDirty:  tcell.NewHexColor(0xf38ba8),
+	HandleError:  tcell.NewHexColor(0xfab387),
 	ScrollThumb:  tcell.NewHexColor(0x45475a),
 	ScrollGutter: tcell.NewHexColor(0x181825),
 	SelectionBG:  tcell.NewHexColor(0x585b70),

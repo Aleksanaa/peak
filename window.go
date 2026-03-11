@@ -545,7 +545,16 @@ func (win *Window) layout() {
 
 func (win *Window) Draw(s tcell.Screen) {
 	win.layout()
-	handleStyle := tcell.StyleDefault.Background(win.editor.theme.Handle).Foreground(tcell.ColorBlack)
+
+	handleColor := win.editor.theme.Handle
+	fn := win.GetFilename()
+	if isSpecial(fn) {
+		handleColor = win.editor.theme.HandleError
+	} else if win.IsDirty() {
+		handleColor = win.editor.theme.HandleDirty
+	}
+
+	handleStyle := tcell.StyleDefault.Background(handleColor).Foreground(tcell.ColorBlack)
 	for i := 0; i < win.tag.h; i++ {
 		s.SetContent(win.x, win.y+i, ' ', nil, handleStyle)
 	}
