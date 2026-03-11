@@ -48,6 +48,12 @@ func (tv *TextView) UpdateLayout() {
 	if len(tv.layout) > 0 && tv.w == tv.lastWidth && tv.buffer.version == tv.lastVersion {
 		return
 	}
+
+	ratio := 0.0
+	if len(tv.layout) > 0 {
+		ratio = float64(tv.scroll) / float64(len(tv.layout))
+	}
+
 	tv.lastWidth = tv.w
 	tv.lastVersion = tv.buffer.version
 	tv.layout = nil
@@ -72,6 +78,16 @@ func (tv *TextView) UpdateLayout() {
 			visualPos += width
 		}
 		tv.layout = append(tv.layout, VisualLine{i, start, len(line)})
+	}
+
+	if len(tv.layout) > 0 && ratio > 0 {
+		tv.scroll = int(ratio * float64(len(tv.layout)))
+		if tv.scroll >= len(tv.layout) {
+			tv.scroll = len(tv.layout) - 1
+		}
+	}
+	if tv.scroll < 0 {
+		tv.scroll = 0
 	}
 }
 

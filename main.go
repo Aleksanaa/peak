@@ -13,7 +13,7 @@ type Theme struct {
 	ColTagBG, ColTagFG                tcell.Color
 	GlobalTagBG, GlobalTagFG          tcell.Color
 	Handle, ScrollThumb, ScrollGutter tcell.Color
-	HandleDirty, HandleError           tcell.Color
+	HandleDirty, HandleError          tcell.Color
 	SelectionBG, SelectionFG          tcell.Color
 	Corner                            tcell.Color
 }
