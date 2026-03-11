@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/gdamore/tcell/v2"
@@ -48,6 +49,8 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 		e.cmdPaste()
 	case "Sort":
 		e.cmdSort(col, win)
+	case "Tab":
+		e.cmdTab(col, win, cmd)
 	case "Undo":
 		e.cmdUndo(win)
 	case "Redo":
@@ -322,6 +325,28 @@ func (e *Editor) cmdSort(col *Column, win *Window) {
 	})
 
 	targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
+}
+
+func (e *Editor) cmdTab(col *Column, win *Window, cmd string) {
+	target := e.getTargetWindow(win)
+	if target == nil {
+		return
+	}
+
+	fields := strings.Fields(cmd)
+	if len(fields) == 1 {
+		// Show current tab width
+		msg := target.GetFilename() + ": Tab " + strconv.Itoa(target.body.tabWidth) + "\n"
+		e.showError(col, target, "", msg)
+		return
+	}
+
+	// Set new tab width
+	newTab, err := strconv.Atoi(fields[1])
+	if err == nil && newTab > 0 {
+		target.body.tabWidth = newTab
+		target.body.UpdateLayout()
+	}
 }
 
 func (e *Editor) cmdUndo(win *Window) {

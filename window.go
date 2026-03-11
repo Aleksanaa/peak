@@ -9,8 +9,6 @@ import (
 	"github.com/gdamore/tcell/v2"
 )
 
-const tabWidth = 4
-
 type VisualLine struct {
 	BufferLine int
 	Start, End int
@@ -28,6 +26,7 @@ type TextView struct {
 	lastWidth   int
 	lastVersion int
 	theme       *Theme
+	tabWidth    int
 }
 
 func NewTextView(text string, x, y, w, h int, style tcell.Style, singleLine, scrollable bool) *TextView {
@@ -38,6 +37,7 @@ func NewTextView(text string, x, y, w, h int, style tcell.Style, singleLine, scr
 		singleLine:  singleLine,
 		scrollable:  scrollable,
 		lastVersion: -1,
+		tabWidth:    4,
 	}
 	tv.UpdateLayout()
 	return tv
@@ -62,13 +62,13 @@ func (tv *TextView) UpdateLayout() {
 		for idx, r := range line {
 			width := 1
 			if r == '\t' {
-				width = tabWidth - (visualPos % tabWidth)
+				width = tv.tabWidth - (visualPos % tv.tabWidth)
 			}
 			if visualPos+width > tv.w && visualPos > 0 {
 				tv.layout = append(tv.layout, VisualLine{i, start, idx})
 				start, visualPos = idx, 0
 				if r == '\t' {
-					width = tabWidth
+					width = tv.tabWidth
 				}
 			}
 			visualPos += width
@@ -120,7 +120,7 @@ func (tv *TextView) bufferToVisual(bx, by int) (int, int) {
 			line := tv.buffer.lines[by]
 			for i := vl.Start; i < bx; i++ {
 				if line[i] == '\t' {
-					vx += tabWidth - (vx % tabWidth)
+					vx += tv.tabWidth - (vx % tv.tabWidth)
 				} else {
 					vx++
 				}
@@ -149,7 +149,7 @@ func (tv *TextView) visualToBuffer(vx, vidx int) (int, int) {
 	for i := vl.Start; i < vl.End; i++ {
 		w := 1
 		if line[i] == '\t' {
-			w = tabWidth - (currVX % tabWidth)
+			w = tv.tabWidth - (currVX % tv.tabWidth)
 		}
 		if currVX+w/2 > vx {
 			break
@@ -181,7 +181,7 @@ func (tv *TextView) Draw(s tcell.Screen) {
 				style = selStyle
 			}
 			if r == '\t' {
-				tw := tabWidth - (vcol % tabWidth)
+				tw := tv.tabWidth - (vcol % tv.tabWidth)
 				for k := 0; k < tw && vcol < tv.w; k++ {
 					s.SetContent(tv.x+vcol, tv.y+vrow, ' ', nil, style)
 					vcol++
@@ -403,6 +403,9 @@ func (tv *TextView) Search(word string) int {
 		sx := 0
 		if y == startRY {
 			sx = startRX
+			if sx > len(line) {
+				sx = len(line)
+			}
 		}
 		if x := strings.Index(line[sx:], word); x != -1 {
 			tv.buffer.cursor = Cursor{sx + x + len(word), y}
@@ -417,6 +420,9 @@ func (tv *TextView) Search(word string) int {
 		limit := len(line)
 		if y == startRY {
 			limit = startRX
+			if limit > len(line) {
+				limit = len(line)
+			}
 		}
 		if x := strings.Index(line[:limit], word); x != -1 {
 			tv.buffer.cursor = Cursor{x + len(word), y}
