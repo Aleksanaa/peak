@@ -230,7 +230,15 @@ func (tv *TextView) GetClickWord(mx, my int) string {
 func (tv *TextView) ShowCursor(s tcell.Screen) {
 	vx, vrow := tv.bufferToVisual(tv.buffer.cursor.x, tv.buffer.cursor.y)
 	if vrow >= tv.scroll && vrow < tv.scroll+tv.h {
+		if vx >= tv.w {
+			vx = tv.w - 1
+		}
+		if vx < 0 {
+			vx = 0
+		}
 		s.ShowCursor(tv.x+vx, tv.y+(vrow-tv.scroll))
+	} else {
+		s.HideCursor()
 	}
 }
 

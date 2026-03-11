@@ -130,13 +130,20 @@ func (e *Editor) Run() {
 		}
 	}()
 
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
-
+	e.Draw()
 	for {
-		e.Draw()
+		var timer *time.Timer
+		var tick <-chan time.Time
+		if e.scrollWin != nil {
+			timer = time.NewTimer(50 * time.Millisecond)
+			tick = timer.C
+		}
+
 		select {
 		case ev := <-events:
+			if timer != nil {
+				timer.Stop()
+			}
 			if ev == nil {
 				return
 			}
@@ -144,17 +151,25 @@ func (e *Editor) Run() {
 			case *tcell.EventInterrupt:
 				if f, ok := ev.Data().(func()); ok {
 					f()
+					e.Draw()
 				}
 			default:
-				if e.HandleEvent(ev) {
+				if quit, redraw := e.HandleEvent(ev); quit {
 					return
+				} else if redraw {
+					e.Draw()
 				}
 			}
 		case fn := <-e.CmdChan:
+			if timer != nil {
+				timer.Stop()
+			}
 			fn()
-		case <-ticker.C:
+			e.Draw()
+		case <-tick:
 			if e.scrollWin != nil && time.Since(e.scrollStartTime) > 200*time.Millisecond {
 				e.scrollWin.body.Scroll(e.scrollDir * e.scrollAmount)
+				e.Draw()
 			}
 		}
 	}
@@ -172,11 +187,14 @@ func (e *Editor) Draw() {
 	e.screen.Show()
 }
 
-func (e *Editor) HandleEvent(ev tcell.Event) bool {
+func (e *Editor) HandleEvent(ev tcell.Event) (bool, bool) {
 	if me, ok := ev.(*tcell.EventMouse); ok {
 		if me.Buttons() != tcell.ButtonNone {
 			_, my := me.Position()
 			e.lastClickY = my
+		} else if e.dragCol == nil && e.dragWin == nil && e.dragView == nil && e.scrollWin == nil {
+			// Skip redraw on mouse moves with no buttons/drag/scroll
+			return false, false
 		}
 	}
 
@@ -184,11 +202,11 @@ func (e *Editor) HandleEvent(ev tcell.Event) bool {
 	case *tcell.EventKey:
 		if ev.Key() == tcell.KeyCtrlF {
 			if e.focusedView != nil && e.focusedView.buffer.GetSelectedText() != "" {
-				return e.Execute(nil, nil, "Look")
+				return e.Execute(nil, nil, "Look"), true
 			}
 		}
 		if e.focusedView != nil {
-			return e.focusedView.HandleEvent(ev)
+			return e.focusedView.HandleEvent(ev), true
 		}
 	case *tcell.EventMouse:
 		mx, my := ev.Position()
@@ -201,25 +219,25 @@ func (e *Editor) HandleEvent(ev tcell.Event) bool {
 		if e.dragCol != nil {
 			if buttons&tcell.Button1 != 0 {
 				e.moveColumnTo(e.dragCol, mx)
-				return false
+				return false, true
 			}
 			e.dragCol = nil
-			return false
+			return false, true
 		}
 		if e.dragWin != nil {
 			if buttons&tcell.Button1 != 0 {
 				e.moveWindowTo(e.dragWin, mx, my)
-				return false
+				return false, true
 			}
 			e.dragWin = nil
-			return false
+			return false, true
 		}
 		if e.dragView != nil {
-			e.dragView.HandleEvent(ev)
+			quit := e.dragView.HandleEvent(ev)
 			if buttons == tcell.ButtonNone {
 				e.dragView = nil
 			}
-			return false
+			return quit, true
 		}
 
 		// Global Tag clicks
@@ -227,29 +245,30 @@ func (e *Editor) HandleEvent(ev tcell.Event) bool {
 			word := e.tag.GetClickWord(mx, my)
 			if word != "" {
 				if buttons == tcell.Button3 { // Middle-click
-					return e.Execute(nil, nil, word)
+					return e.Execute(nil, nil, word), true
 				}
 				if buttons == tcell.Button2 { // Right-click
-					return e.Plumb(nil, word)
+					return e.Plumb(nil, word), true
 				}
 			}
 			if buttons == tcell.Button1 {
 				e.dragView, e.focusedView = e.tag, e.tag
 			}
-			return e.tag.HandleEvent(ev)
+			return e.tag.HandleEvent(ev), true
 		}
 
 		for _, col := range e.columns {
 			if col.Contains(mx, my) {
-				return col.HandleEvent(ev)
+				return col.HandleEvent(ev), true
 			}
 		}
 	case *tcell.EventResize:
 		e.width, e.height = e.screen.Size()
 		e.resize()
 		e.screen.Sync()
+		return false, true
 	}
-	return false
+	return false, true
 }
 
 func (e *Editor) ActivateWindow(win *Window) {
