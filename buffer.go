@@ -309,12 +309,28 @@ func (b *Buffer) Delete() {
 	b.replace(b.cursor, end, "")
 }
 
+func (b *Buffer) ReplaceRangeRunes(q0, q1 int, runes []rune) {
+	b.saveState()
+	b.replaceRangeRunesNoSave(q0, q1, runes)
+}
+
+func (b *Buffer) replaceRangeRunesNoSave(q0, q1 int, runes []rune) {
+	if q0 < 0 {
+		q0 = 0
+	}
+	if q1 < q0 {
+		q1 = q0
+	}
+	start := b.RuneOffsetToCursor(q0)
+	end := b.RuneOffsetToCursor(q1)
+	b.replace(start, end, string(runes))
+}
+
 func (b *Buffer) CursorToByteOffset(c Cursor) int {
 	offset := 0
 	for y := 0; y < c.y; y++ {
 		offset += len(string(b.lines[y])) + 1 // +1 for newline
 	}
-	// We must use string conversion to get byte length of runes
 	offset += len(string(b.lines[c.y][:c.x]))
 	return offset
 }
@@ -324,7 +340,6 @@ func (b *Buffer) ByteOffsetToCursor(offset int) Cursor {
 	for y, line := range b.lines {
 		lineStr := string(line)
 		if offset <= curr+len(lineStr) {
-			// Find rune index within this line
 			rIdx := 0
 			byteIdx := 0
 			for byteIdx < offset-curr {
@@ -340,30 +355,15 @@ func (b *Buffer) ByteOffsetToCursor(offset int) Cursor {
 	return Cursor{len(b.lines[lastY]), lastY}
 }
 
-func (b *Buffer) ReplaceRangeRunes(q0, q1 int, runes []rune) {
-	b.saveState()
-	b.replaceRangeRunesNoSave(q0, q1, runes)
-}
-
-func (b *Buffer) replaceRangeRunesNoSave(q0, q1 int, runes []rune) {
-	// Convert rune offsets to cursors
+func (b *Buffer) runeOffsetToByteOffset(off int) int {
 	full := b.GetRunes()
-	if q0 < 0 {
-		q0 = 0
+	if off > len(full) {
+		off = len(full)
 	}
-	if q1 > len(full) {
-		q1 = len(full)
+	if off < 0 {
+		off = 0
 	}
-	if q0 > q1 {
-		q0, q1 = q1, q0
-	}
-
-	startByte := len(string(full[:q0]))
-	endByte := startByte + len(string(full[q0:q1]))
-
-	start := b.ByteOffsetToCursor(startByte)
-	end := b.ByteOffsetToCursor(endByte)
-	b.replace(start, end, string(runes))
+	return len(string(full[:off]))
 }
 
 func (b *Buffer) CursorToRuneOffset(c Cursor) int {
@@ -376,12 +376,7 @@ func (b *Buffer) CursorToRuneOffset(c Cursor) int {
 }
 
 func (b *Buffer) RuneOffsetToCursor(off int) Cursor {
-	full := b.GetRunes()
-	if off > len(full) {
-		off = len(full)
-	}
-	byteOff := len(string(full[:off]))
-	return b.ByteOffsetToCursor(byteOff)
+	return b.ByteOffsetToCursor(b.runeOffsetToByteOffset(off))
 }
 
 func (b *Buffer) MoveHome() { b.cursor.x = 0 }

@@ -211,34 +211,6 @@ func (e *Editor) HandleEvent(ev tcell.Event) bool {
 
 		for _, col := range e.columns {
 			if col.Contains(mx, my) {
-				if my == col.tag.y {
-					if mx == col.x && buttons == tcell.Button1 {
-						e.dragCol = col
-						return false
-					}
-					if mx > col.x && buttons == tcell.Button1 {
-						e.dragView, e.focusedView = col.tag, col.tag
-					}
-					return col.HandleEvent(ev)
-				}
-				for _, win := range col.windows {
-					if win.Contains(mx, my) {
-						if buttons == tcell.Button1 {
-							if mx == win.x && my >= win.y && my < win.y+win.tagHeight() {
-								e.dragWin = win
-								e.ActivateWindow(win)
-								e.focusedView = win.tag
-								return false
-							}
-							e.ActivateWindow(win)
-							if my < win.y+win.tagHeight() {
-								e.focusedView = win.tag
-							}
-							e.dragView = e.focusedView
-						}
-						return win.HandleEvent(ev)
-					}
-				}
 				return col.HandleEvent(ev)
 			}
 		}
@@ -374,77 +346,93 @@ func (e *Editor) Resize() {
 	}
 	e.tag.Resize(0, 0, e.width, 1)
 
-	// 1. Proportional scaling for existing columns
-	if e.lastWidth > 0 && e.lastWidth != e.width {
-		ratio := float64(e.width) / float64(e.lastWidth)
-		for _, col := range e.columns {
-			if col.explicitWidth > 0 {
-				col.explicitWidth = int(float64(col.explicitWidth) * ratio)
-			}
-		}
-	}
+	widths := distributeSpace(e.width, len(e.columns), func(i int) int {
+		return e.columns[i].explicitWidth
+	}, func(i int) int {
+		return 5
+	}, e.lastWidth, e.width)
 	e.lastWidth = e.width
 
-	// 2. Count explicit vs automatic columns
+	xOffset := 0
+	for i, col := range e.columns {
+		cw := widths[i]
+		col.explicitWidth = cw
+		col.Resize(xOffset, 1, cw, e.height-1)
+		xOffset += cw
+	}
+}
+
+func distributeSpace(totalSpace int, count int, getExplicit func(int) int, getMin func(int) int, lastTotal, currentTotal int) []int {
+	heights := make([]int, count)
 	totalExplicit, numAuto := 0, 0
-	for _, col := range e.columns {
-		if col.explicitWidth > 0 {
-			totalExplicit += col.explicitWidth
+
+	// 1. Proportional scaling
+	scaleRatio := 1.0
+	if lastTotal > 0 && lastTotal != currentTotal {
+		scaleRatio = float64(currentTotal) / float64(lastTotal)
+	}
+
+	for i := 0; i < count; i++ {
+		exp := getExplicit(i)
+		if exp > 0 {
+			heights[i] = int(float64(exp) * scaleRatio)
+			totalExplicit += heights[i]
 		} else {
 			numAuto++
 		}
 	}
 
-	// 3. Redistribute if adding new columns to a full editor
-	availableW := e.width
-	if numAuto > 0 && totalExplicit >= availableW {
-		// New columns should get a fair share (1/N total columns)
-		targetTotalAuto := (availableW * numAuto) / len(e.columns)
+	// 2. Redistribute if full
+	if numAuto > 0 && totalExplicit >= totalSpace {
+		targetTotalAuto := (totalSpace * numAuto) / (count + 1)
 		if targetTotalAuto < 5*numAuto {
 			targetTotalAuto = 5 * numAuto
 		}
-		scale := float64(availableW-targetTotalAuto) / float64(totalExplicit)
-		totalExplicit = 0
-		for _, col := range e.columns {
-			if col.explicitWidth > 0 {
-				col.explicitWidth = int(float64(col.explicitWidth) * scale)
-				totalExplicit += col.explicitWidth
+		if totalExplicit > 0 {
+			scale := float64(totalSpace-targetTotalAuto) / float64(totalExplicit)
+			totalExplicit = 0
+			for i := 0; i < count; i++ {
+				if getExplicit(i) > 0 {
+					heights[i] = int(float64(heights[i]) * scale)
+					totalExplicit += heights[i]
+				}
 			}
 		}
 	}
 
-	// 4. Final layout
-	autoW := 0
+	// 3. Final layout
+	autoSpace := 0
 	if numAuto > 0 {
-		autoW = (availableW - totalExplicit) / numAuto
-		if autoW < 5 {
-			autoW = 5
+		autoSpace = (totalSpace - totalExplicit) / numAuto
+		if autoSpace < 5 {
+			autoSpace = 5
 		}
 	}
 
-	xOffset := 0
-	for i, col := range e.columns {
-		cw := col.explicitWidth
-		if cw <= 0 {
-			cw = autoW
+	actualTotal := 0
+	for i := 0; i < count; i++ {
+		h := heights[i]
+		if h <= 0 {
+			h = autoSpace
 		}
-
-		numRemaining := len(e.columns) - 1 - i
-		maxCW := (e.width - xOffset) - numRemaining*5
-		if cw > maxCW {
-			cw = maxCW
+		min := getMin(i)
+		if h < min {
+			h = min
 		}
-		if cw < 5 {
-			cw = 5
-		}
-
-		if i == len(e.columns)-1 {
-			cw = e.width - xOffset
-		}
-		col.explicitWidth = cw
-		col.Resize(xOffset, 1, cw, e.height-1)
-		xOffset += cw
+		heights[i] = h
+		actualTotal += h
 	}
+
+	// Adjust last one to fit exactly
+	if count > 0 {
+		diff := totalSpace - actualTotal
+		heights[count-1] += diff
+		if heights[count-1] < getMin(count-1) {
+			heights[count-1] = getMin(count - 1)
+		}
+	}
+
+	return heights
 }
 
 func main() {

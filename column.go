@@ -39,7 +39,6 @@ func (c *Column) AddWindow(tagText, bodyText string) *Window {
 
 	newWin := NewWindow(tagText, bodyText, c, c.editor, c.x, c.y, c.w, 0, c.onExec)
 	c.windows = append(c.windows, newWin)
-	// After adding, we rely on Resize to set heights
 	return newWin
 }
 
@@ -69,78 +68,17 @@ func (c *Column) Resize(x, y, w, h int) {
 		return
 	}
 
-	// 1. Proportional scaling for windows
-	if c.lastHeight > 0 && c.lastHeight != h {
-		ratio := float64(h) / float64(c.lastHeight)
-		for _, win := range c.windows {
-			if win.explicitHeight > 0 {
-				win.explicitHeight = int(float64(win.explicitHeight) * ratio)
-			}
-		}
-	}
-	c.lastHeight = h
-
-	// 2. Count explicit vs automatic windows
-	totalExplicit, numAuto := 0, 0
-	for _, win := range c.windows {
-		if win.explicitHeight > 0 {
-			totalExplicit += win.explicitHeight
-		} else {
-			numAuto++
-		}
-	}
-
-	// 3. Redistribute if adding new windows to a full column
 	availableH := h - 1
-	if numAuto > 0 && totalExplicit >= availableH {
-		// New windows should get a fair share (1/N total windows)
-		targetTotalAuto := (availableH * numAuto) / len(c.windows)
-		if targetTotalAuto < 2*numAuto {
-			targetTotalAuto = 2 * numAuto
-		}
-		scale := float64(availableH-targetTotalAuto) / float64(totalExplicit)
-		totalExplicit = 0
-		for _, win := range c.windows {
-			if win.explicitHeight > 0 {
-				win.explicitHeight = int(float64(win.explicitHeight) * scale)
-				totalExplicit += win.explicitHeight
-			}
-		}
-	}
-
-	// 4. Final layout
-	autoH := 0
-	if numAuto > 0 {
-		autoH = (availableH - totalExplicit) / numAuto
-		if autoH < 2 {
-			autoH = 2
-		}
-	}
+	heights := distributeSpace(availableH, len(c.windows), func(i int) int {
+		return c.windows[i].explicitHeight
+	}, func(i int) int {
+		return c.windows[i].tagHeight() + 1
+	}, c.lastHeight, h)
+	c.lastHeight = h
 
 	yOffset := y + 1
 	for i, win := range c.windows {
-		winH := win.explicitHeight
-		if winH <= 0 {
-			winH = autoH
-		}
-
-		neededRemaining := 0
-		for j := i + 1; j < len(c.windows); j++ {
-			neededRemaining += c.windows[j].tagHeight() + 1
-		}
-
-		maxWinH := (y + h - yOffset) - neededRemaining
-		if winH > maxWinH {
-			winH = maxWinH
-		}
-		minWinH := win.tagHeight() + 1
-		if winH < minWinH {
-			winH = minWinH
-		}
-
-		if i == len(c.windows)-1 {
-			winH = (y + h) - yOffset
-		}
+		winH := heights[i]
 		win.explicitHeight = winH
 		win.Resize(x, yOffset, w, winH)
 		yOffset += winH
@@ -154,19 +92,48 @@ func (c *Column) Contains(x, y int) bool {
 func (c *Column) HandleEvent(ev tcell.Event) bool {
 	if me, ok := ev.(*tcell.EventMouse); ok {
 		mx, my := me.Position()
-		if my != c.tag.y || mx == c.x {
-			return false
-		}
-		word := c.tag.GetClickWord(mx, my)
-		if word != "" {
-			if me.Buttons() == tcell.Button3 { // Middle-click
-				return c.onExec(c, nil, word)
+		buttons := me.Buttons()
+
+		if my == c.tag.y {
+			if mx == c.x && buttons == tcell.Button1 {
+				c.editor.dragCol = c
+				return false
 			}
-			if me.Buttons() == tcell.Button2 { // Right-click
-				return c.editor.Plumb(nil, word)
+			if mx > c.x {
+				word := c.tag.GetClickWord(mx, my)
+				if word != "" {
+					if buttons == tcell.Button3 { // Middle-click
+						return c.onExec(c, nil, word)
+					}
+					if buttons == tcell.Button2 { // Right-click
+						return c.editor.Plumb(nil, word)
+					}
+				}
+				if buttons == tcell.Button1 {
+					c.editor.dragView, c.editor.focusedView = c.tag, c.tag
+				}
+				return c.tag.HandleEvent(ev)
 			}
 		}
-		return c.tag.HandleEvent(ev)
+
+		for _, win := range c.windows {
+			if win.Contains(mx, my) {
+				if buttons == tcell.Button1 {
+					if mx == win.x && my >= win.y && my < win.y+win.tagHeight() {
+						c.editor.dragWin = win
+						c.editor.ActivateWindow(win)
+						c.editor.focusedView = win.tag
+						return false
+					}
+					c.editor.ActivateWindow(win)
+					if my < win.y+win.tagHeight() {
+						c.editor.focusedView = win.tag
+					}
+					c.editor.dragView = c.editor.focusedView
+				}
+				return win.HandleEvent(ev)
+			}
+		}
 	}
 	return false
 }

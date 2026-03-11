@@ -51,6 +51,25 @@ func resolvePath(path string) string {
 	return abs
 }
 
+func (e *Editor) resolvePathWithContext(win *Window, path string) string {
+	if path == "" {
+		return ""
+	}
+	if filepath.IsAbs(path) || strings.HasPrefix(path, "~") {
+		return resolvePath(path)
+	}
+
+	dir := ""
+	if win != nil {
+		dir = win.GetDir()
+	} else if e.active != nil {
+		dir = e.active.GetDir()
+	} else {
+		dir, _ = os.Getwd()
+	}
+	return filepath.Join(dir, path)
+}
+
 // Plumb attempts to handle a string (path or search).
 func (e *Editor) Plumb(win *Window, word string) bool {
 	word = strings.TrimSpace(word)
@@ -66,51 +85,11 @@ func (e *Editor) Plumb(win *Window, word string) bool {
 		}
 	}
 
-	full := e.resolvePathWithContext(win, pathPart)
-	// 1. Try to find existing window
-	for _, c := range e.columns {
-		for _, w := range c.windows {
-			if e.resolvePathWithContext(nil, w.GetFilename()) == full {
-				e.ActivateWindow(w)
-				if lineNum >= 0 {
-					w.body.GotoLine(lineNum)
-				}
-				return false
-			}
+	if target := e.Open(win, pathPart); target != nil {
+		if lineNum >= 0 {
+			target.body.GotoLine(lineNum)
 		}
-	}
-
-	// 2. Try to open new window if path exists
-	if content, err := e.readFileOrDir(full); err == nil {
-		target := e.getTargetColumn(nil, win)
-		if target != nil {
-			tagPath := full
-			if win != nil {
-				// Attempt to maintain relative/home-relative path style in tag
-				parentFn := win.GetFilename()
-				if strings.HasPrefix(parentFn, "~") {
-					if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(full, home) {
-						tagPath = "~" + full[len(home):]
-					}
-				} else if !filepath.IsAbs(parentFn) {
-					cwd, _ := os.Getwd()
-					if rel, err := filepath.Rel(cwd, full); err == nil {
-						if !strings.HasPrefix(rel, ".") && !strings.HasPrefix(rel, "/") {
-							tagPath = "./" + rel
-						} else {
-							tagPath = rel
-						}
-					}
-				}
-			}
-			newWin := target.AddWindow(" "+tagPath+" Get Put Undo Redo Snarf Zerox Del ", content)
-			e.ActivateWindow(newWin)
-			if lineNum >= 0 {
-				newWin.body.GotoLine(lineNum)
-			}
-			target.Resize(target.x, target.y, target.w, target.h)
-			return false
-		}
+		return false
 	}
 
 	// 3. Fallback: Search

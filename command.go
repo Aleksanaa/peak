@@ -79,23 +79,54 @@ func (e *Editor) getArg(win *Window, cmd string) string {
 	return ""
 }
 
-func (e *Editor) resolvePathWithContext(win *Window, path string) string {
-	if path == "" {
-		return ""
-	}
-	if filepath.IsAbs(path) || strings.HasPrefix(path, "~") {
-		return resolvePath(path)
+// resolvePathWithContext is now in plumb.go
+
+func (e *Editor) Open(win *Window, path string) *Window {
+	full := e.resolvePathWithContext(win, path)
+
+	// 1. Try to find existing window
+	for _, c := range e.columns {
+		for _, w := range c.windows {
+			if e.resolvePathWithContext(nil, w.GetFilename()) == full {
+				e.ActivateWindow(w)
+				return w
+			}
+		}
 	}
 
-	dir := ""
-	if win != nil {
-		dir = win.GetDir()
-	} else if e.active != nil {
-		dir = e.active.GetDir()
-	} else {
-		dir, _ = os.Getwd()
+	// 2. Try to open new window
+	if content, err := e.readFileOrDir(full); err == nil {
+		target := e.getTargetColumn(nil, win)
+		if target != nil {
+			tagPath := e.formatPathForTag(win, full)
+			newWin := target.AddWindow(" "+tagPath+" Get Put Undo Redo Snarf Zerox Del ", content)
+			e.ActivateWindow(newWin)
+			target.Resize(target.x, target.y, target.w, target.h)
+			return newWin
+		}
 	}
-	return filepath.Join(dir, path)
+	return nil
+}
+
+func (e *Editor) formatPathForTag(contextWin *Window, fullPath string) string {
+	if contextWin == nil {
+		return fullPath
+	}
+	parentFn := contextWin.GetFilename()
+	if strings.HasPrefix(parentFn, "~") {
+		if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(fullPath, home) {
+			return "~" + fullPath[len(home):]
+		}
+	} else if !filepath.IsAbs(parentFn) {
+		cwd, _ := os.Getwd()
+		if rel, err := filepath.Rel(cwd, fullPath); err == nil {
+			if !strings.HasPrefix(rel, ".") && !strings.HasPrefix(rel, "/") {
+				return "./" + rel
+			}
+			return rel
+		}
+	}
+	return fullPath
 }
 
 func (e *Editor) getTargetWindow(win *Window) *Window {
@@ -229,22 +260,17 @@ func (e *Editor) cmdNewCol() {
 }
 
 func (e *Editor) cmdNew(col *Column, win *Window, cmd string) {
-	targetCol := e.getTargetColumn(col, win)
-	if targetCol == nil {
-		return
-	}
-
 	arg := e.getArg(win, cmd)
 	if arg != "" {
-		path := e.resolvePathWithContext(win, arg)
-		if content, err := e.readFileOrDir(path); err == nil {
-			newWin := targetCol.AddWindow(path+" Get Put Del ", content)
-			e.ActivateWindow(newWin)
-			targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
+		if target := e.Open(win, arg); target != nil {
 			return
 		}
 	}
 
+	targetCol := e.getTargetColumn(col, win)
+	if targetCol == nil {
+		return
+	}
 	newWin := targetCol.AddWindow("", "")
 	e.ActivateWindow(newWin)
 	targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
