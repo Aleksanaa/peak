@@ -778,6 +778,10 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 		}
 		return addr, true
 	case '!':
+		if isPeakPath(ctx.Window.GetFilename()) {
+			ctx.Editor.showError(ctx.Column, ctx.Window, "", ctx.Window.GetFilename()+": cannot execute external command in virtual filesystem")
+			return addr, false
+		}
 		dir := ctx.Window.GetDir()
 		ctx.Editor.runAsync(cmd.text, dir, func(out string) {
 			ctx.Editor.showError(ctx.Column, ctx.Window, dir, out)
@@ -791,6 +795,10 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 		}
 		return addr, true
 	case '|', '>', '<':
+		if isPeakPath(ctx.Window.GetFilename()) {
+			ctx.Editor.showError(ctx.Column, ctx.Window, "", ctx.Window.GetFilename()+": cannot execute external command in virtual filesystem")
+			return addr, false
+		}
 		input := string(runes[addr.q0:addr.q1])
 		dir := ctx.Window.GetDir()
 		out, err := runPipe(cmd.cmdc, cmd.text, input, dir)

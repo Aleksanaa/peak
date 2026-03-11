@@ -489,6 +489,11 @@ func (e *Editor) showError(col *Column, win *Window, dir, msg string) {
 }
 
 func (e *Editor) runExternal(col *Column, win *Window, cmd string) {
+	if win != nil && isPeakPath(win.GetFilename()) {
+		e.showError(col, win, "", win.GetFilename()+": cannot execute external command in virtual filesystem")
+		return
+	}
+
 	dir := ""
 	if win != nil {
 		dir = win.GetDir()
