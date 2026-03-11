@@ -1,5 +1,16 @@
 Peak Documentation
 
+                    .          .    
+          .         /\              
+              .    /**\         .   
+      .           /****\   /\       
+           /\    /      \ /**\      
+          /**\  /  /\    /    \     
+         /    \/  /  \  /      \    
+        /      \ /    \/ /\     \   
+       /        \      \/  \/\   \  
+    __/__________\_____/___/__\___\_
+
 Peak is a TUI text editor inspired by the Plan 9 Acme editor. It follows the philosophy that everything is editable text and text is a command.
 
 Documentation Index:
