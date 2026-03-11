@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/uniseg"
 )
 
 type VisualLine struct {
@@ -42,6 +43,17 @@ func NewTextView(text string, x, y, w, h int, style tcell.Style, singleLine, scr
 	return tv
 }
 
+func (tv *TextView) runeWidth(r rune, visualPos int) int {
+	if r == '\t' {
+		return tv.tabWidth - (visualPos % tv.tabWidth)
+	}
+	w := uniseg.StringWidth(string(r))
+	if w == 0 {
+		return 0
+	}
+	return w
+}
+
 func (tv *TextView) UpdateLayout() {
 	if tv.w <= 0 {
 		return
@@ -65,16 +77,11 @@ func (tv *TextView) UpdateLayout() {
 		}
 		visualPos, start := 0, 0
 		for idx, r := range line {
-			width := 1
-			if r == '\t' {
-				width = tv.tabWidth - (visualPos % tv.tabWidth)
-			}
+			width := tv.runeWidth(r, visualPos)
 			if visualPos+width > tv.w && visualPos > 0 {
 				tv.layout = append(tv.layout, VisualLine{i, start, idx})
 				start, visualPos = idx, 0
-				if r == '\t' {
-					width = tv.tabWidth
-				}
+				width = tv.runeWidth(r, visualPos)
 			}
 			visualPos += width
 		}
@@ -134,11 +141,7 @@ func (tv *TextView) bufferToVisual(bx, by int) (int, int) {
 			vx := 0
 			line := tv.buffer.lines[by]
 			for i := vl.Start; i < bx; i++ {
-				if line[i] == '\t' {
-					vx += tv.tabWidth - (vx % tv.tabWidth)
-				} else {
-					vx++
-				}
+				vx += tv.runeWidth(line[i], vx)
 			}
 			// Wrap edge case: if cursor is exactly at width, move to next visual line
 			if vx >= tv.w && lidx+1 < len(tv.layout) && tv.layout[lidx+1].BufferLine == by {
@@ -162,10 +165,7 @@ func (tv *TextView) visualToBuffer(vx, vidx int) (int, int) {
 	line := tv.buffer.lines[vl.BufferLine]
 	bx, currVX := vl.Start, 0
 	for i := vl.Start; i < vl.End; i++ {
-		w := 1
-		if line[i] == '\t' {
-			w = tv.tabWidth - (currVX % tv.tabWidth)
-		}
+		w := tv.runeWidth(line[i], currVX)
 		if currVX+w/2 > vx {
 			break
 		}
@@ -195,15 +195,23 @@ func (tv *TextView) Draw(s tcell.Screen) {
 			if tv.buffer.IsSelected(idx, vl.BufferLine) {
 				style = selStyle
 			}
+			width := tv.runeWidth(r, vcol)
 			if r == '\t' {
-				tw := tv.tabWidth - (vcol % tv.tabWidth)
-				for k := 0; k < tw && vcol < tv.w; k++ {
+				for k := 0; k < width && vcol < tv.w; k++ {
 					s.SetContent(tv.x+vcol, tv.y+vrow, ' ', nil, style)
 					vcol++
 				}
 			} else {
-				s.SetContent(tv.x+vcol, tv.y+vrow, r, nil, style)
-				vcol++
+				if vcol+width <= tv.w {
+					s.SetContent(tv.x+vcol, tv.y+vrow, r, nil, style)
+					vcol += width
+				} else {
+					// Character doesn't fit, fill with spaces
+					for vcol < tv.w {
+						s.SetContent(tv.x+vcol, tv.y+vrow, ' ', nil, style)
+						vcol++
+					}
+				}
 			}
 		}
 		for ; vcol < tv.w; vcol++ {
