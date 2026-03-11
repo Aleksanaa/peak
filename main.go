@@ -2,6 +2,8 @@ package main
 
 import (
 	"log"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -39,6 +41,7 @@ var defaultTheme = Theme{
 
 // Editor is the main application state.
 type Editor struct {
+	CmdChan     chan func()
 	screen      tcell.Screen
 	tag         *TextView
 	columns     []*Column
@@ -57,11 +60,34 @@ type Editor struct {
 	lastWidth       int
 	lastClickY      int
 	theme           Theme
+	nextWinID       int
+	ninep           *NineP
+}
+
+func (e *Editor) Call(f func()) {
+	done := make(chan struct{})
+	e.CmdChan <- func() {
+		f()
+		close(done)
+	}
+	<-done
 }
 
 // Init sets up the initial editor state with two columns.
 func (e *Editor) Init() {
+	user, _ := os.UserHomeDir()
+	logDir := filepath.Join(user, ".peak")
+	os.MkdirAll(logDir, 0700)
+	logFile, err := os.OpenFile(filepath.Join(logDir, "log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err == nil {
+		log.SetOutput(logFile)
+	}
+
+	e.CmdChan = make(chan func())
 	e.theme = defaultTheme
+	e.nextWinID = 1
+	e.ninep = NewNineP(e)
+	e.ninep.Listen()
 	s, err := tcell.NewScreen()
 	if err != nil {
 		log.Fatalf("%+v", err)
@@ -124,6 +150,8 @@ func (e *Editor) Run() {
 					return
 				}
 			}
+		case fn := <-e.CmdChan:
+			fn()
 		case <-ticker.C:
 			if e.scrollWin != nil && time.Since(e.scrollStartTime) > 200*time.Millisecond {
 				e.scrollWin.body.Scroll(e.scrollDir * e.scrollAmount)
@@ -218,7 +246,7 @@ func (e *Editor) HandleEvent(ev tcell.Event) bool {
 		}
 	case *tcell.EventResize:
 		e.width, e.height = e.screen.Size()
-		e.Resize()
+		e.resize()
 		e.screen.Sync()
 	}
 	return false
@@ -267,7 +295,7 @@ func (e *Editor) moveColumnTo(col *Column, mx int) {
 			col.explicitWidth = combinedW - prev.explicitWidth
 		}
 	}
-	e.Resize()
+	e.resize()
 }
 
 func (e *Editor) moveWindowTo(win *Window, mx, my int) {
@@ -343,6 +371,10 @@ func (e *Editor) moveWindowTo(win *Window, mx, my int) {
 }
 
 func (e *Editor) Resize() {
+	e.resize()
+}
+
+func (e *Editor) resize() {
 	if len(e.columns) == 0 {
 		return
 	}
@@ -437,9 +469,11 @@ func distributeSpace(totalSpace int, count int, getExplicit func(int) int, getMi
 	return heights
 }
 
+var appEditor *Editor
+
 func main() {
-	editor := &Editor{}
-	editor.Init()
-	defer editor.screen.Fini()
-	editor.Run()
+	appEditor = &Editor{}
+	appEditor.Init()
+	defer appEditor.screen.Fini()
+	appEditor.Run()
 }

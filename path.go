@@ -1,16 +1,11 @@
 package main
 
 import (
-	"embed"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 )
-
-//go:embed doc
-var docFS embed.FS
 
 func isSpecial(path string) bool {
 	return strings.HasSuffix(path, "+Errors")
@@ -36,15 +31,10 @@ func isDir(path string) bool {
 		return false
 	}
 	if isPeakPath(path) {
-		if path == "/peak" || path == "/peak/" {
-			return true
+		if appEditor != nil && appEditor.ninep != nil {
+			return appEditor.ninep.IsDirInternal(path)
 		}
-		trimmed := trimPeak(path)
-		if trimmed == "doc" {
-			return true
-		}
-		info, err := fs.Stat(docFS, trimmed)
-		return err == nil && info.IsDir()
+		return path == "/peak" || path == "/peak/"
 	}
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
@@ -55,9 +45,10 @@ func isFile(path string) bool {
 		return false
 	}
 	if isPeakPath(path) {
-		trimmed := trimPeak(path)
-		info, err := fs.Stat(docFS, trimmed)
-		return err == nil && !info.IsDir()
+		if appEditor != nil && appEditor.ninep != nil {
+			return appEditor.ninep.IsFileInternal(path)
+		}
+		return false
 	}
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
@@ -188,8 +179,10 @@ func readFile(path string) ([]byte, error) {
 		return nil, os.ErrInvalid
 	}
 	if isPeakPath(path) {
-		trimmed := trimPeak(path)
-		return fs.ReadFile(docFS, trimmed)
+		if appEditor != nil && appEditor.ninep != nil {
+			return appEditor.ninep.ReadInternal(path)
+		}
+		return nil, os.ErrNotExist
 	}
 	return os.ReadFile(path)
 }
@@ -214,38 +207,24 @@ func readFileOrDir(path string) (string, error) {
 	return string(data), nil
 }
 
-func trimPeak(path string) string {
-	p := strings.TrimPrefix(path, "/peak")
-	p = strings.TrimPrefix(p, "/")
-	return strings.TrimSuffix(p, "/")
-}
-
 // listDir returns a formatted string listing the contents of a directory.
 func listDir(path string) (string, error) {
-	var entries []fs.DirEntry
-	var err error
-
 	if isPeakPath(path) {
-		if path == "/peak" || path == "/peak/" {
-			entries = append(entries, &mockDirEntry{name: "doc", isDir: true})
-		} else {
-			trimmed := trimPeak(path)
-			entries, err = fs.ReadDir(docFS, trimmed)
-			if err != nil {
-				return "", err
-			}
+		if appEditor != nil && appEditor.ninep != nil {
+			return appEditor.ninep.ListDirInternal(path)
 		}
-	} else {
-		entries, err = os.ReadDir(path)
-		if err != nil {
-			return "", err
-		}
-		if path == "/" {
-			entries = append(entries, &mockDirEntry{name: "peak", isDir: true})
-			sort.Slice(entries, func(i, j int) bool {
-				return entries[i].Name() < entries[j].Name()
-			})
-		}
+		return "", os.ErrNotExist
+	}
+
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return "", err
+	}
+	if path == "/" {
+		entries = append(entries, &mockDirEntry{name: "peak", isDir: true})
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].Name() < entries[j].Name()
+		})
 	}
 
 	var sb strings.Builder
@@ -266,8 +245,8 @@ type mockDirEntry struct {
 
 func (m *mockDirEntry) Name() string               { return m.name }
 func (m *mockDirEntry) IsDir() bool                { return m.isDir }
-func (m *mockDirEntry) Type() fs.FileMode           { return 0 }
-func (m *mockDirEntry) Info() (fs.FileInfo, error) { return nil, nil }
+func (m *mockDirEntry) Type() os.FileMode          { return 0 }
+func (m *mockDirEntry) Info() (os.FileInfo, error) { return nil, nil }
 
 func join(elem ...string) string {
 	return filepath.Join(elem...)

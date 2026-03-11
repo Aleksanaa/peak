@@ -139,6 +139,31 @@ func (b *Buffer) IsSelected(x, y int) bool {
 	return true
 }
 
+func (b *Buffer) Len() int {
+	count := 0
+	for i, line := range b.lines {
+		count += len(line)
+		if i < len(b.lines)-1 {
+			count++ // \n
+		}
+	}
+	return count
+}
+
+func (b *Buffer) RunesInRange(q0, q1 int) []rune {
+	all := b.GetRunes()
+	if q0 < 0 {
+		q0 = 0
+	}
+	if q1 > len(all) {
+		q1 = len(all)
+	}
+	if q0 > q1 {
+		return nil
+	}
+	return all[q0:q1]
+}
+
 func (b *Buffer) orderedSelection() (Cursor, Cursor) {
 	start, end := *b.selectionStart, *b.selectionEnd
 	if start.y > end.y || (start.y == end.y && start.x > end.x) {

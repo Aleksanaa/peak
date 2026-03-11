@@ -38,6 +38,8 @@ func (c *Column) AddWindow(tagText, bodyText string) *Window {
 	}
 
 	newWin := NewWindow(tagText, bodyText, c, c.editor, c.x, c.y, c.w, 0, c.onExec)
+	newWin.ID = c.editor.nextWinID
+	c.editor.nextWinID++
 	c.windows = append(c.windows, newWin)
 	return newWin
 }
