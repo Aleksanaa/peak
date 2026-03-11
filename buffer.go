@@ -155,6 +155,17 @@ func (b *Buffer) GetText() string {
 	return sb.String()
 }
 
+func (b *Buffer) GetRunes() []rune {
+	var res []rune
+	for i, line := range b.lines {
+		res = append(res, line...)
+		if i < len(b.lines)-1 {
+			res = append(res, '\n')
+		}
+	}
+	return res
+}
+
 func (b *Buffer) SetText(content string) {
 	if len(b.history) > 0 || len(b.lines) > 1 || len(b.lines[0]) > 0 {
 		b.saveState()
@@ -327,6 +338,45 @@ func (b *Buffer) ByteOffsetToCursor(offset int) Cursor {
 	}
 	lastY := len(b.lines) - 1
 	return Cursor{len(b.lines[lastY]), lastY}
+}
+
+func (b *Buffer) ReplaceRangeRunes(q0, q1 int, runes []rune) {
+	// Convert rune offsets to cursors
+	full := b.GetRunes()
+	if q0 < 0 {
+		q0 = 0
+	}
+	if q1 > len(full) {
+		q1 = len(full)
+	}
+	if q0 > q1 {
+		q0, q1 = q1, q0
+	}
+
+	startByte := len(string(full[:q0]))
+	endByte := startByte + len(string(full[q0:q1]))
+
+	start := b.ByteOffsetToCursor(startByte)
+	end := b.ByteOffsetToCursor(endByte)
+	b.SetTextInRange(start, end, string(runes))
+}
+
+func (b *Buffer) CursorToRuneOffset(c Cursor) int {
+	byteOff := b.CursorToByteOffset(c)
+	text := b.GetText()
+	if byteOff > len(text) {
+		byteOff = len(text)
+	}
+	return len([]rune(text[:byteOff]))
+}
+
+func (b *Buffer) RuneOffsetToCursor(off int) Cursor {
+	full := b.GetRunes()
+	if off > len(full) {
+		off = len(full)
+	}
+	byteOff := len(string(full[:off]))
+	return b.ByteOffsetToCursor(byteOff)
 }
 
 func (b *Buffer) MoveHome() { b.cursor.x = 0 }

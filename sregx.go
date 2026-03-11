@@ -1,522 +1,841 @@
-/*
-MIT License
-
-Copyright (c) 2021: Zachary Yedidia.
-
-Permission is hereby granted, free of charge, to any person obtaining
-a copy of this software and associated documentation files (the
-"Software"), to deal in the Software without restriction, including
-without limitation the rights to use, copy, modify, merge, publish,
-distribute, sublicense, and/or sell copies of the Software, and to
-permit persons to whom the Software is furnished to do so, subject to
-the following conditions:
-
-The above copyright notice and this permission notice shall be
-included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
+// Package sregx implements a structural regular expression engine for the Peak editor.
+// It is inspired by the Acme text editor's 'Edit' command and provides a simplified
+// implementation of its recursive descent parser and command execution logic.
+// It utilizes a modified version of Edwood's regexp engine for Plan 9 semantics.
 
 package main
 
 import (
-	"bytes"
+	"fmt"
 	"io"
-	"regexp"
-	"strconv"
+	"os"
+	"os/exec"
+	"strings"
 
-	"github.com/zyedidia/gpeg/capture"
-	"github.com/zyedidia/gpeg/charset"
-	"github.com/zyedidia/gpeg/input"
-	"github.com/zyedidia/gpeg/memo"
-	p "github.com/zyedidia/gpeg/pattern"
-	"github.com/zyedidia/gpeg/vm"
+	"github.com/aleksana/peak/regexp"
 )
 
-// A Command modifies an input byte slice in some way and returns the new one.
-type Command interface {
-	Evaluate(b []byte) []byte
+type Range struct {
+	q0, q1 int
 }
 
-// A CommandPipeline represents a list of commands chained together in a
-// pipeline.
-type CommandPipeline []Command
+type Addr struct {
+	typ  rune // # (byte addr), l (line addr), / ? . $ + - , ; "
+	re   string
+	left *Addr // left side of , and ;
+	num  int
+	next *Addr // or right side of , and ;
+}
 
-// Evaluate runs each command in the pipeline, passing the previous command's
-// output as the next command's input.
-func (cp CommandPipeline) Evaluate(b []byte) []byte {
-	for _, c := range cp {
-		b = c.Evaluate(b)
+type Cmd struct {
+	addr   *Addr  // address (range of text)
+	re     string // regular expression for e.g. 'x'
+	cmd    *Cmd   // target of x, g, {, etc.
+	text   string // text of a, c, i; rhs of s
+	mtaddr *Addr  // address for m, t
+	next   *Cmd   // pointer to next element in braces
+	num    int
+	flag   rune // 'g' for substitution
+	cmdc   rune // command character; 'x', 's', etc.
+}
+
+type SregxResult struct {
+	Cmd *Cmd
+}
+
+type Context struct {
+	Editor *Editor
+	Buffer *Buffer
+	Out    io.Writer
+}
+
+var lastpat string
+
+func SregxCompile(s string, out io.Writer) (*SregxResult, error) {
+	if !strings.HasSuffix(s, "\n") {
+		s += "\n"
 	}
-	return b
-}
-
-type X struct {
-	Patt *regexp.Regexp
-	Cmd  Command
-}
-
-func (x X) Evaluate(b []byte) []byte {
-	return x.Patt.ReplaceAllFunc(b, func(b []byte) []byte {
-		return x.Cmd.Evaluate(b)
-	})
-}
-
-type Y struct {
-	Patt *regexp.Regexp
-	Cmd  Command
-}
-
-func (y Y) Evaluate(b []byte) []byte {
-	return ReplaceAllComplementFunc(y.Patt, b, func(b []byte) []byte {
-		return y.Cmd.Evaluate(b)
-	})
-}
-
-type G struct {
-	Patt *regexp.Regexp
-	Cmd  Command
-}
-
-func (g G) Evaluate(b []byte) []byte {
-	if g.Patt.Match(b) {
-		return g.Cmd.Evaluate(b)
+	cp := &cmdParser{buf: []rune(s)}
+	cmd, err := cp.parse(0)
+	if err != nil {
+		return nil, err
 	}
-	return b
+	return &SregxResult{Cmd: cmd}, nil
 }
 
-type V struct {
-	Patt *regexp.Regexp
-	Cmd  Command
+type cmdParser struct {
+	buf []rune
+	pos int
 }
 
-func (v V) Evaluate(b []byte) []byte {
-	if !v.Patt.Match(b) {
-		return v.Cmd.Evaluate(b)
+func (cp *cmdParser) getch() rune {
+	if cp.pos >= len(cp.buf) {
+		return -1
 	}
-	return b
+	c := cp.buf[cp.pos]
+	cp.pos++
+	return c
 }
 
-type S struct {
-	Patt    *regexp.Regexp
-	Replace []byte
-}
-
-func (s S) Evaluate(b []byte) []byte {
-	return s.Patt.ReplaceAll(b, s.Replace)
-}
-
-type P struct {
-	W io.Writer
-}
-
-func (p P) Evaluate(b []byte) []byte {
-	p.W.Write(b)
-	return b
-}
-
-type D struct{}
-
-func (d D) Evaluate(b []byte) []byte {
-	return []byte{}
-}
-
-type C struct {
-	Change []byte
-}
-
-func (c C) Evaluate(b []byte) []byte {
-	return c.Change
-}
-
-type None struct{}
-
-func (n None) Evaluate(b []byte) []byte {
-	return b
-}
-
-type N struct {
-	Start int
-	End   int
-	Cmd   Command
-}
-
-func (n N) Evaluate(b []byte) []byte {
-	if n.Start < 0 {
-		n.Start = len(b) + 1 + n.Start
+func (cp *cmdParser) ungetch() {
+	if cp.pos > 0 {
+		cp.pos--
 	}
-	if n.End < 0 {
-		n.End = len(b) + 1 + n.End
+}
+
+func (cp *cmdParser) nextc() rune {
+	if cp.pos >= len(cp.buf) {
+		return -1
 	}
-	n.Start = clamp(n.Start, 0, len(b))
-	n.End = clamp(n.End, 0, len(b))
-	return ReplaceSlice(b, n.Start, n.End, n.Cmd.Evaluate(b[n.Start:n.End]))
+	return cp.buf[cp.pos]
 }
 
-type L struct {
-	Start int
-	End   int
-	Cmd   Command
-}
-
-func (l L) Evaluate(b []byte) []byte {
-	if l.Start < 0 || l.End < 0 {
-		nlines := bytes.Count(b, []byte{'\n'})
-		if l.Start < 0 {
-			l.Start = nlines + 1 + l.Start
-		}
-		if l.End < 0 {
-			l.End = nlines + 1 + l.End
-		}
-	}
-	start := IndexN(b, []byte{'\n'}, l.Start) + 1
-	end := IndexN(b, []byte{'\n'}, l.End) + 1
-	start = clamp(start, 0, len(b))
-	end = clamp(end, 0, len(b))
-	return ReplaceSlice(b, start, end, l.Cmd.Evaluate(b[start:end]))
-}
-
-type U struct {
-	Evaluator Evaluator
-}
-
-func (u U) Evaluate(b []byte) []byte {
-	return u.Evaluator(b)
-}
-
-type Evaluator func(b []byte) []byte
-
-func ReplaceAllComplementFunc(re *regexp.Regexp, b []byte, repl func([]byte) []byte) []byte {
-	matches := re.FindAllIndex(b, -1)
-	buf := make([]byte, 0, len(b))
-	beg := 0
-	end := 0
-	for _, match := range matches {
-		end = match[0]
-		if match[1] != 0 {
-			buf = append(buf, repl(b[beg:end])...)
-			buf = append(buf, b[end:match[1]]...)
-		}
-		beg = match[1]
-	}
-	if end != len(b) {
-		buf = append(buf, repl(b[beg:])...)
-	}
-	return buf
-}
-
-func IndexN(b, sep []byte, n int) (index int) {
-	index, idx, sepLen := 0, -1, len(sep)
-	for i := 0; i < n; i++ {
-		if idx = bytes.Index(b, sep); idx == -1 {
+func (cp *cmdParser) skipbl() rune {
+	var c rune
+	for {
+		c = cp.getch()
+		if !(c == ' ' || c == '\t') {
 			break
 		}
-		b = b[idx+sepLen:]
-		index += idx
 	}
-	if idx == -1 {
-		index = -1
+	if c >= 0 {
+		cp.ungetch()
+	}
+	return c
+}
+
+func (cp *cmdParser) getnum(signok bool) int {
+	n := 0
+	sign := 1
+	if signok && cp.nextc() == '-' {
+		sign = -1
+		cp.getch()
+	}
+	c := cp.nextc()
+	if c < '0' || '9' < c {
+		return sign
+	}
+	for {
+		c = cp.getch()
+		if !('0' <= c && c <= '9') {
+			break
+		}
+		n = n*10 + int(c-'0')
+	}
+	cp.ungetch()
+	return sign * n
+}
+
+func (cp *cmdParser) getregexp(delim rune) (string, error) {
+	var buf strings.Builder
+	for {
+		c := cp.getch()
+		if c == '\\' {
+			if cp.nextc() == delim {
+				c = cp.getch()
+			} else if cp.nextc() == '\\' {
+				buf.WriteRune('\\')
+				c = cp.getch()
+			}
+		} else if c == delim || c == '\n' || c == -1 {
+			break
+		}
+		buf.WriteRune(c)
+	}
+	if len(buf.String()) > 0 {
+		lastpat = buf.String()
+	}
+	if len(lastpat) == 0 {
+		return "", fmt.Errorf("no regular expression")
+	}
+	return lastpat, nil
+}
+
+func (cp *cmdParser) getrhs(delim rune) (string, error) {
+	var buf strings.Builder
+	for {
+		c := cp.getch()
+		if c <= 0 || c == delim || c == '\n' {
+			break
+		}
+		if c == '\\' {
+			c = cp.getch()
+			if c <= 0 {
+				return "", fmt.Errorf("bad right hand side")
+			}
+			if c == '\n' {
+				cp.ungetch()
+				c = '\\'
+			} else if c == 'n' {
+				c = '\n'
+			} else if c != delim {
+				buf.WriteRune('\\')
+			}
+		}
+		buf.WriteRune(c)
+	}
+	cp.ungetch()
+	return buf.String(), nil
+}
+
+func (cp *cmdParser) simpleaddr() (*Addr, error) {
+	addr := &Addr{}
+	switch cp.skipbl() {
+	case '#':
+		addr.typ = cp.getch()
+		addr.num = cp.getnum(false)
+	case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+		addr.typ = 'l'
+		addr.num = cp.getnum(false)
+	case '/', '?', '"':
+		addr.typ = cp.getch()
+		re, err := cp.getregexp(addr.typ)
+		if err != nil {
+			return nil, err
+		}
+		addr.re = re
+	case '.', '$', '+', '-':
+		addr.typ = cp.getch()
+	default:
+		return nil, nil
+	}
+	next, err := cp.simpleaddr()
+	if err != nil {
+		return nil, err
+	}
+	if next != nil {
+		if next.typ == '.' || next.typ == '$' {
+			if addr.typ != '"' {
+				return nil, fmt.Errorf("bad address syntax")
+			}
+		} else if next.typ == 'l' || next.typ == '#' || next.typ == '/' || next.typ == '?' {
+			if addr.typ != '+' && addr.typ != '-' {
+				nap := &Addr{typ: '+', next: next}
+				addr.next = nap
+				return addr, nil
+			}
+		}
+		addr.next = next
+	}
+	return addr, nil
+}
+
+func (cp *cmdParser) compoundaddr() (*Addr, error) {
+	left, err := cp.simpleaddr()
+	if err != nil {
+		return nil, err
+	}
+	typ := cp.skipbl()
+	if typ != ',' && typ != ';' {
+		return left, nil
+	}
+	cp.getch()
+	right, err := cp.compoundaddr()
+	if err != nil {
+		return nil, err
+	}
+	return &Addr{typ: typ, left: left, next: right}, nil
+}
+
+func (cp *cmdParser) parse(nest int) (*Cmd, error) {
+	addr, err := cp.compoundaddr()
+	if err != nil {
+		return nil, err
+	}
+	cp.skipbl()
+	c := cp.getch()
+	if c == -1 || c == '\n' {
+		return &Cmd{addr: addr, cmdc: '\n'}, nil
+	}
+	cmd := &Cmd{addr: addr, cmdc: c}
+	i := cmdlookup(c)
+	if i >= 0 {
+		ct := &cmdtab[i]
+		if ct.count != 0 {
+			cmd.num = cp.getnum(ct.count == 2)
+		}
+		if ct.regexp {
+			cp.skipbl()
+			delim := cp.getch()
+			if delim == '\n' || delim < 0 {
+				return nil, fmt.Errorf("address missing")
+			}
+			re, err := cp.getregexp(delim)
+			if err != nil {
+				return nil, err
+			}
+			cmd.re = re
+			if ct.cmdc == 's' {
+				cmd.text, err = cp.getrhs(delim)
+				if err != nil {
+					return nil, err
+				}
+				if cp.nextc() == delim {
+					cp.getch()
+					if cp.nextc() == 'g' {
+						cmd.flag = cp.getch()
+					}
+				}
+			}
+		}
+		if ct.addr {
+			var err error
+			cmd.mtaddr, err = cp.simpleaddr()
+			if err != nil {
+				return nil, err
+			}
+			if cmd.mtaddr == nil {
+				return nil, fmt.Errorf("bad address")
+			}
+		}
+		if ct.text {
+			cmd.text, err = cp.collecttext()
+			if err != nil {
+				return nil, err
+			}
+		}
+		if ct.defcmd != 0 {
+			if cp.skipbl() == '\n' {
+				cp.getch()
+				cmd.cmd = &Cmd{cmdc: ct.defcmd}
+			} else {
+				cmd.cmd, err = cp.parse(nest)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+	} else if c == '{' {
+		var head, last *Cmd
+		for {
+			if head != nil && cp.skipbl() == '\n' {
+				cp.getch()
+			}
+			if cp.nextc() == '}' {
+				cp.getch()
+				break
+			}
+			nc, err := cp.parse(nest + 1)
+			if err != nil {
+				return nil, err
+			}
+			if nc == nil {
+				break
+			}
+			if head == nil {
+				head = nc
+			} else {
+				last.next = nc
+			}
+			last = nc
+		}
+		cmd.cmd = head
+	} else if c == '}' {
+		if nest == 0 {
+			return nil, fmt.Errorf("right brace with no left brace")
+		}
+		return nil, nil
+	} else if c == '|' || c == '>' || c == '<' {
+		cmd.text = cp.collecttoken("\n")
 	} else {
-		index += (n - 1) * sepLen
+		return nil, fmt.Errorf("unknown command %c", c)
 	}
-	return
+	return cmd, nil
 }
 
-func ReplaceSlice(b []byte, start, end int, repl []byte) []byte {
-	dst := make([]byte, 0, len(b)-end+start+len(repl))
-	dst = append(dst, b[:start]...)
-	dst = append(dst, repl...)
-	dst = append(dst, b[end:]...)
-	return dst
+func (cp *cmdParser) collecttoken(end string) string {
+	var s strings.Builder
+	for {
+		c := cp.getch()
+		if c <= 0 || strings.ContainsRune(end, c) {
+			break
+		}
+		s.WriteRune(c)
+	}
+	return s.String()
 }
 
-func clamp(a, start, end int) int {
-	if a > end {
-		return end
+func (cp *cmdParser) collecttext() (string, error) {
+	if cp.skipbl() == '\n' {
+		cp.getch()
+		var buf strings.Builder
+		for {
+			var line strings.Builder
+			for {
+				c := cp.getch()
+				if c <= 0 || c == '\n' {
+					break
+				}
+				line.WriteRune(c)
+			}
+			if line.String() == "." {
+				break
+			}
+			buf.WriteString(line.String())
+			buf.WriteRune('\n')
+		}
+		return buf.String(), nil
 	}
-	if a < start {
-		return start
+	delim := cp.getch()
+	s, err := cp.getrhs(delim)
+	if err != nil {
+		return "", err
+	}
+	if cp.nextc() == delim {
+		cp.getch()
+	}
+	return s, nil
+}
+
+type cmdtab_entry struct {
+	cmdc    rune
+	text    bool
+	regexp  bool
+	addr    bool // for m, t
+	defcmd  rune
+	defaddr int // 0: no, 1: dot, 2: all
+	count   int // 0: no, 1: unsigned, 2: signed
+}
+
+var cmdtab = []cmdtab_entry{
+	{'\n', false, false, false, 0, 1, 0},
+	{'a', true, false, false, 0, 1, 0},
+	{'c', true, false, false, 0, 1, 0},
+	{'d', false, false, false, 0, 1, 0},
+	{'g', false, true, false, 'p', 1, 0},
+	{'i', true, false, false, 0, 1, 0},
+	{'m', false, false, true, 0, 1, 0},
+	{'p', false, false, false, 0, 1, 0},
+	{'s', false, true, false, 0, 1, 1},
+	{'t', false, false, true, 0, 1, 0},
+	{'u', false, false, false, 0, 0, 2},
+	{'v', false, true, false, 'p', 1, 0},
+	{'w', false, false, false, 0, 2, 0},
+	{'x', false, true, false, 'p', 1, 0},
+	{'y', false, true, false, 'p', 1, 0},
+	{'=', false, false, false, 0, 1, 0},
+	{'X', false, true, false, 'f', 0, 0},
+	{'Y', false, true, false, 'f', 0, 0},
+}
+
+func cmdlookup(c rune) int {
+	for i, ent := range cmdtab {
+		if ent.cmdc == c {
+			return i
+		}
+	}
+	return -1
+}
+
+func compileRegex(pat string) (*regexp.Regexp, error) {
+	return regexp.CompileAcme(pat)
+}
+
+func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
+	addr := dot
+	runes := ctx.Buffer.GetRunes()
+	if cmd.addr != nil {
+		addr = cmdaddress(cmd.addr, dot, runes, 0)
+	} else {
+		i := cmdlookup(cmd.cmdc)
+		if i >= 0 && cmdtab[i].defaddr == 2 {
+			addr = Range{0, len(runes)}
+		}
+	}
+
+	switch cmd.cmdc {
+	case '\n':
+		return addr, true
+	case 'p':
+		if ctx.Out != nil {
+			ctx.Out.Write([]byte(string(runes[addr.q0:addr.q1])))
+			ctx.Out.Write([]byte{'\n'})
+		}
+		return addr, true
+	case 'd':
+		ctx.Buffer.ReplaceRangeRunes(addr.q0, addr.q1, nil)
+		return Range{addr.q0, addr.q0}, true
+	case 'a':
+		ctx.Buffer.ReplaceRangeRunes(addr.q1, addr.q1, []rune(cmd.text))
+		return Range{addr.q1, addr.q1 + len([]rune(cmd.text))}, true
+	case 'i':
+		ctx.Buffer.ReplaceRangeRunes(addr.q0, addr.q0, []rune(cmd.text))
+		return Range{addr.q0, addr.q0 + len([]rune(cmd.text))}, true
+	case 'c':
+		ctx.Buffer.ReplaceRangeRunes(addr.q0, addr.q1, []rune(cmd.text))
+		return Range{addr.q0, addr.q0 + len([]rune(cmd.text))}, true
+	case 'm', 't':
+		addr2 := cmdaddress(cmd.mtaddr, dot, runes, 0)
+		text := append([]rune{}, runes[addr.q0:addr.q1]...)
+		if cmd.cmdc == 'm' {
+			if addr.q1 <= addr2.q0 {
+				ctx.Buffer.ReplaceRangeRunes(addr2.q1, addr2.q1, text)
+				ctx.Buffer.ReplaceRangeRunes(addr.q0, addr.q1, nil)
+			} else if addr.q0 >= addr2.q1 {
+				ctx.Buffer.ReplaceRangeRunes(addr.q0, addr.q1, nil)
+				ctx.Buffer.ReplaceRangeRunes(addr2.q1, addr2.q1, text)
+			} else {
+				// overlap, ignore as in Acme
+			}
+		} else {
+			ctx.Buffer.ReplaceRangeRunes(addr2.q1, addr2.q1, text)
+		}
+		return addr, true
+	case 'x', 'y':
+		re, err := compileRegex(cmd.re)
+		if err != nil {
+			return addr, false
+		}
+		text := runes[addr.q0:addr.q1]
+
+		var rp []Range
+		if cmd.cmdc == 'x' {
+			matches := re.FindForward(text, 0, -1, -1)
+			for _, m := range matches {
+				rp = append(rp, Range{addr.q0 + m[0], addr.q0 + m[1]})
+			}
+		} else {
+			matches := re.FindForward(text, 0, -1, -1)
+			op := 0
+			for _, m := range matches {
+				rp = append(rp, Range{addr.q0 + op, addr.q0 + m[0]})
+				op = m[1]
+			}
+			rp = append(rp, Range{addr.q0 + op, addr.q1})
+		}
+
+		for i := len(rp) - 1; i >= 0; i-- {
+			cmd.cmd.Execute(ctx, rp[i])
+		}
+		return addr, true
+	case 's':
+		re, err := compileRegex(cmd.re)
+		if err != nil {
+			return addr, false
+		}
+		text := runes[addr.q0:addr.q1]
+		
+		var matches [][]int
+		all := re.FindForward(text, 0, -1, -1)
+		if len(all) >= cmd.num {
+			if cmd.flag == 'g' {
+				matches = all[cmd.num-1:]
+			} else {
+				matches = [][]int{all[cmd.num-1]}
+			}
+		}
+
+		if len(matches) == 0 {
+			return addr, true
+		}
+
+		// Apply replacements from back to front to avoid offset issues
+		for i := len(matches) - 1; i >= 0; i-- {
+			m := matches[i]
+			expanded := expand(cmd.text, text, m)
+			q0 := addr.q0 + m[0]
+			q1 := addr.q0 + m[1]
+			ctx.Buffer.ReplaceRangeRunes(q0, q1, []rune(expanded))
+		}
+		return addr, true
+	case 'g', 'v':
+		re, err := compileRegex(cmd.re)
+		if err != nil {
+			return addr, false
+		}
+		match := re.MatchString(string(runes[addr.q0:addr.q1]))
+		if (cmd.cmdc == 'g' && match) || (cmd.cmdc == 'v' && !match) {
+			return cmd.cmd.Execute(ctx, addr)
+		}
+		return addr, true
+	case 'X', 'Y':
+		re, err := compileRegex(cmd.re)
+		if err != nil {
+			return addr, false
+		}
+		for _, col := range ctx.Editor.columns {
+			for _, win := range col.windows {
+				filename := win.GetFilename()
+				match := re.MatchString(filename)
+				if (cmd.cmdc == 'X' && match) || (cmd.cmdc == 'Y' && !match) {
+					subCtx := &Context{Editor: ctx.Editor, Buffer: win.body.buffer, Out: ctx.Out}
+					subDot := Range{win.body.buffer.CursorToRuneOffset(win.body.buffer.cursor), win.body.buffer.CursorToRuneOffset(win.body.buffer.cursor)}
+					if win.body.buffer.selectionStart != nil {
+						s, e := win.body.buffer.orderedSelection()
+						subDot = Range{win.body.buffer.CursorToRuneOffset(s), win.body.buffer.CursorToRuneOffset(e)}
+					}
+					cmd.cmd.Execute(subCtx, subDot)
+				}
+			}
+		}
+		return addr, true
+	case 'u':
+		for i := 0; i < cmd.num; i++ {
+			ctx.Buffer.Undo()
+		}
+		return addr, true
+	case 'w':
+		filename := cmd.text
+		if filename == "" {
+			filename = ctx.Editor.active.GetFilename()
+		}
+		if filename != "" && !strings.HasSuffix(filename, "/") {
+			err := os.WriteFile(filename, []byte(ctx.Buffer.GetText()), 0644)
+			if err != nil && ctx.Out != nil {
+				ctx.Out.Write([]byte(err.Error() + "\n"))
+			}
+		}
+		return addr, true
+	case '=':
+		if ctx.Out != nil {
+			ctx.Out.Write([]byte(fmt.Sprintf("#%d,#%d\n", addr.q0, addr.q1)))
+		}
+		return addr, true
+	case '{':
+		curr := cmd.cmd
+		for curr != nil {
+			addr, _ = curr.Execute(ctx, addr)
+			curr = curr.next
+		}
+		return addr, true
+	case '|', '>', '<':
+		input := string(runes[addr.q0:addr.q1])
+		out, err := runPipe(cmd.cmdc, cmd.text, input)
+		if err != nil {
+			if ctx.Out != nil {
+				ctx.Out.Write([]byte(err.Error() + "\n"))
+			}
+			return addr, false
+		}
+		if cmd.cmdc == '|' || cmd.cmdc == '<' {
+			ctx.Buffer.ReplaceRangeRunes(addr.q0, addr.q1, []rune(out))
+			return Range{addr.q0, addr.q0 + len([]rune(out))}, true
+		}
+		if ctx.Out != nil && len(out) > 0 {
+			ctx.Out.Write([]byte(out))
+		}
+		return addr, true
+	}
+	return addr, true
+}
+
+func expand(repl string, text []rune, match []int) string {
+	var buf strings.Builder
+	for i := 0; i < len(repl); i++ {
+		c := repl[i]
+		if c == '&' {
+			buf.WriteString(string(text[match[0]:match[1]]))
+		} else if c == '\\' && i+1 < len(repl) {
+			i++
+			nc := repl[i]
+			if nc >= '1' && nc <= '9' {
+				n := int(nc - '0')
+				if n*2+1 < len(match) && match[n*2] >= 0 {
+					buf.WriteString(string(text[match[n*2]:match[n*2+1]]))
+				}
+			} else {
+				buf.WriteByte(nc)
+			}
+		} else {
+			buf.WriteByte(c)
+		}
+	}
+	return buf.String()
+}
+
+func runPipe(cmd rune, shellCmd, input string) (string, error) {
+	c := exec.Command("sh", "-c", shellCmd)
+	if cmd == '|' || cmd == '>' {
+		c.Stdin = strings.NewReader(input)
+	}
+	out, err := c.CombinedOutput()
+	return string(out), err
+}
+
+func cmdaddress(ap *Addr, a Range, runes []rune, sign int) Range {
+	for {
+		switch ap.typ {
+		case 'l':
+			a = lineaddr(ap.num, a, runes, sign)
+			sign = 0
+		case '#':
+			a = charaddr(ap.num, a, runes, sign)
+			sign = 0
+		case '.':
+			sign = 0
+		case '$':
+			size := len(runes)
+			a = Range{size, size}
+			sign = 0
+		case '/':
+			a = nextmatch(runes, ap.re, a, sign)
+			sign = 0
+		case '?':
+			a = nextmatch(runes, ap.re, a, -1)
+			sign = 0
+		case '"':
+			sign = 0
+		case ',':
+			var a1, a2 Range
+			if ap.left != nil {
+				a1 = cmdaddress(ap.left, a, runes, 0)
+			} else {
+				a1 = Range{0, 0}
+			}
+			if ap.next != nil {
+				a2 = cmdaddress(ap.next, a, runes, 0)
+			} else {
+				size := len(runes)
+				a2 = Range{size, size}
+			}
+			return Range{a1.q0, a2.q1}
+		case ';':
+			var a1, a2 Range
+			if ap.left != nil {
+				a1 = cmdaddress(ap.left, a, runes, 0)
+			} else {
+				a1 = Range{0, 0}
+			}
+			if ap.next != nil {
+				a2 = cmdaddress(ap.next, a1, runes, 0)
+			} else {
+				size := len(runes)
+				a2 = Range{size, size}
+			}
+			return Range{a1.q0, a2.q1}
+		case '+':
+			sign = 1
+			if ap.next == nil || (ap.next.typ != 'l' && ap.next.typ != '#' && ap.next.typ != '/' && ap.next.typ != '?') {
+				a = lineaddr(1, a, runes, sign)
+				sign = 0
+			}
+		case '-':
+			sign = -1
+			if ap.next == nil || (ap.next.typ != 'l' && ap.next.typ != '#' && ap.next.typ != '/' && ap.next.typ != '?') {
+				a = lineaddr(1, a, runes, sign)
+				sign = 0
+			}
+		}
+		ap = ap.next
+		if ap == nil {
+			break
+		}
 	}
 	return a
 }
 
-// MultiError represents multiple errors.
-type MultiError []error
-
-func (e MultiError) Error() string {
-	s := ""
-	for _, err := range e {
-		s += err.Error() + ","
-	}
-	return s
-}
-
-const (
-	cmdId = iota
-	pattId
-	charId
-	numId
-	rangeId
-	xId
-	yId
-	gId
-	vId
-	sId
-	cId
-	pId
-	dId
-	nId
-	lId
-	uId
-	addrId
-	commaId
-	dotId
-)
-
-var grammar = p.Grammar("Sregex", map[string]p.Pattern{
-	"Sregex": p.Concat(
-		p.Or(
-			p.NonTerm("Addr"),
-			p.And(p.NonTerm("Command")),
-			p.And(p.Any(0)),
-		),
-		p.Optional(p.NonTerm("Command")),
-		p.Star(p.Concat(
-			p.NonTerm("Pipe"),
-			p.NonTerm("Command"),
-		)),
-		p.Not(p.Any(1)),
-	),
-	"Addr": p.Or(
-		p.CapId(p.Literal(","), commaId),
-		p.CapId(p.Literal("."), dotId),
-		p.CapId(p.NonTerm("Pattern"), addrId),
-	),
-	"Pipe": p.Concat(
-		p.NonTerm("S"),
-		p.Literal("|"),
-		p.NonTerm("S"),
-	),
-	"Command": p.CapId(p.Or(
-		p.Concat(p.CapId(p.Literal("x"), xId), p.NonTerm("RCommand")),
-		p.Concat(p.CapId(p.Literal("y"), yId), p.NonTerm("RCommand")),
-		p.Concat(p.CapId(p.Literal("g"), gId), p.NonTerm("RCommand")),
-		p.Concat(p.CapId(p.Literal("v"), vId), p.NonTerm("RCommand")),
-		p.Concat(p.CapId(p.Literal("s"), sId), p.NonTerm("Pattern"), p.NonTerm("RPattern"), p.Optional(p.Literal("g"))),
-		p.Concat(p.CapId(p.Literal("c"), cId), p.NonTerm("Pattern")),
-		p.Concat(p.CapId(p.Literal("n"), nId), p.NonTerm("Range"), p.NonTerm("Command")),
-		p.Concat(p.CapId(p.Literal("l"), lId), p.NonTerm("Range"), p.NonTerm("Command")),
-		p.CapId(p.Literal("p"), pId),
-		p.CapId(p.Literal("d"), dId),
-		p.Concat(
-			p.CapId(p.Set(charset.Range('a', 'z').Add(charset.Range('A', 'Z'))), uId),
-			p.NonTerm("Pattern"),
-		),
-	), cmdId),
-	"RCommand": p.Concat(
-		p.NonTerm("Pattern"),
-		p.NonTerm("S"),
-		p.NonTerm("Command"),
-	),
-	"Pattern": p.Concat(
-		p.Literal("/"),
-		p.NonTerm("RPattern"),
-	),
-	"RPattern": p.Or(
-		p.CapId(p.Concat(
-			p.Star(p.Concat(
-				p.Not(p.Literal("/")),
-				p.NonTerm("Char"),
-			)),
-			p.Literal("/"),
-		), pattId),
-		p.Error("Pattern failed to match", nil),
-	),
-	"Range": p.CapId(p.Concat(
-		p.Literal("["),
-		p.NonTerm("Number"),
-		p.Literal(":"),
-		p.NonTerm("Number"),
-		p.Literal("]"),
-	), rangeId),
-	"Char": p.CapId(p.Or(
-		p.Concat(p.Literal("\\"), p.Set(charset.New([]byte{'/', 'n', 'r', 't', '\\'}))),
-		p.Concat(p.Literal("\\"), p.Set(charset.Range('0', '2')), p.Set(charset.Range('0', '7')), p.Set(charset.Range('0', '7'))),
-		p.Concat(p.Literal("\\"), p.Set(charset.Range('0', '7')), p.Optional(p.Set(charset.Range('0', '7')))),
-		p.Concat(p.Not(p.Literal("\\")), p.Any(1)),
-	), charId),
-	"Number": p.CapId(p.Concat(
-		p.Optional(p.Literal("-")),
-		p.Plus(p.Set(charset.Range('0', '9'))),
-	), numId),
-	"S":     p.Star(p.NonTerm("Space")),
-	"Space": p.Set(charset.New([]byte{9, 10, 11, 12, 13, ' '})),
-})
-
-func (r *SregxResult) ResolveAddr(b []byte, dot [2]int) (int, int, bool) {
-	switch r.AddrType {
-	case commaId:
-		return 0, len(b), true
-	case dotId:
-		return dot[0], dot[1], true
-	case addrId:
-		re, err := regexp.Compile(r.Addr)
-		if err != nil {
-			return 0, 0, false
-		}
-		// Search after dot, wrap if not found
-		loc := re.FindIndex(b[dot[1]:])
-		if loc != nil {
-			return dot[1] + loc[0], dot[1] + loc[1], true
-		}
-		loc = re.FindIndex(b[:dot[1]])
-		if loc != nil {
-			return loc[0], loc[1], true
-		}
-	}
-	return 0, 0, false
-}
-
-type SregxResult struct {
-	Cmd      Command
-	Addr     string
-	AddrType int // commaId, dotId, addrId, or 0
-}
-
-func SregxCompile(s string, out io.Writer) (*SregxResult, error) {
-	peg := p.MustCompile(grammar)
-	code := vm.Encode(peg)
-	in := input.StringReader(s)
-	machine := vm.NewVM(in, code)
-	match, _, ast, errs := machine.Exec(memo.NoneTable{})
-	if errs != nil {
-		return nil, MultiError(errs)
-	}
-	if !match {
-		return nil, MultiError{io.EOF}
-	}
-
-	inp := input.NewInput(in)
-	res := &SregxResult{Cmd: None{}}
-
-	startIdx := 0
-	if len(ast) > 0 {
-		first := ast[0]
-		switch first.Id {
-		case commaId, dotId, addrId:
-			res.AddrType = int(first.Id)
-			if first.Id == addrId {
-				res.Addr = pattern(first.Children[0], inp)
+func lineaddr(l int, addr Range, runes []rune, sign int) Range {
+	n := 0
+	p := 0
+	if sign >= 0 {
+		if l == 0 {
+			if sign == 0 || addr.q1 == 0 {
+				return Range{0, 0}
 			}
-			startIdx = 1
-		}
-	}
-
-	var cmds CommandPipeline
-	for i := startIdx; i < len(ast); i++ {
-		cmd, err := sregx_compile(ast[i], inp, out, nil)
-		if err != nil {
-			return nil, MultiError{err}
-		}
-		cmds = append(cmds, cmd)
-	}
-
-	if len(cmds) > 0 {
-		res.Cmd = cmds
-	}
-	return res, nil
-}
-
-func sregx_compile(n *capture.Node, in *input.Input, out io.Writer, usrfns map[string]EvalMaker) (Command, error) {
-	var c Command
-	id := n.Children[0].Id
-	switch id {
-	case xId, yId, gId, vId, sId:
-		regex, err := regexp.Compile(pattern(n.Children[1], in))
-		if err != nil {
-			return nil, err
-		}
-		if id == sId {
-			c = S{
-				Patt:    regex,
-				Replace: []byte(pattern(n.Children[2], in)),
-			}
+			p = addr.q1
 		} else {
-			cmd, err := sregx_compile(n.Children[2], in, out, usrfns)
-			if err != nil {
-				return nil, err
+			if sign == 0 || addr.q1 == 0 {
+				p = 0
+				n = 1
+			} else {
+				p = addr.q1 - 1
+				if p >= 0 && p < len(runes) && runes[p] == '\n' {
+					n = 1
+				}
+				p++
 			}
-			switch id {
-			case xId:
-				c = X{Patt: regex, Cmd: cmd}
-			case yId:
-				c = Y{Patt: regex, Cmd: cmd}
-			case gId:
-				c = G{Patt: regex, Cmd: cmd}
-			case vId:
-				c = V{Patt: regex, Cmd: cmd}
+			for n < l {
+				if p >= len(runes) {
+					return Range{len(runes), len(runes)}
+				}
+				if runes[p] == '\n' {
+					n++
+				}
+				p++
 			}
 		}
-	case cId:
-		c = C{Change: []byte(pattern(n.Children[1], in))}
-	case nId, lId:
-		start, end := rangeNums(n.Children[1], in)
-		cmd, err := sregx_compile(n.Children[2], in, out, usrfns)
-		if err != nil {
-			return nil, err
+		q0 := p
+		for p < len(runes) && runes[p] != '\n' {
+			p++
 		}
-		if id == nId {
-			c = N{Start: start, End: end, Cmd: cmd}
-		} else {
-			c = L{Start: start, End: end, Cmd: cmd}
+		return Range{q0, p}
+	} else {
+		p = addr.q0
+		if l == 0 {
+			return Range{addr.q0, addr.q0}
 		}
-	case pId:
-		c = P{W: out}
-	case dId:
-		c = D{}
+		for n = 0; n < l; {
+			if p == 0 {
+				n++
+				if n != l {
+					return Range{0, 0}
+				}
+			} else {
+				c := runes[p-1]
+				n++
+				if c != '\n' || n != l {
+					p--
+				}
+			}
+		}
+		q1 := p
+		if p > 0 {
+			p--
+		}
+		for p > 0 && runes[p-1] != '\n' {
+			p--
+		}
+		return Range{p, q1}
 	}
-	return c, nil
 }
 
-var special = map[byte]byte{
-	'n':  '\n',
-	'r':  '\r',
-	't':  '\t',
-	'\\': '\\',
-	'/':  '/',
-}
-
-func char(b []byte) byte {
-	if b[0] == '\\' {
-		if v, ok := special[b[1]]; ok {
-			return v
-		}
-		i, _ := strconv.ParseInt(string(b[1:]), 8, 8)
-		return byte(i)
+func charaddr(l int, addr Range, runes []rune, sign int) Range {
+	size := len(runes)
+	if sign == 0 {
+		addr.q0 = l
+		addr.q1 = l
+	} else if sign < 0 {
+		addr.q0 -= l
+		addr.q1 = addr.q0
+	} else {
+		addr.q1 += l
+		addr.q0 = addr.q1
 	}
-	return b[0]
+	if addr.q0 < 0 {
+		addr.q0 = 0
+	}
+	if addr.q1 > size {
+		addr.q1 = size
+	}
+	return addr
 }
 
-func pattern(n *capture.Node, in *input.Input) string {
-	var bytes []byte
-	for _, c := range n.Children {
-		if c.Id == charId {
-			bytes = append(bytes, char(in.Slice(c.Start(), c.End())))
+func nextmatch(runes []rune, pat string, addr Range, sign int) Range {
+	re, err := compileRegex(pat)
+	if err != nil {
+		return addr
+	}
+
+	if sign >= 0 {
+		matches := re.FindForward(runes, addr.q1, -1, 1)
+		if len(matches) > 0 {
+			return Range{matches[0][0], matches[0][1]}
+		}
+		// Wrap around
+		matches = re.FindForward(runes, 0, addr.q1, 1)
+		if len(matches) > 0 {
+			return Range{matches[0][0], matches[0][1]}
+		}
+	} else {
+		matches := re.FindBackward(runes, 0, addr.q0, 1)
+		if len(matches) > 0 {
+			return Range{matches[0][0], matches[0][1]}
+		}
+		// Wrap around
+		matches = re.FindBackward(runes, addr.q0, len(runes), 1)
+		if len(matches) > 0 {
+			return Range{matches[0][0], matches[0][1]}
 		}
 	}
-	return string(bytes)
+	return addr
 }
-
-func rangeNums(n *capture.Node, in *input.Input) (int, int) {
-	start, _ := strconv.Atoi(string(in.Slice(n.Children[0].Start(), n.Children[0].End())))
-	end, _ := strconv.Atoi(string(in.Slice(n.Children[1].Start(), n.Children[1].End())))
-	return start, end
-}
-
-type EvalMaker func(s string) (Evaluator, error)
