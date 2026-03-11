@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/atotto/clipboard"
 	"github.com/gdamore/tcell/v2"
 )
 
@@ -42,6 +41,10 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 		e.cmdZerox(col, win)
 	case "Snarf":
 		e.cmdSnarf()
+	case "Cut":
+		e.cmdCut()
+	case "Paste":
+		e.cmdPaste()
 	case "Undo":
 		e.cmdUndo(win)
 	case "Redo":
@@ -289,9 +292,19 @@ func (e *Editor) cmdZerox(col *Column, win *Window) {
 
 func (e *Editor) cmdSnarf() {
 	if e.focusedView != nil {
-		if text := e.focusedView.buffer.GetSelectedText(); text != "" {
-			clipboard.WriteAll(text)
-		}
+		e.focusedView.buffer.Snarf()
+	}
+}
+
+func (e *Editor) cmdCut() {
+	if e.focusedView != nil {
+		e.focusedView.buffer.Cut()
+	}
+}
+
+func (e *Editor) cmdPaste() {
+	if e.focusedView != nil {
+		e.focusedView.buffer.Paste()
 	}
 }
 

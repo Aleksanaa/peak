@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/atotto/clipboard"
 	"github.com/gdamore/tcell/v2"
 )
 
@@ -238,29 +237,11 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 		case tcell.KeyCtrlY:
 			tv.buffer.Redo()
 		case tcell.KeyCtrlC:
-			if txt := tv.buffer.GetSelectedText(); txt != "" {
-				clipboard.WriteAll(txt)
-			}
+			tv.buffer.Snarf()
 		case tcell.KeyCtrlX:
-			if txt := tv.buffer.GetSelectedText(); txt != "" {
-				clipboard.WriteAll(txt)
-				tv.buffer.DeleteSelection()
-			}
+			tv.buffer.Cut()
 		case tcell.KeyCtrlV:
-			if txt, err := clipboard.ReadAll(); err == nil {
-				if tv.buffer.selectionStart != nil {
-					tv.buffer.DeleteSelection()
-				}
-				for _, r := range txt {
-					if r == '\n' {
-						if !tv.singleLine {
-							tv.buffer.NewLine()
-						}
-					} else {
-						tv.buffer.Insert(r)
-					}
-				}
-			}
+			tv.buffer.Paste()
 		case tcell.KeyCtrlU:
 			tv.buffer.ClearSelection()
 			tv.buffer.DeleteLine()

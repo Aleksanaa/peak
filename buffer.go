@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"unicode/utf8"
+
+	"github.com/atotto/clipboard"
 )
 
 // Cursor represents a 2D position in the text buffer.
@@ -269,6 +271,33 @@ func (b *Buffer) DeleteSelection() {
 	b.saveState()
 	start, end := b.orderedSelection()
 	b.replace(start, end, "")
+}
+
+func (b *Buffer) Snarf() {
+	if text := b.GetSelectedText(); text != "" {
+		go clipboard.WriteAll(text)
+	}
+}
+
+func (b *Buffer) Cut() {
+	if text := b.GetSelectedText(); text != "" {
+		go clipboard.WriteAll(text)
+		b.DeleteSelection()
+	}
+}
+
+func (b *Buffer) Paste() {
+	text, err := clipboard.ReadAll()
+	if err != nil || text == "" {
+		return
+	}
+	b.saveState()
+	if b.selectionStart != nil && b.selectionEnd != nil {
+		start, end := b.orderedSelection()
+		b.replace(start, end, text)
+	} else {
+		b.replace(b.cursor, b.cursor, text)
+	}
 }
 
 func (b *Buffer) Backspace() {
