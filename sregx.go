@@ -127,6 +127,7 @@ func (e *Elog) Apply(b *Buffer) {
 
 type Context struct {
 	Editor *Editor
+	Window *Window
 	Buffer *Buffer
 	Out    io.Writer
 	Log    *Elog
@@ -377,6 +378,9 @@ func (cp *cmdParser) parse(nest int) (*Cmd, error) {
 				return nil, err
 			}
 		}
+		if len(ct.token) > 0 {
+			cmd.text = cp.collecttoken(ct.token)
+		}
 		if ct.defcmd != 0 {
 			if cp.skipbl() == '\n' {
 				cp.getch()
@@ -476,29 +480,36 @@ type cmdtab_entry struct {
 	regexp  bool
 	addr    bool // for m, t
 	defcmd  rune
-	defaddr int // 0: no, 1: dot, 2: all
-	count   int // 0: no, 1: unsigned, 2: signed
+	defaddr int    // 0: no, 1: dot, 2: all
+	count   int    // 0: no, 1: unsigned, 2: signed
+	token   string // takes text terminated by one of these
 }
 
 var cmdtab = []cmdtab_entry{
-	{'\n', false, false, false, 0, 1, 0},
-	{'a', true, false, false, 0, 1, 0},
-	{'c', true, false, false, 0, 1, 0},
-	{'d', false, false, false, 0, 1, 0},
-	{'g', false, true, false, 'p', 1, 0},
-	{'i', true, false, false, 0, 1, 0},
-	{'m', false, false, true, 0, 1, 0},
-	{'p', false, false, false, 0, 1, 0},
-	{'s', false, true, false, 0, 1, 1},
-	{'t', false, false, true, 0, 1, 0},
-	{'u', false, false, false, 0, 0, 2},
-	{'v', false, true, false, 'p', 1, 0},
-	{'w', false, false, false, 0, 2, 0},
-	{'x', false, true, false, 'p', 1, 0},
-	{'y', false, true, false, 'p', 1, 0},
-	{'=', false, false, false, 0, 1, 0},
-	{'X', false, true, false, 'f', 0, 0},
-	{'Y', false, true, false, 'f', 0, 0},
+	{'\n', false, false, false, 0, 1, 0, ""},
+	{'a', true, false, false, 0, 1, 0, ""},
+	{'b', false, false, false, 0, 0, 0, "\n"},
+	{'c', true, false, false, 0, 1, 0, ""},
+	{'d', false, false, false, 0, 1, 0, ""},
+	{'e', false, false, false, 0, 0, 0, "\t\n"},
+	{'f', false, false, false, 0, 0, 0, "\t\n"},
+	{'g', false, true, false, 'p', 1, 0, ""},
+	{'i', true, false, false, 0, 1, 0, ""},
+	{'m', false, false, true, 0, 1, 0, ""},
+	{'p', false, false, false, 0, 1, 0, ""},
+	{'r', false, false, false, 0, 1, 0, "\t\n"},
+	{'s', false, true, false, 0, 1, 1, ""},
+	{'t', false, false, true, 0, 1, 0, ""},
+	{'u', false, false, false, 0, 0, 2, ""},
+	{'v', false, true, false, 'p', 1, 0, ""},
+	{'w', false, false, false, 0, 2, 0, "\t\n"},
+	{'x', false, true, false, 'p', 1, 0, ""},
+	{'y', false, true, false, 'p', 1, 0, ""},
+	{'=', false, false, false, 0, 1, 0, "\n"},
+	{'B', false, false, false, 0, 0, 0, "\n"},
+	{'D', false, false, false, 0, 0, 0, "\n"},
+	{'X', false, true, false, 'f', 0, 0, ""},
+	{'Y', false, true, false, 'f', 0, 0, ""},
 }
 
 func cmdlookup(c rune) int {
@@ -535,6 +546,38 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 			ctx.Out.Write([]byte{'\n'})
 		}
 		return addr, true
+	case 'b':
+		target := strings.TrimSpace(cmd.text)
+		if target == "" {
+			if ctx.Out != nil {
+				ctx.Out.Write([]byte(ctx.Window.GetFilename() + "\n"))
+			}
+			return addr, true
+		}
+		// Find window by name: exact match first
+		for _, col := range ctx.Editor.columns {
+			for _, win := range col.windows {
+				if win.GetFilename() == target {
+					ctx.Window = win
+					ctx.Buffer = win.body.buffer
+					return Range{0, 0}, true
+				}
+			}
+		}
+		// Partial match
+		for _, col := range ctx.Editor.columns {
+			for _, win := range col.windows {
+				if strings.Contains(win.GetFilename(), target) {
+					ctx.Window = win
+					ctx.Buffer = win.body.buffer
+					return Range{0, 0}, true
+				}
+			}
+		}
+		if ctx.Out != nil {
+			ctx.Out.Write([]byte(fmt.Sprintf("no such window: %s\n", target)))
+		}
+		return addr, false
 	case 'd':
 		ctx.Log.Delete(addr.q0, addr.q1)
 		return Range{addr.q0, addr.q0}, true
@@ -547,6 +590,41 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 	case 'c':
 		ctx.Log.Replace(addr.q0, addr.q1, []rune(cmd.text))
 		return Range{addr.q0, addr.q0 + len([]rune(cmd.text))}, true
+	case 'e', 'r':
+		filename := strings.TrimSpace(cmd.text)
+		if filename == "" {
+			filename = ctx.Window.GetFilename()
+		}
+		if filename == "" {
+			if ctx.Out != nil {
+				ctx.Out.Write([]byte("no filename\n"))
+			}
+			return addr, false
+		}
+		data, err := os.ReadFile(filename)
+		if err != nil {
+			if ctx.Out != nil {
+				ctx.Out.Write([]byte(err.Error() + "\n"))
+			}
+			return addr, false
+		}
+		newRunes := []rune(string(data))
+		q0, q1 := addr.q0, addr.q1
+		if cmd.cmdc == 'e' {
+			q0, q1 = 0, len(runes)
+		}
+		ctx.Log.Replace(q0, q1, newRunes)
+		return Range{q0, q0 + len(newRunes)}, true
+	case 'f':
+		filename := strings.TrimSpace(cmd.text)
+		if filename == "" {
+			if ctx.Out != nil {
+				ctx.Out.Write([]byte(ctx.Window.GetFilename() + "\n"))
+			}
+		} else {
+			ctx.Window.SetName(filename)
+		}
+		return addr, true
 	case 'm', 't':
 		addr2 := cmdaddress(cmd.mtaddr, dot, runes, 0)
 		text := append([]rune{}, runes[addr.q0:addr.q1]...)
@@ -630,6 +708,28 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 			return cmd.cmd.Execute(ctx, addr)
 		}
 		return addr, true
+	case 'B':
+		files := strings.Fields(cmd.text)
+		for _, f := range files {
+			ctx.Editor.Execute(nil, nil, "New "+f)
+		}
+		return addr, true
+	case 'D':
+		files := strings.Fields(cmd.text)
+		if len(files) == 0 {
+			ctx.Editor.Execute(nil, ctx.Window, "Del")
+		} else {
+			for _, f := range files {
+				for _, col := range ctx.Editor.columns {
+					for _, win := range col.windows {
+						if win.GetFilename() == f {
+							ctx.Editor.Execute(col, win, "Del")
+						}
+					}
+				}
+			}
+		}
+		return addr, true
 	case 'X', 'Y':
 		re, err := compileRegex(cmd.re)
 		if err != nil {
@@ -641,7 +741,7 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 				match := re.MatchString(filename)
 				if (cmd.cmdc == 'X' && match) || (cmd.cmdc == 'Y' && !match) {
 					subLog := &Elog{}
-					subCtx := &Context{Editor: ctx.Editor, Buffer: win.body.buffer, Out: ctx.Out, Log: subLog}
+					subCtx := &Context{Editor: ctx.Editor, Window: win, Buffer: win.body.buffer, Out: ctx.Out, Log: subLog}
 					subDot := Range{win.body.buffer.CursorToRuneOffset(win.body.buffer.cursor), win.body.buffer.CursorToRuneOffset(win.body.buffer.cursor)}
 					if win.body.buffer.selectionStart != nil {
 						s, e := win.body.buffer.orderedSelection()
@@ -661,10 +761,11 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 	case 'w':
 		filename := cmd.text
 		if filename == "" {
-			filename = ctx.Editor.active.GetFilename()
+			filename = ctx.Window.GetFilename()
 		}
 		if filename != "" && !strings.HasSuffix(filename, "/") {
-			err := os.WriteFile(filename, []byte(ctx.Buffer.GetText()), 0644)
+			textToWrite := string(runes[addr.q0:addr.q1])
+			err := os.WriteFile(filename, []byte(textToWrite), 0644)
 			if err != nil && ctx.Out != nil {
 				ctx.Out.Write([]byte(err.Error() + "\n"))
 			}

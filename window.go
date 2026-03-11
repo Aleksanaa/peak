@@ -500,6 +500,17 @@ func (win *Window) GetFilename() string {
 	return ""
 }
 
+func (win *Window) SetName(name string) {
+	tag := win.tag.buffer.GetText()
+	fields := strings.Fields(tag)
+	if len(fields) > 0 {
+		fields[0] = name
+		win.tag.buffer.SetText(strings.Join(fields, " ") + " ")
+	} else {
+		win.tag.buffer.SetText(name + " Get Put Del ")
+	}
+}
+
 func (win *Window) Contains(x, y int) bool {
 	return x >= win.x && x < win.x+win.w && y >= win.y && y < win.y+win.h
 }

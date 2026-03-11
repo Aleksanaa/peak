@@ -291,7 +291,7 @@ func (e *Editor) cmdEdit(col *Column, win *Window, cmd string) {
 	}
 
 	log := &Elog{}
-	ctx := &Context{Editor: e, Buffer: buf, Out: &pOut, Log: log}
+	ctx := &Context{Editor: e, Window: target, Buffer: buf, Out: &pOut, Log: log}
 	newDot, ok := res.Cmd.Execute(ctx, dot)
 	if !ok {
 		return
