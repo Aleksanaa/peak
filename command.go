@@ -49,6 +49,8 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 		e.cmdEdit(col, win, cmd)
 	case "Del":
 		e.cmdDel(win)
+	case "Delete":
+		e.cmdDelete(win)
 	case "Delcol":
 		e.cmdDelcol(col, win)
 	case "NewCol":
@@ -210,6 +212,17 @@ func (e *Editor) cmdDel(win *Window) {
 		return
 	}
 
+	e.deleteWindow(target)
+}
+
+func (e *Editor) cmdDelete(win *Window) {
+	target := e.getTargetWindow(win)
+	if target != nil {
+		e.deleteWindow(target)
+	}
+}
+
+func (e *Editor) deleteWindow(target *Window) {
 	col := target.parent
 	for i, w := range col.windows {
 		if w == target {

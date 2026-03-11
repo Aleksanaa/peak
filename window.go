@@ -495,7 +495,6 @@ func (win *Window) Warn() {
 	win.warnedVersion = win.body.buffer.version
 }
 
-
 func (win *Window) GetFilename() string {
 	if len(win.tag.buffer.lines) == 0 {
 		return ""
