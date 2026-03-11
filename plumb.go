@@ -51,52 +51,6 @@ func resolvePath(path string) string {
 	return abs
 }
 
-// resolvePathWithContext resolves a path relative to a window's directory or CWD.
-func (e *Editor) resolvePathWithContext(win *Window, path string) string {
-	if path == "" {
-		return ""
-	}
-	if filepath.IsAbs(path) || strings.HasPrefix(path, "~") {
-		return resolvePath(path)
-	}
-
-	dir, _ := os.Getwd()
-	target := win
-	if target == nil {
-		target = e.active
-	}
-	if target != nil {
-		fn := target.GetFilename()
-		if strings.HasSuffix(fn, "+Errors") {
-			dir = filepath.Dir(fn)
-		} else {
-			absFn := resolvePath(fn)
-			if info, err := os.Stat(absFn); err == nil && info.IsDir() {
-				dir = absFn
-			} else {
-				dir = filepath.Dir(absFn)
-			}
-		}
-	}
-	return filepath.Join(dir, path)
-}
-
-// readFileOrDir returns the content of a file or a listing if it's a directory.
-func (e *Editor) readFileOrDir(path string) (string, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return "", err
-	}
-	if info.IsDir() {
-		return e.listDir(path)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
-
 // Plumb attempts to handle a string (path or search).
 func (e *Editor) Plumb(win *Window, word string) bool {
 	word = strings.TrimSpace(word)

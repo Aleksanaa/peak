@@ -79,11 +79,46 @@ func (e *Editor) getArg(win *Window, cmd string) string {
 	return ""
 }
 
+func (e *Editor) resolvePathWithContext(win *Window, path string) string {
+	if path == "" {
+		return ""
+	}
+	if filepath.IsAbs(path) || strings.HasPrefix(path, "~") {
+		return resolvePath(path)
+	}
+
+	dir := ""
+	if win != nil {
+		dir = win.GetDir()
+	} else if e.active != nil {
+		dir = e.active.GetDir()
+	} else {
+		dir, _ = os.Getwd()
+	}
+	return filepath.Join(dir, path)
+}
+
 func (e *Editor) getTargetWindow(win *Window) *Window {
 	if win != nil {
 		return win
 	}
 	return e.active
+}
+
+// readFileOrDir returns the content of a file or a listing if it's a directory.
+func (e *Editor) readFileOrDir(path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		return e.listDir(path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 func (e *Editor) listDir(path string) (string, error) {
@@ -291,7 +326,7 @@ func (e *Editor) cmdEdit(col *Column, win *Window, cmd string) {
 	}
 
 	log := &Elog{}
-	ctx := &Context{Editor: e, Window: target, Buffer: buf, Out: &pOut, Log: log}
+	ctx := &Context{Editor: e, Column: col, Window: target, Buffer: buf, Out: &pOut, Log: log}
 	newDot, ok := res.Cmd.Execute(ctx, dot)
 	if !ok {
 		return
@@ -326,17 +361,10 @@ func (e *Editor) alignWindow(target *Window, line int) {
 
 func (e *Editor) showError(col *Column, win *Window, dir, msg string) {
 	if dir == "" {
-		dir, _ = os.Getwd()
 		if win != nil {
-			if f := e.resolvePathWithContext(win, win.GetFilename()); f != "" {
-				if info, err := os.Stat(f); err == nil {
-					if info.IsDir() {
-						dir = f
-					} else {
-						dir = filepath.Dir(f)
-					}
-				}
-			}
+			dir = win.GetDir()
+		} else {
+			dir, _ = os.Getwd()
 		}
 	}
 
@@ -363,24 +391,26 @@ func (e *Editor) showError(col *Column, win *Window, dir, msg string) {
 }
 
 func (e *Editor) runExternal(col *Column, win *Window, cmd string) {
-	dir, _ := os.Getwd()
+	dir := ""
 	if win != nil {
-		if f := e.resolvePathWithContext(win, win.GetFilename()); f != "" {
-			if info, err := os.Stat(f); err == nil {
-				if info.IsDir() {
-					dir = f
-				} else {
-					dir = filepath.Dir(f)
-				}
-			}
-		}
+		dir = win.GetDir()
+	} else {
+		dir, _ = os.Getwd()
 	}
 
+	e.runAsync(cmd, dir, func(out string) {
+		e.showError(col, win, dir, out)
+	})
+}
+
+func (e *Editor) runAsync(cmd, dir string, callback func(string)) {
 	go func() {
-		out, _ := exec.Command("sh", "-c", cmd).CombinedOutput()
+		c := exec.Command("sh", "-c", cmd)
+		c.Dir = dir
+		out, _ := c.CombinedOutput()
 		if len(out) > 0 {
 			e.screen.PostEvent(tcell.NewEventInterrupt(func() {
-				e.showError(col, win, dir, string(out))
+				callback(string(out))
 			}))
 		}
 	}()

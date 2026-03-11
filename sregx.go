@@ -127,6 +127,7 @@ func (e *Elog) Apply(b *Buffer) {
 
 type Context struct {
 	Editor *Editor
+	Column *Column
 	Window *Window
 	Buffer *Buffer
 	Out    io.Writer
@@ -506,6 +507,7 @@ var cmdtab = []cmdtab_entry{
 	{'x', false, true, false, 'p', 1, 0, ""},
 	{'y', false, true, false, 'p', 1, 0, ""},
 	{'=', false, false, false, 0, 1, 0, "\n"},
+	{'!', false, false, false, 0, 0, 0, "\n"},
 	{'B', false, false, false, 0, 0, 0, "\n"},
 	{'D', false, false, false, 0, 0, 0, "\n"},
 	{'X', false, true, false, 'f', 0, 0, ""},
@@ -741,7 +743,7 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 				match := re.MatchString(filename)
 				if (cmd.cmdc == 'X' && match) || (cmd.cmdc == 'Y' && !match) {
 					subLog := &Elog{}
-					subCtx := &Context{Editor: ctx.Editor, Window: win, Buffer: win.body.buffer, Out: ctx.Out, Log: subLog}
+					subCtx := &Context{Editor: ctx.Editor, Column: col, Window: win, Buffer: win.body.buffer, Out: ctx.Out, Log: subLog}
 					subDot := Range{win.body.buffer.CursorToRuneOffset(win.body.buffer.cursor), win.body.buffer.CursorToRuneOffset(win.body.buffer.cursor)}
 					if win.body.buffer.selectionStart != nil {
 						s, e := win.body.buffer.orderedSelection()
@@ -776,6 +778,12 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 			ctx.Out.Write([]byte(fmt.Sprintf("#%d,#%d\n", addr.q0, addr.q1)))
 		}
 		return addr, true
+	case '!':
+		dir := ctx.Window.GetDir()
+		ctx.Editor.runAsync(cmd.text, dir, func(out string) {
+			ctx.Editor.showError(ctx.Column, ctx.Window, dir, out)
+		})
+		return addr, true
 	case '{':
 		curr := cmd.cmd
 		for curr != nil {
@@ -785,7 +793,8 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 		return addr, true
 	case '|', '>', '<':
 		input := string(runes[addr.q0:addr.q1])
-		out, err := runPipe(cmd.cmdc, cmd.text, input)
+		dir := ctx.Window.GetDir()
+		out, err := runPipe(cmd.cmdc, cmd.text, input, dir)
 		if err != nil {
 			if ctx.Out != nil {
 				ctx.Out.Write([]byte(err.Error() + "\n"))
@@ -828,8 +837,9 @@ func expand(repl string, text []rune, match []int) string {
 	return buf.String()
 }
 
-func runPipe(cmd rune, shellCmd, input string) (string, error) {
+func runPipe(cmd rune, shellCmd, input, dir string) (string, error) {
 	c := exec.Command("sh", "-c", shellCmd)
+	c.Dir = dir
 	if cmd == '|' || cmd == '>' {
 		c.Stdin = strings.NewReader(input)
 	}
