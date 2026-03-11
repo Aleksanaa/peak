@@ -516,10 +516,7 @@ func NewWindow(tag, body string, parent *Column, editor *Editor, x, y, w, h int,
 
 func (win *Window) IsDirty() bool {
 	fn := win.GetFilename()
-	if fn == "" || isSpecial(fn) {
-		return false
-	}
-	if isPeakPath(fn) {
+	if !isFile(fn) || isPeakPath(fn) || isSpecial(fn) {
 		return false
 	}
 	return win.body.buffer.version != win.savedVersion
