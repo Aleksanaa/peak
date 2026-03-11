@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/gdamore/tcell/v2"
@@ -45,6 +46,8 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 		e.cmdCut()
 	case "Paste":
 		e.cmdPaste()
+	case "Sort":
+		e.cmdSort(col, win)
 	case "Undo":
 		e.cmdUndo(win)
 	case "Redo":
@@ -306,6 +309,19 @@ func (e *Editor) cmdPaste() {
 	if e.focusedView != nil {
 		e.focusedView.buffer.Paste()
 	}
+}
+
+func (e *Editor) cmdSort(col *Column, win *Window) {
+	targetCol := e.getTargetColumn(col, win)
+	if targetCol == nil || len(targetCol.windows) <= 1 {
+		return
+	}
+
+	sort.Slice(targetCol.windows, func(i, j int) bool {
+		return targetCol.windows[i].GetFilename() < targetCol.windows[j].GetFilename()
+	})
+
+	targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
 }
 
 func (e *Editor) cmdUndo(win *Window) {
