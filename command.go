@@ -22,6 +22,24 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 
 	switch root {
 	case "Exit":
+		var dirty []*Window
+		for _, col := range e.columns {
+			for _, w := range col.windows {
+				if w.IsDirty() && !w.Warned() {
+					dirty = append(dirty, w)
+				}
+			}
+		}
+
+		if len(dirty) > 0 {
+			msg := ""
+			for _, w := range dirty {
+				w.Warn()
+				msg += w.GetFilename() + " modified\n"
+			}
+			e.showError(nil, nil, "", msg)
+			return false
+		}
 		return true
 	case "Get":
 		e.cmdGet(win, cmd)
@@ -157,6 +175,8 @@ func (e *Editor) cmdGet(win *Window, cmd string) {
 	path := e.resolvePathWithContext(target, arg)
 	if content, err := readFileOrDir(path); err == nil {
 		target.body.buffer.SetText(content)
+		target.savedVersion = target.body.buffer.version
+		target.warnedVersion = target.savedVersion
 	}
 }
 
@@ -171,7 +191,10 @@ func (e *Editor) cmdPut(win *Window, cmd string) {
 	}
 	path := e.resolvePathWithContext(target, arg)
 	if path != "" && !isDir(path) {
-		writeFile(path, []byte(target.body.buffer.GetText()))
+		if err := writeFile(path, []byte(target.body.buffer.GetText())); err == nil {
+			target.savedVersion = target.body.buffer.version
+			target.warnedVersion = target.savedVersion
+		}
 	}
 }
 
@@ -180,6 +203,13 @@ func (e *Editor) cmdDel(win *Window) {
 	if target == nil {
 		return
 	}
+
+	if target.IsDirty() && !target.Warned() {
+		target.Warn()
+		e.showError(target.parent, target, "", target.GetFilename()+" modified\n")
+		return
+	}
+
 	col := target.parent
 	for i, w := range col.windows {
 		if w == target {
@@ -207,9 +237,28 @@ func (e *Editor) cmdDelcol(col *Column, win *Window) {
 	if target == nil && win != nil {
 		target = win.parent
 	}
-	if target != nil {
-		e.RemoveColumn(target)
+	if target == nil {
+		return
 	}
+
+	var dirty []*Window
+	for _, w := range target.windows {
+		if w.IsDirty() && !w.Warned() {
+			dirty = append(dirty, w)
+		}
+	}
+
+	if len(dirty) > 0 {
+		msg := ""
+		for _, w := range dirty {
+			w.Warn()
+			msg += w.GetFilename() + " modified\n"
+		}
+		e.showError(target, nil, "", msg)
+		return
+	}
+
+	e.RemoveColumn(target)
 }
 
 func (e *Editor) cmdNewCol() {
@@ -243,6 +292,8 @@ func (e *Editor) cmdZerox(col *Column, win *Window) {
 		newWin := target.parent.AddWindow(target.tag.buffer.GetText(), target.body.buffer.GetText())
 		newWin.body.scroll = target.body.scroll
 		newWin.body.buffer.cursor = target.body.buffer.cursor
+		newWin.savedVersion = target.savedVersion
+		newWin.warnedVersion = target.warnedVersion
 		e.ActivateWindow(newWin)
 		target.parent.Resize(target.parent.x, target.parent.y, target.parent.w, target.parent.h)
 	}

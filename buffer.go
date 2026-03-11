@@ -13,8 +13,9 @@ type Cursor struct {
 }
 
 type bufferState struct {
-	lines  [][]rune
-	cursor Cursor
+	lines   [][]rune
+	cursor  Cursor
+	version int
 }
 
 // Buffer handles the raw text data and selection state.
@@ -26,14 +27,18 @@ type Buffer struct {
 	history        []bufferState
 	redoStack      []bufferState
 	version        int
+	nextVer        int
 }
 
 // NewBuffer initializes a buffer with the given string content.
 func NewBuffer(content string) *Buffer {
 	b := &Buffer{
-		lines: [][]rune{{}},
+		lines:   [][]rune{{}},
+		version: 0,
+		nextVer: 1,
 	}
 	b.SetText(content)
+	// After initial SetText, we want to reset history/version so it starts at 0
 	b.history = nil
 	b.redoStack = nil
 	b.version = 0
@@ -41,42 +46,38 @@ func NewBuffer(content string) *Buffer {
 }
 
 func (b *Buffer) copyLines() [][]rune {
-	// Shallow copy: only copy the slice of line pointers.
-	// We must ensure that we never modify the contents of a line in-place
-	// if it might be shared with a state in history.
 	return append([][]rune{}, b.lines...)
 }
 
 func (b *Buffer) saveState() {
-	b.history = append(b.history, bufferState{lines: b.copyLines(), cursor: b.cursor})
+	b.history = append(b.history, bufferState{lines: b.copyLines(), cursor: b.cursor, version: b.version})
 	b.redoStack = nil
-	b.version++
 }
 
 func (b *Buffer) Undo() {
 	if len(b.history) == 0 {
 		return
 	}
-	b.redoStack = append(b.redoStack, bufferState{lines: b.copyLines(), cursor: b.cursor})
+	b.redoStack = append(b.redoStack, bufferState{lines: b.copyLines(), cursor: b.cursor, version: b.version})
 	last := b.history[len(b.history)-1]
 	b.history = b.history[:len(b.history)-1]
 	b.lines = last.lines
 	b.cursor = last.cursor
+	b.version = last.version
 	b.ClearSelection()
-	b.version++
 }
 
 func (b *Buffer) Redo() {
 	if len(b.redoStack) == 0 {
 		return
 	}
-	b.history = append(b.history, bufferState{lines: b.copyLines(), cursor: b.cursor})
+	b.history = append(b.history, bufferState{lines: b.copyLines(), cursor: b.cursor, version: b.version})
 	next := b.redoStack[len(b.redoStack)-1]
 	b.redoStack = b.redoStack[:len(b.redoStack)-1]
 	b.lines = next.lines
 	b.cursor = next.cursor
+	b.version = next.version
 	b.ClearSelection()
-	b.version++
 }
 
 func (b *Buffer) ClearSelection() {
@@ -183,7 +184,8 @@ func (b *Buffer) SetText(content string) {
 	}
 	b.cursor = Cursor{0, 0}
 	b.ClearSelection()
-	b.version++
+	b.version = b.nextVer
+	b.nextVer++
 }
 
 func (b *Buffer) replace(start, end Cursor, content string) Cursor {
@@ -213,7 +215,8 @@ func (b *Buffer) replace(start, end Cursor, content string) Cursor {
 	}
 	b.cursor = newEnd
 	b.ClearSelection()
-	b.version++
+	b.version = b.nextVer
+	b.nextVer++
 	return newEnd
 }
 
@@ -227,13 +230,15 @@ func (b *Buffer) DeleteLine() {
 	if len(b.lines) <= 1 {
 		b.lines = [][]rune{{}}
 		b.cursor = Cursor{0, 0}
-		return
+	} else {
+		b.lines = append(append([][]rune{}, b.lines[:b.cursor.y]...), b.lines[b.cursor.y+1:]...)
+		if b.cursor.y >= len(b.lines) {
+			b.cursor.y = len(b.lines) - 1
+		}
+		b.cursor.x = 0
 	}
-	b.lines = append(append([][]rune{}, b.lines[:b.cursor.y]...), b.lines[b.cursor.y+1:]...)
-	if b.cursor.y >= len(b.lines) {
-		b.cursor.y = len(b.lines) - 1
-	}
-	b.cursor.x = 0
+	b.version = b.nextVer
+	b.nextVer++
 }
 
 func (b *Buffer) DeleteWordBefore() {

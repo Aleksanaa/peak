@@ -461,6 +461,9 @@ type Window struct {
 	x, y, w, h     int
 	onExec         func(*Column, *Window, string) bool
 	explicitHeight int
+
+	savedVersion  int
+	warnedVersion int
 }
 
 func NewWindow(tag, body string, parent *Column, editor *Editor, x, y, w, h int, onExec func(*Column, *Window, string) bool) *Window {
@@ -475,6 +478,23 @@ func NewWindow(tag, body string, parent *Column, editor *Editor, x, y, w, h int,
 	win.body.theme = &editor.theme
 	return win
 }
+
+func (win *Window) IsDirty() bool {
+	fn := win.GetFilename()
+	if fn == "" || isSpecial(fn) || isDir(fn) {
+		return false
+	}
+	return win.body.buffer.version != win.savedVersion
+}
+
+func (win *Window) Warned() bool {
+	return win.warnedVersion == win.body.buffer.version
+}
+
+func (win *Window) Warn() {
+	win.warnedVersion = win.body.buffer.version
+}
+
 
 func (win *Window) GetFilename() string {
 	if len(win.tag.buffer.lines) == 0 {
