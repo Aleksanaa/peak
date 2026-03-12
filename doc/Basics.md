@@ -1,10 +1,10 @@
-Peak Basics
+# Peak Basics
 
 Peak is a TUI (Terminal User Interface) text editor inspired by the Plan 9 Acme editor. It follows the philosophy that everything is editable text, and every piece of text can be a command.
 
 The core soul of Peak is interaction, where you write what you want to do and execute it.
 
-1. The Layout
+## 1. The Layout
 
 The editor is divided into several areas, all of which are editable:
 
@@ -16,7 +16,7 @@ The Window Tag usually contains the filename and standard commands (Get, Put, Lo
 
 The Handle is the small colored area at the top-left of each column and window. You can click and drag it to move or resize elements.
 
-2. Mouse Interaction (The Acme Way)
+## 2. Mouse Interaction (The Acme Way)
 
 Acme-style editors rely heavily on three mouse buttons to interact with text as data and commands.
 
@@ -35,13 +35,13 @@ Acme-style editors rely heavily on three mouse buttons to interact with text as 
   - If the text is a path suffixed by a number (e.g., main.go:15), Peak opens the file and jumps to the line.
   - If it's a plain word, Peak searches for it (Look).
 
-Scrolling (The Scrollbar Handle)
+### Scrolling (The Scrollbar Handle)
 The thin vertical bar on the left of a window's body is the scrollbar.
 - Left Click: Scroll up.
 - Right Click: Scroll down.
 - Middle Click: Jump to that position in the file.
 
-3. Essential Commands
+## 3. Essential Commands
 
 You can execute these by middle-clicking them in any tag or even in the text body:
 
@@ -56,7 +56,7 @@ You can execute these by middle-clicking them in any tag or even in the text bod
 
 External Commands: Any word that isn't a built-in command (like ls, grep, or make) will be executed as a shell command. The output usually appears in a new window named +Errors.
 
-4. Keyboard Shortcuts
+## 4. Keyboard Shortcuts
 
 While the mouse is primary, some standard keyboard shortcuts are available:
 
@@ -66,7 +66,7 @@ While the mouse is primary, some standard keyboard shortcuts are available:
 
 See Shortcuts.md for a complete list of navigation and editing shortcuts.
 
-5. Typical Workflow
+## 5. Typical Workflow
 
 1. Open a file: Type the filename in a tag and Right-Click it.
 2. Edit: Click in the body and start typing.

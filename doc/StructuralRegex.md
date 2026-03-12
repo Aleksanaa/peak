@@ -1,15 +1,16 @@
-Structural Regular Expressions in Peak
+# Structural Regular Expressions in Peak
 
 Peak's Edit command implements a powerful structural regular expression engine, similar to the one found in the Acme and Sam editors. Unlike traditional line-oriented tools (like sed), structural regex allows you to manipulate the structure of the text itself.
 
-1. Using the Edit Command
+## 1. Using the Edit Command
 
 The Edit command (usually abbreviated to E) takes a structural regex as an argument:
-Edit <regex>
+
+    Edit <regex>
 
 You can execute it by typing it in a tag and middle-clicking it. It operates on the current selection or the entire file if nothing is selected.
 
-2. Addresses
+## 2. Addresses
 
 Addresses specify which part of the text a command should operate on.
 
@@ -23,7 +24,7 @@ Addresses specify which part of the text a command should operate on.
 - a1,a2 : The range from the start of a1 to the end of a2.
 - a1;a2 : Like a1,a2, but sets the context to a1 before evaluating a2.
 
-3. Basic Commands
+## 3. Basic Commands
 
 - a/text/ : Append text after the addressed range.
 - i/text/ : Insert text before the addressed range.
@@ -38,7 +39,7 @@ Addresses specify which part of the text a command should operate on.
 - f [file] : Set the filename to file, or print current filename if omitted.
 - = : Print the current byte-offset address.
 
-4. Structural Commands (The Powerhouses)
+## 4. Structural Commands (The Powerhouses)
 
 These commands allow you to loop over matches, guard execution, or group commands.
 
@@ -48,7 +49,7 @@ These commands allow you to loop over matches, guard execution, or group command
 - v/re/ command : Invert Guard. If the current range does *not* match re, run command.
 - { command1 \n command2 \n ... } : Group multiple commands to run on the same address.
 
-5. Multi-file Commands
+## 5. Multi-file Commands
 
 - X/re/ command : For every open window whose filename matches re, run command.
 - Y/re/ command : For every open window whose filename does *not* match re, run command.
@@ -56,26 +57,31 @@ These commands allow you to loop over matches, guard execution, or group command
 - D [files] : Close the list of files (default current file).
 - b [win] : Change the context to the window win.
 
-6. Shell Integration
+## 6. Shell Integration
 
 - |command : Pipe the addressed range through an external shell command and replace the range with the output.
 - >command : Pipe the addressed range to the input of command.
 - <command : Replace the addressed range with the output of command.
 - !command : Run command in the shell (standard Acme behavior).
 
-7. Examples
+## 7. Examples
 
 - Uppercase all occurrences of "peak":
-  Edit , x/peak/ |tr a-z A-Z
+
+    Edit , x/peak/ |tr a-z A-Z
 
 - Delete all trailing whitespace in the file:
-  Edit , x/[ 	]+$/ d
+
+    Edit , x/[ 	]+$/ d
 
 - Comment out every line containing "TODO":
-  Edit , x/.*TODO.*/ i/\/\/ /
+
+    Edit , x/.*TODO.*/ i/\/\/ /
 
 - Find "func" in all Go files:
-  Edit X/\.go$/ , x/func .*/ p
+
+    Edit X/\.go$/ , x/func .*/ p
 
 - Complex formatting:
-  Edit , x/struct \{[^}]+\}/ g/FieldName/ s/FieldName/NewName/
+
+    Edit , x/struct \{[^}]+\}/ g/FieldName/ s/FieldName/NewName/
