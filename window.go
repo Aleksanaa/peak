@@ -376,16 +376,14 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 		mx, my := ev.Position()
 		if buttons != tcell.ButtonNone {
 			bx, by := tv.visualToBuffer(mx-tv.x, my-tv.y+tv.scroll)
-			if buttons == tcell.Button1 && !tv.drag && !tv.buffer.IsSelected(bx, by) {
+			if buttons == tcell.Button1 && !tv.drag {
 				tv.buffer.ClearSelection()
 			}
 			if buttons == tcell.Button1 {
 				if !tv.drag {
 					tv.drag = true
-					if !tv.buffer.IsSelected(bx, by) {
-						tv.buffer.cursor = Cursor{bx, by}
-						tv.buffer.SetSelection(tv.buffer.cursor, tv.buffer.cursor)
-					}
+					tv.buffer.cursor = Cursor{bx, by}
+					tv.buffer.SetSelection(tv.buffer.cursor, tv.buffer.cursor)
 				} else {
 					tv.buffer.cursor = Cursor{bx, by}
 					tv.buffer.selectionEnd = &Cursor{bx, by}
