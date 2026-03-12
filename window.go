@@ -259,6 +259,18 @@ func (tv *TextView) Resize(x, y, w, h int) {
 	tv.UpdateLayout()
 }
 
+func (tv *TextView) prepareTyping() bool {
+	if tv.buffer.selectionStart != nil {
+		start, _ := tv.buffer.orderedSelection()
+		tv.typingStart = &Cursor{start.x, start.y}
+		return true
+	}
+	if tv.typingStart == nil {
+		tv.typingStart = &Cursor{tv.buffer.cursor.x, tv.buffer.cursor.y}
+	}
+	return false
+}
+
 func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 	switch ev := ev.(type) {
 	case *tcell.EventKey:
@@ -266,6 +278,11 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 		case tcell.KeyEsc:
 			if tv.typingStart != nil {
 				tv.buffer.SetSelection(*tv.typingStart, tv.buffer.cursor)
+				tv.typingStart = nil
+			} else if tv.buffer.selectionStart != nil {
+				start, _ := tv.buffer.orderedSelection()
+				tv.buffer.cursor = start
+				tv.buffer.ClearSelection()
 				tv.typingStart = nil
 			}
 		case tcell.KeyCtrlZ:
@@ -284,31 +301,21 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 			tv.typingStart = nil
 			tv.buffer.Cut()
 		case tcell.KeyCtrlV:
-			if tv.typingStart == nil {
-				tv.typingStart = &Cursor{tv.buffer.cursor.x, tv.buffer.cursor.y}
-			}
+			tv.prepareTyping()
 			tv.buffer.Paste()
 		case tcell.KeyCtrlU:
-			if tv.typingStart == nil {
-				tv.typingStart = &Cursor{tv.buffer.cursor.x, tv.buffer.cursor.y}
-			}
+			tv.typingStart = nil
 			tv.buffer.ClearSelection()
 			tv.buffer.DeleteLine()
 		case tcell.KeyCtrlW:
-			if tv.typingStart == nil {
-				tv.typingStart = &Cursor{tv.buffer.cursor.x, tv.buffer.cursor.y}
-			}
+			tv.typingStart = nil
 			tv.buffer.ClearSelection()
 			tv.buffer.DeleteWordBefore()
 		case tcell.KeyCtrlH, tcell.KeyBackspace, tcell.KeyBackspace2:
-			if tv.typingStart == nil {
-				tv.typingStart = &Cursor{tv.buffer.cursor.x, tv.buffer.cursor.y}
-			}
+			tv.prepareTyping()
 			tv.buffer.Backspace()
 		case tcell.KeyDelete:
-			if tv.typingStart == nil {
-				tv.typingStart = &Cursor{tv.buffer.cursor.x, tv.buffer.cursor.y}
-			}
+			tv.prepareTyping()
 			tv.buffer.Delete()
 		case tcell.KeyPgUp:
 			tv.typingStart = nil
@@ -374,26 +381,20 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 			tv.buffer.ClearSelection()
 			tv.buffer.MoveEnd()
 		case tcell.KeyEnter:
-			if tv.typingStart == nil {
-				tv.typingStart = &Cursor{tv.buffer.cursor.x, tv.buffer.cursor.y}
+			if tv.prepareTyping() {
+				tv.buffer.DeleteSelection()
+				tv.typingStart = nil
 			}
-			tv.buffer.ClearSelection()
 			if !tv.singleLine {
 				tv.buffer.NewLine()
 			}
 		case tcell.KeyTab:
-			if tv.typingStart == nil {
-				tv.typingStart = &Cursor{tv.buffer.cursor.x, tv.buffer.cursor.y}
-			}
-			if tv.buffer.selectionStart != nil {
+			if tv.prepareTyping() {
 				tv.buffer.DeleteSelection()
 			}
 			tv.buffer.Insert('\t')
 		case tcell.KeyRune:
-			if tv.typingStart == nil {
-				tv.typingStart = &Cursor{tv.buffer.cursor.x, tv.buffer.cursor.y}
-			}
-			if tv.buffer.selectionStart != nil {
+			if tv.prepareTyping() {
 				tv.buffer.DeleteSelection()
 			}
 			tv.buffer.Insert(ev.Rune())
