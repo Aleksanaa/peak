@@ -216,7 +216,11 @@ func (tv *TextView) Draw(s tcell.Screen) {
 			}
 		}
 		for ; vcol < tv.w; vcol++ {
-			s.SetContent(tv.x+vcol, tv.y+vrow, ' ', nil, tv.style)
+			style := tv.style
+			if tv.buffer.IsSelected(vl.End, vl.BufferLine) {
+				style = selStyle
+			}
+			s.SetContent(tv.x+vcol, tv.y+vrow, ' ', nil, style)
 		}
 		vrow++
 	}
