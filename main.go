@@ -185,6 +185,9 @@ func (e *Editor) Draw() {
 		e.focusedView.ShowCursor(e.screen)
 	}
 	e.screen.Show()
+	if e.ninep != nil {
+		e.ninep.UpdateIndex()
+	}
 }
 
 func (e *Editor) HandleEvent(ev tcell.Event) (bool, bool) {

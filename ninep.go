@@ -3,16 +3,18 @@ package main
 import (
 	"embed"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
-	"github.com/knusbaum/go9p"
-	p9fs "github.com/knusbaum/go9p/fs"
-	"github.com/knusbaum/go9p/proto"
+	"github.com/halfwit/styx"
+	"github.com/spf13/afero"
 )
 
 //go:embed doc
@@ -21,58 +23,64 @@ var docFS embed.FS
 // NineP handles the 9P filesystem for Peak.
 type NineP struct {
 	editor *Editor
-	fs     *p9fs.FS
-	root   *p9fs.StaticDir
-	ssh    *SSHManager
+	vfs    *CompositeFs
+	index  atomic.Value // holds string
 }
 
 func NewNineP(e *Editor) *NineP {
-	// func NewFS(rootUser, rootGroup string, rootPerms uint32, opts ...Option) (*FS, *StaticDir)
-	gfs, root := p9fs.NewFS("user", "user", 0755)
-	p := &NineP{
-		editor: e,
-		fs:     gfs,
-		root:   root,
-		ssh:    NewSSHManager(),
-	}
+	vfs := NewCompositeFs(afero.NewOsFs())
+	p := &NineP{editor: e, vfs: vfs}
+	p.index.Store("")
 
-	// Create /index
-	indexStat := p.fs.NewStat("index", "user", "user", 0444)
-	index := &indexFile{
-		BaseFile: *p9fs.NewBaseFile(indexStat),
-		p:        p,
-	}
-	root.AddChild(index)
+	// Create /peak container
+	vfs.Mount("/peak", &PeakDirectoryFs{Fs: afero.NewMemMapFs(), p: p})
 
-	// Create /doc
-	docDir := p9fs.NewStaticDir(p.fs.NewStat("doc", "user", "user", 0755|proto.DMDIR))
-	root.AddChild(docDir)
-
-	// Populate /doc from docFS
-	entries, _ := docFS.ReadDir("doc")
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			name := entry.Name()
-			data, _ := docFS.ReadFile("doc/" + name)
-			fileStat := p.fs.NewStat(name, "user", "user", 0444)
-			docDir.AddChild(p9fs.NewStaticFile(fileStat, data))
-		}
-	}
-
-	// Create /ssh
-	root.AddChild(NewSSHDir(p.fs, p.ssh))
+	// Mount virtual filesystems
+	docFs := afero.FromIOFS{FS: docFS}
+	vfs.Mount("/peak/doc", afero.NewBasePathFs(docFs, "doc"))
+	vfs.Mount("/peak/ssh", NewSftpMountFs())
 
 	return p
 }
 
+func (p *NineP) UpdateIndex() {
+	if p.editor == nil {
+		return
+	}
+	var sb strings.Builder
+	for _, col := range p.editor.columns {
+		for _, win := range col.windows {
+			dirty := 0
+			if win.hasVersion && win.body.buffer.version != win.savedVersion {
+				dirty = 1
+			}
+			tagLen := win.tag.buffer.Len()
+			bodyLen := win.body.buffer.Len()
+			isdir := 0
+			if win.isDir {
+				isdir = 1
+			}
+			tagText := win.tag.buffer.GetText()
+			if i := strings.Index(tagText, "\n"); i >= 0 {
+				tagText = tagText[:i]
+			}
+			fmt.Fprintf(&sb, "%11d %11d %11d %11d %11d %s\n", win.ID, tagLen, bodyLen, isdir, dirty, tagText)
+		}
+	}
+	p.index.Store(sb.String())
+}
+
+func (p *NineP) getIndex() string {
+	return p.index.Load().(string)
+}
+
 func (p *NineP) Listen() {
-	user, err := os.UserHomeDir()
+	userDir, err := os.UserHomeDir()
 	if err != nil {
 		return
 	}
-	sockDir := filepath.Join(user, ".peak")
-	os.MkdirAll(sockDir, 0700)
-	sockPath := filepath.Join(sockDir, "9p")
+	sockPath := filepath.Join(userDir, ".peak", "9p")
+	os.MkdirAll(filepath.Dir(sockPath), 0700)
 	os.Remove(sockPath)
 
 	l, err := net.Listen("unix", sockPath)
@@ -83,355 +91,399 @@ func (p *NineP) Listen() {
 
 	go func() {
 		defer l.Close()
-		for {
-			conn, err := l.Accept()
-			if err != nil {
-				return
-			}
-			go go9p.ServeReadWriter(conn, conn, &srvWrapper{
-				srv: p.fs.Server(),
-				ed:  p.editor,
-			})
+		handler := New9PHandler(afero.NewBasePathFs(p.vfs, "/peak"))
+		srv := &styx.Server{Handler: handler}
+		if err := srv.Serve(l); err != nil {
+			log.Printf("9P server error: %v", err)
 		}
 	}()
 }
 
-type srvWrapper struct {
-	srv go9p.Srv
-	ed  *Editor
-}
-
-func (s *srvWrapper) NewConn() go9p.Conn {
-	return s.srv.NewConn()
-}
-
-func (s *srvWrapper) Version(c go9p.Conn, t *proto.TRVersion) (proto.FCall, error) {
-	if strings.HasPrefix(t.Version, "9P2000") {
-		t.Version = "9P2000"
-	}
-	return s.srv.Version(c, t)
-}
-
-func (s *srvWrapper) Auth(c go9p.Conn, t *proto.TAuth) (proto.FCall, error) {
-	var ret proto.FCall
-	var err error
-	s.ed.Call(func() {
-		ret, err = s.srv.Auth(c, t)
-	})
-	return ret, err
-}
-
-func (s *srvWrapper) Attach(c go9p.Conn, t *proto.TAttach) (proto.FCall, error) {
-	var ret proto.FCall
-	var err error
-	s.ed.Call(func() {
-		ret, err = s.srv.Attach(c, t)
-	})
-	return ret, err
-}
-
-func (s *srvWrapper) Walk(c go9p.Conn, t *proto.TWalk) (proto.FCall, error) {
-	var ret proto.FCall
-	var err error
-	s.ed.Call(func() {
-		ret, err = s.srv.Walk(c, t)
-	})
-	return ret, err
-}
-
-func (s *srvWrapper) Open(c go9p.Conn, t *proto.TOpen) (proto.FCall, error) {
-	var ret proto.FCall
-	var err error
-	s.ed.Call(func() {
-		ret, err = s.srv.Open(c, t)
-	})
-	return ret, err
-}
-
-func (s *srvWrapper) Create(c go9p.Conn, t *proto.TCreate) (proto.FCall, error) {
-	var ret proto.FCall
-	var err error
-	s.ed.Call(func() {
-		ret, err = s.srv.Create(c, t)
-	})
-	return ret, err
-}
-
-func (s *srvWrapper) Read(c go9p.Conn, t *proto.TRead) (proto.FCall, error) {
-	var ret proto.FCall
-	var err error
-	s.ed.Call(func() {
-		ret, err = s.srv.Read(c, t)
-	})
-	return ret, err
-}
-
-func (s *srvWrapper) Write(c go9p.Conn, t *proto.TWrite) (proto.FCall, error) {
-	var ret proto.FCall
-	var err error
-	s.ed.Call(func() {
-		ret, err = s.srv.Write(c, t)
-	})
-	return ret, err
-}
-
-func (s *srvWrapper) Clunk(c go9p.Conn, t *proto.TClunk) (proto.FCall, error) {
-	var ret proto.FCall
-	var err error
-	s.ed.Call(func() {
-		ret, err = s.srv.Clunk(c, t)
-	})
-	return ret, err
-}
-
-func (s *srvWrapper) Remove(c go9p.Conn, t *proto.TRemove) (proto.FCall, error) {
-	var ret proto.FCall
-	var err error
-	s.ed.Call(func() {
-		ret, err = s.srv.Remove(c, t)
-	})
-	return ret, err
-}
-
-func (s *srvWrapper) Stat(c go9p.Conn, t *proto.TStat) (proto.FCall, error) {
-	var ret proto.FCall
-	var err error
-	s.ed.Call(func() {
-		ret, err = s.srv.Stat(c, t)
-	})
-	return ret, err
-}
-
-func (s *srvWrapper) Wstat(c go9p.Conn, t *proto.TWstat) (proto.FCall, error) {
-	var ret proto.FCall
-	var err error
-	s.ed.Call(func() {
-		ret, err = s.srv.Wstat(c, t)
-	})
-	return ret, err
-}
-
-func (p *NineP) getIndex() string {
-	var sb strings.Builder
-	if p.editor != nil {
-		// ASSUME LOCKED by caller (either srvWrapper or TUI thread)
-		for _, col := range p.editor.columns {
-			for _, win := range col.windows {
-				dirty := 0
-				if win.hasVersion && win.body.buffer.version != win.savedVersion {
-					dirty = 1
+func New9PHandler(vfs afero.Fs) styx.Handler {
+	return styx.HandlerFunc(func(s *styx.Session) {
+		for s.Next() {
+			req := s.Request()
+			path := req.Path()
+			switch msg := req.(type) {
+			case styx.Twalk:
+				fi, err := vfs.Stat(path)
+				msg.Rwalk(fi, err)
+			case styx.Topen:
+				flags := os.O_RDWR
+				if msg.Flag&0x10 != 0 {
+					flags |= os.O_TRUNC
 				}
-				tagLen := win.tag.buffer.Len()
-				bodyLen := win.body.buffer.Len()
-				isdir := 0
-				if win.isDir {
-					isdir = 1
+				f, err := vfs.OpenFile(path, flags, 0)
+				msg.Ropen(f, err)
+			case styx.Tstat:
+				fi, err := vfs.Stat(path)
+				msg.Rstat(fi, err)
+			case styx.Tremove:
+				msg.Rremove(vfs.Remove(path))
+			case styx.Tsync:
+				msg.Rsync(nil)
+			case styx.Ttruncate:
+				f, err := vfs.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0)
+				if err == nil {
+					f.Close()
 				}
-				tagText := win.tag.buffer.GetText()
-
-				fmt.Fprintf(&sb, "%11d %11d %11d %11d %11d ", win.ID, tagLen, bodyLen, isdir, dirty)
-
-				if i := strings.Index(tagText, "\n"); i >= 0 {
-					tagText = tagText[:i]
+				msg.Rtruncate(err)
+			case styx.Tcreate:
+				// Use O_RDWR by default to ensure file creation works
+				f, err := vfs.OpenFile(filepath.Join(path, msg.Name), os.O_CREATE|os.O_TRUNC|os.O_RDWR, msg.Mode)
+				msg.Rcreate(f, err)
+			case styx.Tchmod:
+				msg.Rchmod(vfs.Chmod(path, msg.Mode))
+			case styx.Tchown:
+				msg.Rchown(nil)
+			case styx.Tutimes:
+				msg.Rutimes(vfs.Chtimes(path, msg.Atime, msg.Mtime))
+			case styx.Trename:
+				newPath := msg.NewPath
+				if !filepath.IsAbs(newPath) && !strings.HasPrefix(newPath, "/") {
+					newPath = filepath.Join(filepath.Dir(msg.OldPath), newPath)
 				}
-				sb.WriteString(tagText)
-				sb.WriteString("\n")
+				msg.Rrename(vfs.Rename(msg.OldPath, newPath))
 			}
 		}
-	}
-	return sb.String()
+	})
 }
 
-type indexFile struct {
-	p9fs.BaseFile
+type PeakDirectoryFs struct {
+	afero.Fs
 	p *NineP
 }
 
-func (f *indexFile) Stat() proto.Stat {
-	content := f.p.getIndex()
-	s := f.BaseFile.Stat()
-	s.Length = uint64(len(content))
-	return s
-}
-
-func (f *indexFile) Open(fid uint64, omode proto.Mode) error {
-	return nil
-}
-
-func (f *indexFile) Read(fid uint64, offset uint64, count uint64) ([]byte, error) {
-	content := f.p.getIndex()
-	if offset >= uint64(len(content)) {
-		return []byte{}, nil
+func (d *PeakDirectoryFs) Stat(name string) (os.FileInfo, error) {
+	if strings.TrimPrefix(filepath.ToSlash(filepath.Clean(name)), "/") == "index" {
+		return &SimpleFileInfo{name: "index", size: int64(len(d.p.getIndex())), mode: 0444}, nil
 	}
-	end := offset + count
-	if end > uint64(len(content)) {
-		end = uint64(len(content))
+	return d.Fs.Stat(name)
+}
+
+func (d *PeakDirectoryFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	rel := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(name)), "/")
+	if rel == "index" {
+		return &indexFile{p: d.p, name: "index"}, nil
 	}
-	return []byte(content[offset:end]), nil
-}
-
-func (f *indexFile) Write(fid uint64, offset uint64, data []byte) (uint32, error) {
-	return 0, fmt.Errorf("read-only")
-}
-
-func (f *indexFile) Close(fid uint64) error {
-	return nil
-}
-
-// Internal VFS access for path.go
-
-func (p *NineP) findNode(path string) (p9fs.FSNode, error) {
-	path = strings.TrimPrefix(path, "/peak")
-	path = strings.TrimPrefix(path, "/")
-	if path == "" {
-		return p.root, nil
-	}
-	parts := strings.Split(path, "/")
-	var current p9fs.FSNode = p.root
-	for _, part := range parts {
-		if part == "" {
-			continue
-		}
-		// Check for Children() first (StaticDir)
-		if dir, ok := current.(p9fs.Dir); ok {
-			if children := dir.Children(); children != nil {
-				if next, ok := children[part]; ok {
-					current = next
-					continue
-				}
-			}
-		}
-		// Fallback to Walk() (dynamic nodes like SSHDir)
-		if walker, ok := current.(interface {
-			Walk(string) (p9fs.FSNode, error)
-		}); ok {
-			next, err := walker.Walk(part)
-			if err == nil {
-				current = next
-				continue
-			}
-		}
-		return nil, os.ErrNotExist
-	}
-	return current, nil
-}
-
-func (p *NineP) ReadInternal(path string) ([]byte, error) {
-	node, err := p.findNode(path)
+	f, err := d.Fs.OpenFile(name, flag, perm)
 	if err != nil {
 		return nil, err
 	}
-	file, ok := node.(p9fs.File)
-	if !ok {
-		return nil, os.ErrInvalid
+	if rel == "." || rel == "" {
+		return &mergedDirFile{
+			File: f,
+			extra: []os.FileInfo{
+				&SimpleFileInfo{name: "index", size: int64(len(d.p.getIndex())), mode: 0444},
+			},
+		}, nil
 	}
-
-	// Use a dummy fid for internal reading
-	const dummyFid = 0
-	if err := file.Open(dummyFid, proto.Oread); err != nil {
-		return nil, err
-	}
-	defer file.Close(dummyFid)
-
-	var result []byte
-	var offset uint64
-	for {
-		chunk, err := file.Read(dummyFid, offset, 8192)
-		if err != nil {
-			return nil, err
-		}
-		if len(chunk) == 0 {
-			break
-		}
-		result = append(result, chunk...)
-		offset += uint64(len(chunk))
-	}
-	return result, nil
+	return f, nil
 }
 
-func (p *NineP) WriteInternal(path string, data []byte) error {
-	node, err := p.findNode(path)
-	if err != nil {
-		return err
-	}
-	file, ok := node.(p9fs.File)
-	if !ok {
-		return os.ErrInvalid
-	}
-
-	const dummyFid = 0
-	if err := file.Open(dummyFid, proto.Owrite|proto.Otrunc); err != nil {
-		return err
-	}
-	defer file.Close(dummyFid)
-
-	var offset uint64
-	for len(data) > 0 {
-		n, err := file.Write(dummyFid, offset, data)
-		if err != nil {
-			return err
-		}
-		if n == 0 {
-			return fmt.Errorf("zero write")
-		}
-		data = data[n:]
-		offset += uint64(n)
-	}
-	return nil
+func (d *PeakDirectoryFs) Open(name string) (afero.File, error) {
+	return d.OpenFile(name, os.O_RDONLY, 0)
 }
 
-func (p *NineP) IsDirInternal(path string) bool {
-	node, err := p.findNode(path)
-	if err != nil {
-		return false
-	}
-	return (node.Stat().Mode & proto.DMDIR) != 0
+type indexFile struct {
+	p      *NineP
+	name   string
+	offset int64
 }
 
-func (p *NineP) IsFileInternal(path string) bool {
-	node, err := p.findNode(path)
-	if err != nil {
-		return false
+func (f *indexFile) Close() error                           { return nil }
+func (f *indexFile) Write(p []byte) (int, error)            { return 0, os.ErrPermission }
+func (f *indexFile) WriteAt(p []byte, o int64) (int, error) { return 0, os.ErrPermission }
+func (f *indexFile) WriteString(s string) (int, error)      { return 0, os.ErrPermission }
+func (f *indexFile) Truncate(s int64) error                 { return os.ErrPermission }
+func (f *indexFile) Sync() error                            { return nil }
+func (f *indexFile) Name() string                           { return f.name }
+func (f *indexFile) Readdir(n int) ([]os.FileInfo, error)   { return nil, nil }
+func (f *indexFile) Readdirnames(n int) ([]string, error)   { return nil, nil }
+
+func (f *indexFile) Read(p []byte) (n int, err error) {
+	content := f.p.getIndex()
+	if f.offset >= int64(len(content)) {
+		return 0, io.EOF
 	}
-	return (node.Stat().Mode & proto.DMDIR) == 0
+	n = copy(p, content[f.offset:])
+	f.offset += int64(n)
+	return n, nil
 }
 
-func (p *NineP) ListDirInternal(path string) (string, error) {
-	node, err := p.findNode(path)
-	if err != nil {
-		return "", err
+func (f *indexFile) ReadAt(p []byte, off int64) (n int, err error) {
+	content := f.p.getIndex()
+	if off >= int64(len(content)) {
+		return 0, io.EOF
 	}
-	dir, ok := node.(p9fs.Dir)
-	if !ok {
-		return "", os.ErrInvalid
-	}
+	n = copy(p, content[off:])
+	return n, nil
+}
 
-	children := dir.Children()
-	names := make([]string, 0, len(children))
-	for name, child := range children {
-		if (child.Stat().Mode & proto.DMDIR) != 0 {
-			name += "/"
-		}
-		names = append(names, name)
+func (f *indexFile) Seek(offset int64, whence int) (int64, error) {
+	content := f.p.getIndex()
+	switch whence {
+	case io.SeekStart:
+		f.offset = offset
+	case io.SeekCurrent:
+		f.offset += offset
+	case io.SeekEnd:
+		f.offset = int64(len(content)) + offset
 	}
-	sort.Strings(names)
+	return f.offset, nil
+}
 
-	var sb strings.Builder
-	for _, name := range names {
-		sb.WriteString(name + "\n")
-	}
-	return sb.String(), nil
+func (f *indexFile) Stat() (os.FileInfo, error) {
+	return &SimpleFileInfo{name: f.name, size: int64(len(f.p.getIndex())), mode: 0444}, nil
 }
 
 func (p *NineP) RunInternal(path, cmd, input string, winid int) (string, error) {
-	node, err := p.findNode(path)
-	if err != nil {
-		return "", err
-	}
-	if runner, ok := node.(interface {
-		Run(cmd, input string, winid int) (string, error)
+	fs, rel := p.vfs.getFs(path)
+	if runner, ok := fs.(interface {
+		Run(path, cmd, input string, winid int) (string, error)
 	}); ok {
-		return runner.Run(cmd, input, winid)
+		return runner.Run(rel, cmd, input, winid)
 	}
 	return "", fmt.Errorf("%s: does not support command execution", path)
 }
+
+type SimpleFileInfo struct {
+	name    string
+	isDir   bool
+	size    int64
+	modTime time.Time
+	mode    os.FileMode
+}
+
+func (s *SimpleFileInfo) Name() string       { return s.name }
+func (s *SimpleFileInfo) Size() int64        { return s.size }
+func (s *SimpleFileInfo) IsDir() bool        { return s.isDir }
+func (s *SimpleFileInfo) ModTime() time.Time { return s.modTime }
+func (s *SimpleFileInfo) Sys() interface{}   { return nil }
+func (s *SimpleFileInfo) Mode() os.FileMode {
+	// Just some simple modes to make 9pfuse happy
+	mode := s.mode.Perm()
+	if mode == 0 {
+		if s.isDir {
+			mode = 0755
+		} else {
+			mode = 0644
+		}
+	}
+	if s.isDir {
+		return os.ModeDir | mode
+	}
+	return mode
+}
+
+func NewFileInfo(fi os.FileInfo) *SimpleFileInfo {
+	return &SimpleFileInfo{
+		name:    fi.Name(),
+		isDir:   fi.IsDir(),
+		size:    fi.Size(),
+		modTime: fi.ModTime(),
+		mode:    fi.Mode(),
+	}
+}
+
+func sliceReaddir(offset *int, entries []os.FileInfo, count int) ([]os.FileInfo, error) {
+	if count <= 0 {
+		return entries, nil
+	}
+	if *offset >= len(entries) {
+		return nil, io.EOF
+	}
+	end := *offset + count
+	if end > len(entries) {
+		end = len(entries)
+	}
+	res := entries[*offset:end]
+	*offset = end
+	return res, nil
+}
+
+func convertEntries(raw []os.FileInfo) []os.FileInfo {
+	res := make([]os.FileInfo, 0, len(raw))
+	for _, fi := range raw {
+		if name := fi.Name(); name != "." && name != ".." {
+			res = append(res, NewFileInfo(fi))
+		}
+	}
+	return res
+}
+
+type CompositeFs struct {
+	base   afero.Fs
+	mounts sync.Map // string -> afero.Fs
+}
+
+func NewCompositeFs(base afero.Fs) *CompositeFs {
+	return &CompositeFs{base: base}
+}
+
+func (c *CompositeFs) Mount(path string, fs afero.Fs) {
+	path = filepath.ToSlash(filepath.Clean(path))
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	c.mounts.Store(path, fs)
+	_ = c.base.MkdirAll(path, 0755)
+}
+
+func (c *CompositeFs) getFs(name string) (afero.Fs, string) {
+	name = filepath.ToSlash(filepath.Clean(name))
+	if !strings.HasPrefix(name, "/") {
+		return c.base, name
+	}
+
+	var bestPath string
+	var bestFs afero.Fs
+	c.mounts.Range(func(key, value interface{}) bool {
+		mpath := key.(string)
+		if name == mpath || strings.HasPrefix(name, mpath+"/") {
+			if len(mpath) > len(bestPath) {
+				bestPath, bestFs = mpath, value.(afero.Fs)
+			}
+		}
+		return true
+	})
+
+	if bestFs != nil {
+		rel := strings.TrimPrefix(name, bestPath)
+		if rel == "" || rel == "/" {
+			return bestFs, "."
+		}
+		return bestFs, strings.TrimPrefix(rel, "/")
+	}
+	return c.base, name
+}
+
+func (c *CompositeFs) Open(name string) (afero.File, error) {
+	return c.OpenFile(name, os.O_RDONLY, 0)
+}
+
+func (c *CompositeFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	name = filepath.ToSlash(filepath.Clean(name))
+	fs, rel := c.getFs(name)
+	f, err := fs.OpenFile(rel, flag, perm)
+	if err != nil {
+		return nil, err
+	}
+
+	fi, err := f.Stat()
+	if err == nil && fi.IsDir() {
+		var extra []os.FileInfo
+		prefix := name
+		if !strings.HasSuffix(prefix, "/") {
+			prefix += "/"
+		}
+		c.mounts.Range(func(key, value interface{}) bool {
+			mpath := key.(string)
+			if mpath != name && strings.HasPrefix(mpath, prefix) {
+				if relM := strings.TrimPrefix(mpath, prefix); !strings.Contains(relM, "/") && relM != "" {
+					extra = append(extra, &SimpleFileInfo{name: relM, isDir: true})
+				}
+			}
+			return true
+		})
+		if len(extra) > 0 {
+			return &mergedDirFile{File: f, extra: extra}, nil
+		}
+	}
+	return f, nil
+}
+
+func (c *CompositeFs) Stat(name string) (os.FileInfo, error) {
+	fs, rel := c.getFs(name)
+	return fs.Stat(rel)
+}
+
+func (c *CompositeFs) Remove(n string) error               { f, r := c.getFs(n); return f.Remove(r) }
+func (c *CompositeFs) RemoveAll(n string) error            { f, r := c.getFs(n); return f.RemoveAll(r) }
+func (c *CompositeFs) Create(n string) (afero.File, error) { f, r := c.getFs(n); return f.Create(r) }
+func (c *CompositeFs) Mkdir(n string, p os.FileMode) error { f, r := c.getFs(n); return f.Mkdir(r, p) }
+func (c *CompositeFs) MkdirAll(n string, p os.FileMode) error {
+	f, r := c.getFs(n)
+	return f.MkdirAll(r, p)
+}
+func (c *CompositeFs) Rename(o, n string) error {
+	f1, r1 := c.getFs(o)
+	f2, r2 := c.getFs(n)
+	if f1 != f2 {
+		return fmt.Errorf("cross-fs rename not supported")
+	}
+	return f1.Rename(r1, r2)
+}
+func (c *CompositeFs) Chmod(n string, m os.FileMode) error { f, r := c.getFs(n); return f.Chmod(r, m) }
+func (c *CompositeFs) Chown(n string, u, g int) error      { f, r := c.getFs(n); return f.Chown(r, u, g) }
+func (c *CompositeFs) Chtimes(n string, a, m time.Time) error {
+	f, r := c.getFs(n)
+	return f.Chtimes(r, a, m)
+}
+func (c *CompositeFs) Name() string { return "CompositeFs" }
+
+type mergedDirFile struct {
+	afero.File
+	extra       []os.FileInfo
+	extraOffset int
+	baseDone    bool
+	seen        map[string]bool
+}
+
+func (m *mergedDirFile) Readdir(count int) ([]os.FileInfo, error) {
+	if m.seen == nil {
+		m.seen = make(map[string]bool)
+	}
+	var res []os.FileInfo
+	if !m.baseDone {
+		entries, err := m.File.Readdir(count)
+		for _, e := range entries {
+			if !m.seen[e.Name()] {
+				res = append(res, e)
+				m.seen[e.Name()] = true
+			}
+		}
+		if err == io.EOF || (count > 0 && len(entries) < count) {
+			m.baseDone = true
+		} else if err != nil {
+			return nil, err
+		}
+	}
+
+	for m.extraOffset < len(m.extra) && (count <= 0 || len(res) < count) {
+		ex := m.extra[m.extraOffset]
+		m.extraOffset++
+		if !m.seen[ex.Name()] {
+			res = append(res, ex)
+			m.seen[ex.Name()] = true
+		}
+	}
+	if len(res) == 0 && count > 0 {
+		return nil, io.EOF
+	}
+	return res, nil
+}
+
+type memDirFile struct {
+	name    string
+	entries []os.FileInfo
+	offset  int
+}
+
+func (v *memDirFile) Close() error                                   { return nil }
+func (v *memDirFile) Read(p []byte) (n int, err error)               { return 0, io.EOF }
+func (v *memDirFile) ReadAt(p []byte, off int64) (n int, err error)  { return 0, io.EOF }
+func (v *memDirFile) Seek(offset int64, whence int) (int64, error)   { return 0, nil }
+func (v *memDirFile) Write(p []byte) (n int, err error)              { return 0, os.ErrPermission }
+func (v *memDirFile) WriteAt(p []byte, off int64) (n int, err error) { return 0, os.ErrPermission }
+func (v *memDirFile) Name() string                                   { return v.name }
+func (v *memDirFile) Readdir(count int) ([]os.FileInfo, error) {
+	return sliceReaddir(&v.offset, v.entries, count)
+}
+func (v *memDirFile) Readdirnames(n int) ([]string, error) { return nil, nil }
+func (v *memDirFile) Stat() (os.FileInfo, error) {
+	return &SimpleFileInfo{name: v.name, isDir: true}, nil
+}
+func (v *memDirFile) Sync() error                               { return nil }
+func (v *memDirFile) Truncate(size int64) error                 { return os.ErrPermission }
+func (v *memDirFile) WriteString(s string) (ret int, err error) { return 0, os.ErrPermission }

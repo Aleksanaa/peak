@@ -2,48 +2,209 @@ package main
 
 import (
 	"fmt"
-	"io"
-	"log"
 	"net"
 	"os"
 	"os/user"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"al.essio.dev/pkg/shellescape"
-	p9fs "github.com/knusbaum/go9p/fs"
-	"github.com/knusbaum/go9p/proto"
 	"github.com/pkg/sftp"
+	"github.com/spf13/afero"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 )
 
 type SSHClient struct {
-	conn   *ssh.Client
-	sftp   *sftp.Client
-	target string
-	reqs   chan func()
-	files  map[uint64]*sftp.File
+	ssh  *ssh.Client
+	sftp *sftp.Client
 }
 
-func (c *SSHClient) loop() {
-	for f := range c.reqs {
-		f()
+type SftpMountFs struct {
+	conns sync.Map // string -> *SSHClient
+}
+
+func NewSftpMountFs() *SftpMountFs {
+	return &SftpMountFs{}
+}
+
+func (s *SftpMountFs) getClient(connStr string) (*SSHClient, error) {
+	if val, ok := s.conns.Load(connStr); ok {
+		return val.(*SSHClient), nil
 	}
-}
 
-func (c *SSHClient) call(f func()) {
-	done := make(chan struct{})
-	c.reqs <- func() {
-		f()
-		close(done)
+	userStr, host, _ := strings.Cut(connStr, "@")
+	if host == "" {
+		host, userStr = userStr, os.Getenv("USER")
+		if userStr == "" {
+			if u, err := user.Current(); err == nil {
+				userStr = u.Username
+			} else {
+				userStr = "root"
+			}
+		}
 	}
-	<-done
+	if !strings.Contains(host, ":") {
+		host += ":22"
+	}
+
+	var auths []ssh.AuthMethod
+	if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" {
+		if conn, err := net.Dial("unix", sock); err == nil {
+			auths = append(auths, ssh.PublicKeysCallback(agent.NewClient(conn).Signers))
+		}
+	}
+
+	config := &ssh.ClientConfig{
+		User:            userStr,
+		Auth:            auths,
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         10 * time.Second,
+	}
+
+	sshConn, err := ssh.Dial("tcp", host, config)
+	if err != nil {
+		return nil, err
+	}
+	sftpClient, err := sftp.NewClient(sshConn)
+	if err != nil {
+		sshConn.Close()
+		return nil, err
+	}
+	client := &SSHClient{ssh: sshConn, sftp: sftpClient}
+	s.conns.Store(connStr, client)
+	return client, nil
 }
 
-func (c *SSHClient) Run(cmd, path, input string, winid int) (string, error) {
-	session, err := c.conn.NewSession()
+func (s *SftpMountFs) parse(name string) (string, string) {
+	name = strings.TrimPrefix(filepath.ToSlash(filepath.Clean(name)), "/")
+	if name == "" || name == "." {
+		return "", ""
+	}
+	parts := strings.SplitN(name, "/", 2)
+	if len(parts) == 1 {
+		return parts[0], "/"
+	}
+	return parts[0], "/" + parts[1]
+}
+
+func (s *SftpMountFs) withClient(name string, fn func(cli *sftp.Client, rel string) error) error {
+	conn, rel := s.parse(name)
+	if conn == "" {
+		return os.ErrInvalid
+	}
+	client, err := s.getClient(conn)
+	if err != nil {
+		return err
+	}
+	return fn(client.sftp, rel)
+}
+
+func (s *SftpMountFs) Stat(name string) (os.FileInfo, error) {
+	conn, rel := s.parse(name)
+	if conn == "" {
+		return &SimpleFileInfo{name: "ssh", isDir: true}, nil
+	}
+	client, err := s.getClient(conn)
+	if err != nil {
+		if rel == "" || rel == "/" {
+			return &SimpleFileInfo{name: conn, isDir: true}, nil
+		}
+		return nil, err
+	}
+	fi, err := client.sftp.Stat(rel)
+	if err != nil {
+		if rel == "" || rel == "/" {
+			return &SimpleFileInfo{name: conn, isDir: true}, nil
+		}
+		return nil, err
+	}
+	return &SimpleFileInfo{name: filepath.Base(name), isDir: fi.IsDir(), size: fi.Size(), modTime: fi.ModTime(), mode: fi.Mode()}, nil
+}
+
+func (s *SftpMountFs) Open(name string) (afero.File, error) {
+	return s.OpenFile(name, os.O_RDONLY, 0)
+}
+
+func (s *SftpMountFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	conn, rel := s.parse(name)
+	if conn == "" {
+		var entries []os.FileInfo
+		s.conns.Range(func(k, v interface{}) bool {
+			entries = append(entries, &SimpleFileInfo{name: k.(string), isDir: true})
+			return true
+		})
+		return &memDirFile{name: "ssh", entries: entries}, nil
+	}
+
+	client, err := s.getClient(conn)
+	if err != nil {
+		if rel == "" || rel == "/" {
+			return &memDirFile{name: conn}, nil
+		}
+		return nil, err
+	}
+
+	if rel == "" || rel == "/" {
+		return &sftpFile{client: client.sftp, name: "/", isDir: true}, nil
+	}
+	fi, err := client.sftp.Stat(rel)
+	if err == nil && fi.IsDir() {
+		return &sftpFile{client: client.sftp, name: rel, isDir: true}, nil
+	}
+
+	f, err := client.sftp.OpenFile(rel, flag)
+	if err != nil {
+		return nil, err
+	}
+	return &sftpFile{File: f, client: client.sftp, name: rel}, nil
+}
+
+func (s *SftpMountFs) Remove(n string) error    { return s.withClient(n, func(c *sftp.Client, r string) error { return c.Remove(r) }) }
+func (s *SftpMountFs) RemoveAll(n string) error { return s.Remove(n) }
+func (s *SftpMountFs) Create(n string) (afero.File, error) {
+	return s.OpenFile(n, os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0666)
+}
+func (s *SftpMountFs) Mkdir(n string, p os.FileMode) error {
+	return s.withClient(n, func(c *sftp.Client, r string) error { return c.Mkdir(r) })
+}
+func (s *SftpMountFs) MkdirAll(n string, p os.FileMode) error { return s.Mkdir(n, p) }
+func (s *SftpMountFs) Rename(o, n string) error {
+	oc, or := s.parse(o)
+	nc, nr := s.parse(n)
+	if oc != nc || oc == "" {
+		return fmt.Errorf("cross-fs rename")
+	}
+	cli, err := s.getClient(oc)
+	if err != nil {
+		return err
+	}
+	return cli.sftp.Rename(or, nr)
+}
+func (s *SftpMountFs) Chmod(n string, m os.FileMode) error {
+	return s.withClient(n, func(c *sftp.Client, r string) error { return c.Chmod(r, m) })
+}
+func (s *SftpMountFs) Chown(n string, u, g int) error {
+	return s.withClient(n, func(c *sftp.Client, r string) error { return c.Chown(r, u, g) })
+}
+func (s *SftpMountFs) Chtimes(n string, a, m time.Time) error {
+	return s.withClient(n, func(c *sftp.Client, r string) error { return c.Chtimes(r, a, m) })
+}
+func (s *SftpMountFs) Name() string { return "SftpMountFs" }
+
+func (s *SftpMountFs) Run(path, cmd, input string, winid int) (string, error) {
+	conn, rel := s.parse(path)
+	if conn == "" {
+		return "", fmt.Errorf("not an ssh path")
+	}
+	client, err := s.getClient(conn)
+	if err != nil {
+		return "", err
+	}
+
+	session, err := client.ssh.NewSession()
 	if err != nil {
 		return "", err
 	}
@@ -53,16 +214,14 @@ func (c *SSHClient) Run(cmd, path, input string, winid int) (string, error) {
 		session.Stdin = strings.NewReader(input)
 	}
 
-	dir := path
-	if info, err := c.sftp.Stat(path); err == nil && !info.IsDir() {
-		dir = filepath.Dir(path)
+	dir := rel
+	if info, err := client.sftp.Stat(rel); err == nil && !info.IsDir() {
+		dir = filepath.Dir(rel)
 	}
 
-	// For remote execution, building a robust remote command line.
-	// env is used to set the context variables for the inner sh.
 	remoteCmd := fmt.Sprintf("cd %s && env %s %s sh -c %s",
 		shellescape.Quote(dir),
-		shellescape.Quote("samfile="+path),
+		shellescape.Quote("samfile="+rel),
 		shellescape.Quote(fmt.Sprintf("winid=%d", winid)),
 		shellescape.Quote(cmd))
 
@@ -70,302 +229,70 @@ func (c *SSHClient) Run(cmd, path, input string, winid int) (string, error) {
 	return string(out), err
 }
 
-type SSHManager struct {
-	clients sync.Map // string -> *SSHClient
+type sftpFile struct {
+	*sftp.File
+	client  *sftp.Client
+	name    string
+	isDir   bool
+	offset  int
+	entries []os.FileInfo
 }
 
-func NewSSHManager() *SSHManager {
-	return &SSHManager{}
-}
-
-func (m *SSHManager) connect(target string) (*SSHClient, error) {
-	log.Printf("SSH: Connecting to %s", target)
-	var username string
-	host := target
-	if idx := strings.Index(target, "@"); idx != -1 {
-		username = target[:idx]
-		host = target[idx+1:]
-	} else {
-		u, err := user.Current()
+func (f *sftpFile) Name() string { return filepath.Base(f.name) }
+func (f *sftpFile) Readdir(count int) ([]os.FileInfo, error) {
+	if f.entries == nil {
+		raw, err := f.client.ReadDir(f.name)
 		if err != nil {
 			return nil, err
 		}
-		username = u.Username
+		f.entries = convertEntries(raw)
 	}
-
-	auths := []ssh.AuthMethod{}
-	if aconn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK")); err == nil {
-		auths = append(auths, ssh.PublicKeysCallback(agent.NewClient(aconn).Signers))
+	return sliceReaddir(&f.offset, f.entries, count)
+}
+func (f *sftpFile) Readdirnames(n int) ([]string, error) { return nil, nil }
+func (f *sftpFile) Stat() (os.FileInfo, error) {
+	if f.isDir {
+		return &SimpleFileInfo{name: f.Name(), isDir: true}, nil
 	}
-
-	config := &ssh.ClientConfig{
-		User:            username,
-		Auth:            auths,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-	}
-
-	addr := host
-	if !filepath.IsAbs(host) && !strings.HasPrefix(host, "[") && strings.Index(host, ":") == -1 {
-		addr = host + ":22"
-	}
-
-	conn, err := ssh.Dial("tcp", addr, config)
+	fi, err := f.File.Stat()
 	if err != nil {
 		return nil, err
 	}
-
-	sftpClient, err := sftp.NewClient(conn)
-	if err != nil {
-		conn.Close()
-		return nil, err
-	}
-
-	log.Printf("SSH: Successfully connected to %s", target)
-	client := &SSHClient{
-		conn:   conn,
-		sftp:   sftpClient,
-		target: target,
-		reqs:   make(chan func()),
-		files:  make(map[uint64]*sftp.File),
-	}
-	go client.loop()
-	return client, nil
+	return NewFileInfo(fi), nil
 }
-
-func (m *SSHManager) GetClient(target string) (*SSHClient, error) {
-	if c, ok := m.clients.Load(target); ok {
-		return c.(*SSHClient), nil
-	}
-	client, err := m.connect(target)
-	if err != nil {
-		return nil, err
-	}
-	m.clients.Store(target, client)
-	return client, nil
-}
-
-// SSHDir is the /peak/ssh directory.
-type SSHDir struct {
-	p9fs.BaseFile
-	manager *SSHManager
-	fs      *p9fs.FS
-}
-
-func NewSSHDir(fs *p9fs.FS, manager *SSHManager) *SSHDir {
-	stat := fs.NewStat("ssh", "user", "user", 0755|proto.DMDIR)
-	return &SSHDir{
-		BaseFile: *p9fs.NewBaseFile(stat),
-		manager:  manager,
-		fs:       fs,
-	}
-}
-
-func (d *SSHDir) Children() map[string]p9fs.FSNode {
-	return nil
-}
-
-func (d *SSHDir) Walk(name string) (p9fs.FSNode, error) {
-	client, err := d.manager.GetClient(name)
-	if err != nil {
-		return nil, err
-	}
-
-	stat := &proto.Stat{
-		Name: name,
-		Uid:  "user",
-		Gid:  "user",
-		Muid: "user",
-		Mode: 0755 | proto.DMDIR,
-	}
-	return &SFTPNode{
-		BaseFile: *p9fs.NewBaseFile(stat),
-		manager:  d.manager,
-		target:   name,
-		path:     "/",
-		isDir:    true,
-		fs:       d.fs,
-		client:   client,
-	}, nil
-}
-
-// SFTPNode implements a 9P node backed by SFTP.
-type SFTPNode struct {
-	p9fs.BaseFile
-	manager *SSHManager
-	target  string
-	path    string
-	isDir   bool
-	fs      *p9fs.FS
-	client  *SSHClient
-}
-
-func (n *SFTPNode) Stat() proto.Stat {
-	s := n.BaseFile.Stat()
-	n.client.call(func() {
-		if info, err := n.client.sftp.Stat(n.path); err == nil {
-			s.Length = uint64(info.Size())
-			if info.IsDir() {
-				s.Mode |= proto.DMDIR
-			} else {
-				s.Mode &= ^uint32(proto.DMDIR)
-			}
-		}
-	})
-	return s
-}
-
-func (n *SFTPNode) Run(cmd, input string, winid int) (string, error) {
-	return n.client.Run(cmd, n.path, input, winid)
-}
-
-func (n *SFTPNode) Children() map[string]p9fs.FSNode {
-	if !n.isDir {
+func (f *sftpFile) Sync() error {
+	if f.File == nil {
 		return nil
 	}
-	var entries []os.FileInfo
-	n.client.call(func() {
-		entries, _ = n.client.sftp.ReadDir(n.path)
-	})
-
-	res := make(map[string]p9fs.FSNode)
-	for _, e := range entries {
-		name := e.Name()
-		if name == "." || name == ".." {
-			continue
-		}
-		full := filepath.Join(n.path, name)
-		mode := uint32(0644)
-		if e.IsDir() {
-			mode = 0755 | proto.DMDIR
-		}
-		stat := &proto.Stat{
-			Name: name,
-			Uid:  "user",
-			Gid:  "user",
-			Muid: "user",
-			Mode: mode,
-		}
-		node := &SFTPNode{
-			BaseFile: *p9fs.NewBaseFile(stat),
-			manager:  n.manager,
-			target:   n.target,
-			path:     full,
-			isDir:    e.IsDir(),
-			fs:       n.fs,
-			client:   n.client,
-		}
-		res[name] = node
-	}
-	return res
+	return f.File.Sync()
 }
-
-func (n *SFTPNode) Walk(name string) (p9fs.FSNode, error) {
-	if !n.isDir {
-		return nil, os.ErrInvalid
+func (f *sftpFile) Truncate(size int64) error {
+	if f.File == nil {
+		return os.ErrInvalid
 	}
-	full := filepath.Join(n.path, name)
-	var info os.FileInfo
-	var err error
-	n.client.call(func() {
-		info, err = n.client.sftp.Stat(full)
-	})
-	if err != nil {
-		return nil, err
-	}
-	mode := uint32(0644)
-	if info.IsDir() {
-		mode = 0755 | proto.DMDIR
-	}
-	stat := &proto.Stat{
-		Name: name,
-		Uid:  "user",
-		Gid:  "user",
-		Muid: "user",
-		Mode: mode,
-	}
-	return &SFTPNode{
-		BaseFile: *p9fs.NewBaseFile(stat),
-		manager:  n.manager,
-		target:   name,
-		path:     full,
-		isDir:    info.IsDir(),
-		fs:       n.fs,
-		client:   n.client,
-	}, nil
+	return f.File.Truncate(size)
 }
-
-func (n *SFTPNode) Open(fid uint64, omode proto.Mode) error {
-	if n.isDir {
-		return nil
+func (f *sftpFile) WriteString(s string) (ret int, err error) {
+	if f.File == nil {
+		return 0, os.ErrInvalid
 	}
-	var err error
-	n.client.call(func() {
-		flags := os.O_RDONLY
-		switch omode & 3 {
-		case proto.Owrite:
-			flags = os.O_WRONLY
-		case proto.Ordwr:
-			flags = os.O_RDWR
-		}
-		if omode&proto.Otrunc != 0 {
-			flags |= os.O_TRUNC
-		}
-		f, e := n.client.sftp.OpenFile(n.path, flags)
-		if e != nil {
-			err = e
-			return
-		}
-		n.client.files[fid] = f
-	})
-	return err
+	return f.File.Write([]byte(s))
 }
-
-func (n *SFTPNode) Read(fid uint64, offset uint64, count uint64) ([]byte, error) {
-	if n.isDir {
-		return nil, fmt.Errorf("is directory")
+func (f *sftpFile) Write(p []byte) (n int, err error) {
+	if f.File == nil {
+		return 0, os.ErrInvalid
 	}
-	var data []byte
-	var err error
-	n.client.call(func() {
-		f, ok := n.client.files[fid]
-		if !ok {
-			err = fmt.Errorf("not open")
-			return
-		}
-		buf := make([]byte, count)
-		nr, e := f.ReadAt(buf, int64(offset))
-		if e != nil && e != io.EOF {
-			err = e
-			return
-		}
-		data = buf[:nr]
-	})
-	return data, err
+	return f.File.Write(p)
 }
-
-func (n *SFTPNode) Write(fid uint64, offset uint64, data []byte) (uint32, error) {
-	if n.isDir {
-		return 0, fmt.Errorf("is directory")
+func (f *sftpFile) WriteAt(p []byte, off int64) (n int, err error) {
+	if f.File == nil {
+		return 0, os.ErrInvalid
 	}
-	var nw int
-	var err error
-	n.client.call(func() {
-		f, ok := n.client.files[fid]
-		if !ok {
-			err = fmt.Errorf("not open")
-			return
-		}
-		nw, err = f.WriteAt(data, int64(offset))
-	})
-	return uint32(nw), err
+	return f.File.WriteAt(p, off)
 }
-
-func (n *SFTPNode) Close(fid uint64) error {
-	n.client.call(func() {
-		if f, ok := n.client.files[fid]; ok {
-			f.Close()
-			delete(n.client.files, fid)
-		}
-	})
+func (f *sftpFile) Close() error {
+	if f.File != nil {
+		return f.File.Close()
+	}
 	return nil
 }
