@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
@@ -219,12 +218,6 @@ func listDir(path string) (string, error) {
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		return "", err
-	}
-	if path == "/" {
-		entries = append(entries, &mockDirEntry{name: "peak", isDir: true})
-		sort.Slice(entries, func(i, j int) bool {
-			return entries[i].Name() < entries[j].Name()
-		})
 	}
 
 	var sb strings.Builder
