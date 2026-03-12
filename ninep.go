@@ -212,23 +212,17 @@ func (p *NineP) getIndex() string {
 		// ASSUME LOCKED by caller (either srvWrapper or TUI thread)
 		for _, col := range p.editor.columns {
 			for _, win := range col.windows {
-				// Inline CtlPrint logic to avoid calling methods that might call isDir
 				dirty := 0
-				if win.body.buffer.version != win.savedVersion {
+				if win.hasVersion && win.body.buffer.version != win.savedVersion {
 					dirty = 1
 				}
 				tagLen := win.tag.buffer.Len()
 				bodyLen := win.body.buffer.Len()
 				isdir := 0
-				// We don't call win.GetFilename() or isDir here to stay safe
-				tagText := win.tag.buffer.GetText()
-				fields := strings.Fields(tagText)
-				if len(fields) > 0 {
-					fn := fields[0]
-					if strings.HasSuffix(fn, "/") {
-						isdir = 1
-					}
+				if win.isDir {
+					isdir = 1
 				}
+				tagText := win.tag.buffer.GetText()
 
 				fmt.Fprintf(&sb, "%11d %11d %11d %11d %11d ", win.ID, tagLen, bodyLen, isdir, dirty)
 

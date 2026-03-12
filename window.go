@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -542,25 +541,10 @@ type Window struct {
 	onExec         func(*Column, *Window, string) bool
 	explicitHeight int
 
+	isDir         bool
+	hasVersion    bool
 	savedVersion  int
 	warnedVersion int
-}
-
-func (win *Window) CtlPrint(all bool) string {
-	dirty := 0
-	if win.IsDirty() {
-		dirty = 1
-	}
-	// Format: %11d %11d %11d %11d %11d
-	// (id, tag nchars, body nchars, isdir, isdirty)
-	// For peak, we'll simplify nchars to byte count of the first line/buffer
-	tagLen := win.tag.buffer.Len()
-	bodyLen := win.body.buffer.Len()
-	isdir := 0
-	if isDir(win.GetFilename()) {
-		isdir = 1
-	}
-	return fmt.Sprintf("%11d %11d %11d %11d %11d ", win.ID, tagLen, bodyLen, isdir, dirty)
 }
 
 func NewWindow(tag, body string, parent *Column, editor *Editor, x, y, w, h int, onExec func(*Column, *Window, string) bool) *Window {
@@ -577,8 +561,7 @@ func NewWindow(tag, body string, parent *Column, editor *Editor, x, y, w, h int,
 }
 
 func (win *Window) IsDirty() bool {
-	fn := win.GetFilename()
-	if !isFile(fn) || isPeakPath(fn) || isSpecial(fn) {
+	if !win.hasVersion {
 		return false
 	}
 	return win.body.buffer.version != win.savedVersion

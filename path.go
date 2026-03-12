@@ -53,6 +53,10 @@ func isFile(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
+func hasVersion(path string) bool {
+	return isFile(path) && !isPeakPath(path) && !isSpecial(path)
+}
+
 // getPathDir returns the directory associated with a path.
 // If the path is a directory, it returns the path itself (with a trailing slash).
 // Otherwise, it returns the directory containing the file (with a trailing slash).

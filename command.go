@@ -130,6 +130,9 @@ func (e *Editor) Open(win *Window, path string) *Window {
 			tagPath := e.formatPathForTag(win, full)
 			newWin := target.AddWindow(" "+tagPath+" Get Put Undo Redo Snarf Zerox Del ", content)
 			e.ActivateWindow(newWin)
+			newWin.hasVersion = hasVersion(full)
+			newWin.isDir = isDir(full)
+			newWin.savedVersion = newWin.body.buffer.version
 			target.Resize(target.x, target.y, target.w, target.h)
 			return newWin
 		}
@@ -179,6 +182,8 @@ func (e *Editor) cmdGet(win *Window, cmd string) {
 	path := e.resolvePathWithContext(target, arg)
 	if content, err := readFileOrDir(path); err == nil {
 		target.body.buffer.SetText(content)
+		target.hasVersion = hasVersion(path)
+		target.isDir = isDir(path)
 		target.savedVersion = target.body.buffer.version
 		target.warnedVersion = target.savedVersion
 	}
@@ -196,6 +201,8 @@ func (e *Editor) cmdPut(win *Window, cmd string) {
 	path := e.resolvePathWithContext(target, arg)
 	if path != "" && !isDir(path) {
 		if err := writeFile(path, []byte(target.body.buffer.GetText())); err == nil {
+			target.hasVersion = hasVersion(path)
+			target.isDir = isDir(path)
 			target.savedVersion = target.body.buffer.version
 			target.warnedVersion = target.savedVersion
 		}
@@ -307,6 +314,8 @@ func (e *Editor) cmdZerox(col *Column, win *Window) {
 		newWin := target.parent.AddWindow(target.tag.buffer.GetText(), target.body.buffer.GetText())
 		newWin.body.scroll = target.body.scroll
 		newWin.body.buffer.cursor = target.body.buffer.cursor
+		newWin.hasVersion = target.hasVersion
+		newWin.isDir = target.isDir
 		newWin.savedVersion = target.savedVersion
 		newWin.warnedVersion = target.warnedVersion
 		e.ActivateWindow(newWin)
