@@ -27,6 +27,7 @@ type TextView struct {
 	lastVersion int
 	theme       *Theme
 	tabWidth    int
+	typingStart *Cursor
 }
 
 func NewTextView(text string, x, y, w, h int, style tcell.Style, singleLine, scrollable bool) *TextView {
@@ -259,31 +260,55 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 	switch ev := ev.(type) {
 	case *tcell.EventKey:
 		switch ev.Key() {
+		case tcell.KeyEsc:
+			if tv.typingStart != nil {
+				tv.buffer.SetSelection(*tv.typingStart, tv.buffer.cursor)
+				tv.typingStart = nil
+			}
 		case tcell.KeyCtrlZ:
+			tv.typingStart = nil
 			if ev.Modifiers()&tcell.ModShift != 0 {
 				tv.buffer.Redo()
 			} else {
 				tv.buffer.Undo()
 			}
 		case tcell.KeyCtrlY:
+			tv.typingStart = nil
 			tv.buffer.Redo()
 		case tcell.KeyCtrlC:
 			tv.buffer.Snarf()
 		case tcell.KeyCtrlX:
+			tv.typingStart = nil
 			tv.buffer.Cut()
 		case tcell.KeyCtrlV:
+			if tv.typingStart == nil {
+				tv.typingStart = &Cursor{tv.buffer.cursor.x, tv.buffer.cursor.y}
+			}
 			tv.buffer.Paste()
 		case tcell.KeyCtrlU:
+			if tv.typingStart == nil {
+				tv.typingStart = &Cursor{tv.buffer.cursor.x, tv.buffer.cursor.y}
+			}
 			tv.buffer.ClearSelection()
 			tv.buffer.DeleteLine()
 		case tcell.KeyCtrlW:
+			if tv.typingStart == nil {
+				tv.typingStart = &Cursor{tv.buffer.cursor.x, tv.buffer.cursor.y}
+			}
 			tv.buffer.ClearSelection()
 			tv.buffer.DeleteWordBefore()
 		case tcell.KeyCtrlH, tcell.KeyBackspace, tcell.KeyBackspace2:
+			if tv.typingStart == nil {
+				tv.typingStart = &Cursor{tv.buffer.cursor.x, tv.buffer.cursor.y}
+			}
 			tv.buffer.Backspace()
 		case tcell.KeyDelete:
+			if tv.typingStart == nil {
+				tv.typingStart = &Cursor{tv.buffer.cursor.x, tv.buffer.cursor.y}
+			}
 			tv.buffer.Delete()
 		case tcell.KeyPgUp:
+			tv.typingStart = nil
 			tv.buffer.ClearSelection()
 			tv.scroll -= tv.h
 			if tv.scroll < 0 {
@@ -295,6 +320,7 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 				tv.buffer.cursor = Cursor{bx, by}
 			}
 		case tcell.KeyPgDn:
+			tv.typingStart = nil
 			tv.buffer.ClearSelection()
 			tv.scroll += tv.h
 			if tv.scroll >= len(tv.layout) {
@@ -309,16 +335,19 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 				tv.buffer.cursor = Cursor{bx, by}
 			}
 		case tcell.KeyUp:
+			tv.typingStart = nil
 			tv.buffer.ClearSelection()
 			if !tv.singleLine {
 				tv.buffer.MoveUp()
 			}
 		case tcell.KeyDown:
+			tv.typingStart = nil
 			tv.buffer.ClearSelection()
 			if !tv.singleLine {
 				tv.buffer.MoveDown()
 			}
 		case tcell.KeyLeft:
+			tv.typingStart = nil
 			tv.buffer.ClearSelection()
 			if ev.Modifiers()&tcell.ModCtrl != 0 {
 				tv.buffer.MoveWordLeft()
@@ -326,6 +355,7 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 				tv.buffer.MoveLeft()
 			}
 		case tcell.KeyRight:
+			tv.typingStart = nil
 			tv.buffer.ClearSelection()
 			if ev.Modifiers()&tcell.ModCtrl != 0 {
 				tv.buffer.MoveWordRight()
@@ -333,22 +363,33 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 				tv.buffer.MoveRight()
 			}
 		case tcell.KeyHome:
+			tv.typingStart = nil
 			tv.buffer.ClearSelection()
 			tv.buffer.MoveHome()
 		case tcell.KeyEnd:
+			tv.typingStart = nil
 			tv.buffer.ClearSelection()
 			tv.buffer.MoveEnd()
 		case tcell.KeyEnter:
+			if tv.typingStart == nil {
+				tv.typingStart = &Cursor{tv.buffer.cursor.x, tv.buffer.cursor.y}
+			}
 			tv.buffer.ClearSelection()
 			if !tv.singleLine {
 				tv.buffer.NewLine()
 			}
 		case tcell.KeyTab:
+			if tv.typingStart == nil {
+				tv.typingStart = &Cursor{tv.buffer.cursor.x, tv.buffer.cursor.y}
+			}
 			if tv.buffer.selectionStart != nil {
 				tv.buffer.DeleteSelection()
 			}
 			tv.buffer.Insert('\t')
 		case tcell.KeyRune:
+			if tv.typingStart == nil {
+				tv.typingStart = &Cursor{tv.buffer.cursor.x, tv.buffer.cursor.y}
+			}
 			if tv.buffer.selectionStart != nil {
 				tv.buffer.DeleteSelection()
 			}
@@ -359,6 +400,9 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 		return false
 	case *tcell.EventMouse:
 		buttons := ev.Buttons()
+		if buttons != tcell.ButtonNone {
+			tv.typingStart = nil
+		}
 		if tv.scrollable {
 			if buttons&tcell.WheelUp != 0 {
 				if tv.scroll > 0 {
