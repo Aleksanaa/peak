@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"al.essio.dev/pkg/shellescape"
 )
 
 func isSpecial(path string) bool {
@@ -258,12 +260,24 @@ func join(elem ...string) string {
 }
 
 // runCommand runs a command with sh -c and returns the output and error.
-func runCommand(cmd, dir, input string) (string, error) {
-	if isPeakPath(dir) {
-		return "", fmt.Errorf("%s: cannot execute external command in virtual filesystem", dir)
+// It sets environment variables for samfile and winid.
+func runCommand(cmd, path, input string, winid int) (string, error) {
+	if isPeakPath(path) {
+		if appEditor != nil && appEditor.ninep != nil {
+			return appEditor.ninep.RunInternal(path, cmd, input, winid)
+		}
+		return "", fmt.Errorf("%s: cannot execute external command in virtual filesystem", path)
 	}
 
-	c := exec.Command("sh", "-c", cmd)
+	dir := getPathDir(path)
+
+	// Use env to set variables and sh -c for the command.
+	wrappedCmd := fmt.Sprintf("env samfile=%s winid=%d sh -c %s",
+		shellescape.Quote(path),
+		winid,
+		shellescape.Quote(cmd))
+
+	c := exec.Command("sh", "-c", wrappedCmd)
 	c.Dir = dir
 	if input != "" {
 		c.Stdin = strings.NewReader(input)

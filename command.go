@@ -506,22 +506,25 @@ func (e *Editor) showError(col *Column, win *Window, dir, msg string) {
 }
 
 func (e *Editor) runExternal(col *Column, win *Window, cmd string) {
-	dir := ""
+	filename := ""
+	winid := 0
 	if win != nil {
-		dir = win.GetDir()
+		filename = win.GetFilename()
+		winid = win.ID
 	} else {
-		dir = getwd()
+		filename = getwd()
 	}
 
 	go func() {
-		out, err := runCommand(cmd, dir, "")
+		out, err := runCommand(cmd, filename, "", winid)
 		if err != nil || len(out) > 0 {
 			msg := out
 			if msg == "" && err != nil {
 				msg = err.Error()
 			}
 			e.screen.PostEvent(tcell.NewEventInterrupt(func() {
-				e.showError(col, win, dir, msg)
+				// Use getPathDir to show error in correct directory context
+				e.showError(col, win, getPathDir(filename), msg)
 			}))
 		}
 	}()

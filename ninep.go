@@ -422,3 +422,16 @@ func (p *NineP) ListDirInternal(path string) (string, error) {
 	}
 	return sb.String(), nil
 }
+
+func (p *NineP) RunInternal(path, cmd, input string, winid int) (string, error) {
+	node, err := p.findNode(path)
+	if err != nil {
+		return "", err
+	}
+	if runner, ok := node.(interface {
+		Run(cmd, input string, winid int) (string, error)
+	}); ok {
+		return runner.Run(cmd, input, winid)
+	}
+	return "", fmt.Errorf("%s: does not support command execution", path)
+}

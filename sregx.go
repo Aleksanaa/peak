@@ -778,16 +778,17 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 		}
 		return addr, true
 	case '!':
-		dir := ctx.Window.GetDir()
+		filename := ctx.Window.GetFilename()
+		winid := ctx.Window.ID
 		go func() {
-			out, err := runCommand(cmd.text, dir, "")
+			out, err := runCommand(cmd.text, filename, "", winid)
 			if err != nil || len(out) > 0 {
 				msg := out
 				if msg == "" && err != nil {
 					msg = err.Error()
 				}
 				ctx.Editor.screen.PostEvent(tcell.NewEventInterrupt(func() {
-					ctx.Editor.showError(ctx.Column, ctx.Window, dir, msg)
+					ctx.Editor.showError(ctx.Column, ctx.Window, getPathDir(filename), msg)
 				}))
 			}
 		}()
@@ -801,8 +802,9 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 		return addr, true
 	case '|', '>', '<':
 		input := string(runes[addr.q0:addr.q1])
-		dir := ctx.Window.GetDir()
-		out, err := runPipe(cmd.cmdc, cmd.text, input, dir)
+		filename := ctx.Window.GetFilename()
+		winid := ctx.Window.ID
+		out, err := runPipe(cmd.cmdc, cmd.text, input, filename, winid)
 		if err != nil {
 			if ctx.Out != nil {
 				ctx.Out.Write([]byte(err.Error() + "\n"))
@@ -845,12 +847,12 @@ func expand(repl string, text []rune, match []int) string {
 	return buf.String()
 }
 
-func runPipe(cmd rune, shellCmd, input, dir string) (string, error) {
+func runPipe(cmd rune, shellCmd, input, path string, winid int) (string, error) {
 	in := ""
 	if cmd == '|' || cmd == '>' {
 		in = input
 	}
-	return runCommand(shellCmd, dir, in)
+	return runCommand(shellCmd, path, in, winid)
 }
 
 func cmdaddress(ap *Addr, a Range, runes []rune, sign int) Range {

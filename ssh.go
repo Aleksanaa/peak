@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"al.essio.dev/pkg/shellescape"
 	p9fs "github.com/knusbaum/go9p/fs"
 	"github.com/knusbaum/go9p/proto"
 	"github.com/pkg/sftp"
@@ -39,6 +40,34 @@ func (c *SSHClient) call(f func()) {
 		close(done)
 	}
 	<-done
+}
+
+func (c *SSHClient) Run(cmd, path, input string, winid int) (string, error) {
+	session, err := c.conn.NewSession()
+	if err != nil {
+		return "", err
+	}
+	defer session.Close()
+
+	if input != "" {
+		session.Stdin = strings.NewReader(input)
+	}
+
+	dir := path
+	if info, err := c.sftp.Stat(path); err == nil && !info.IsDir() {
+		dir = filepath.Dir(path)
+	}
+
+	// For remote execution, building a robust remote command line.
+	// env is used to set the context variables for the inner sh.
+	remoteCmd := fmt.Sprintf("cd %s && env %s %s sh -c %s",
+		shellescape.Quote(dir),
+		shellescape.Quote("samfile="+path),
+		shellescape.Quote(fmt.Sprintf("winid=%d", winid)),
+		shellescape.Quote(cmd))
+
+	out, err := session.CombinedOutput(remoteCmd)
+	return string(out), err
 }
 
 type SSHManager struct {
@@ -183,6 +212,10 @@ func (n *SFTPNode) Stat() proto.Stat {
 		}
 	})
 	return s
+}
+
+func (n *SFTPNode) Run(cmd, input string, winid int) (string, error) {
+	return n.client.Run(cmd, n.path, input, winid)
 }
 
 func (n *SFTPNode) Children() map[string]p9fs.FSNode {
