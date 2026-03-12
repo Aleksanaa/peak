@@ -201,10 +201,7 @@ func join(elem ...string) string {
 // runCommand runs a command with sh -c and returns the output and error.
 func runCommand(cmd, path, input string, winid int) (string, error) {
 	if appEditor != nil && appEditor.ninep != nil {
-		// Try virtual execution first (e.g. SSH)
-		if out, err := appEditor.ninep.RunInternal(path, cmd, input, winid); err == nil || !strings.Contains(err.Error(), "does not support command execution") {
-			return out, err
-		}
+		return appEditor.ninep.RunInternal(path, cmd, input, winid)
 	}
 
 	dir := getPathDir(path)
