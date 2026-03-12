@@ -23,6 +23,7 @@ type NineP struct {
 	editor *Editor
 	fs     *p9fs.FS
 	root   *p9fs.StaticDir
+	ssh    *SSHManager
 }
 
 func NewNineP(e *Editor) *NineP {
@@ -32,6 +33,7 @@ func NewNineP(e *Editor) *NineP {
 		editor: e,
 		fs:     gfs,
 		root:   root,
+		ssh:    NewSSHManager(),
 	}
 
 	// Create /index
@@ -56,6 +58,9 @@ func NewNineP(e *Editor) *NineP {
 			docDir.AddChild(p9fs.NewStaticFile(fileStat, data))
 		}
 	}
+
+	// Create /ssh
+	root.AddChild(NewSSHDir(p.fs, p.ssh))
 
 	return p
 }
@@ -287,15 +292,26 @@ func (p *NineP) findNode(path string) (p9fs.FSNode, error) {
 		if part == "" {
 			continue
 		}
-		dir, ok := current.(p9fs.Dir)
-		if !ok {
-			return nil, os.ErrNotExist
+		// Check for Children() first (StaticDir)
+		if dir, ok := current.(p9fs.Dir); ok {
+			if children := dir.Children(); children != nil {
+				if next, ok := children[part]; ok {
+					current = next
+					continue
+				}
+			}
 		}
-		next, ok := dir.Children()[part]
-		if !ok {
-			return nil, os.ErrNotExist
+		// Fallback to Walk() (dynamic nodes like SSHDir)
+		if walker, ok := current.(interface {
+			Walk(string) (p9fs.FSNode, error)
+		}); ok {
+			next, err := walker.Walk(part)
+			if err == nil {
+				current = next
+				continue
+			}
 		}
-		current = next
+		return nil, os.ErrNotExist
 	}
 	return current, nil
 }
@@ -331,6 +347,37 @@ func (p *NineP) ReadInternal(path string) ([]byte, error) {
 		offset += uint64(len(chunk))
 	}
 	return result, nil
+}
+
+func (p *NineP) WriteInternal(path string, data []byte) error {
+	node, err := p.findNode(path)
+	if err != nil {
+		return err
+	}
+	file, ok := node.(p9fs.File)
+	if !ok {
+		return os.ErrInvalid
+	}
+
+	const dummyFid = 0
+	if err := file.Open(dummyFid, proto.Owrite|proto.Otrunc); err != nil {
+		return err
+	}
+	defer file.Close(dummyFid)
+
+	var offset uint64
+	for len(data) > 0 {
+		n, err := file.Write(dummyFid, offset, data)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return fmt.Errorf("zero write")
+		}
+		data = data[n:]
+		offset += uint64(n)
+	}
+	return nil
 }
 
 func (p *NineP) IsDirInternal(path string) bool {

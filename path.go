@@ -194,7 +194,13 @@ func readFile(path string) ([]byte, error) {
 
 // writeFile writes data to a file.
 func writeFile(path string, data []byte) error {
-	if isSpecial(path) || isDir(path) || isPeakPath(path) {
+	if isSpecial(path) || isDir(path) {
+		return os.ErrInvalid
+	}
+	if isPeakPath(path) {
+		if appEditor != nil && appEditor.ninep != nil {
+			return appEditor.ninep.WriteInternal(path, data)
+		}
 		return os.ErrInvalid
 	}
 	return os.WriteFile(path, data, 0644)

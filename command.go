@@ -199,12 +199,21 @@ func (e *Editor) cmdPut(win *Window, cmd string) {
 	}
 	path := e.resolvePathWithContext(target, arg)
 	if path != "" && !isDir(path) {
-		if err := writeFile(path, []byte(target.body.buffer.GetText())); err == nil {
-			target.hasVersion = hasVersion(path)
-			target.isDir = isDir(path)
-			target.savedVersion = target.body.buffer.version
-			target.warnedVersion = target.savedVersion
-		}
+		text := target.body.buffer.GetText()
+		version := target.body.buffer.version
+		go func() {
+			err := writeFile(path, []byte(text))
+			e.screen.PostEvent(tcell.NewEventInterrupt(func() {
+				if err != nil {
+					e.showError(target.parent, target, "", err.Error())
+				} else {
+					target.hasVersion = hasVersion(path)
+					target.isDir = isDir(path)
+					target.savedVersion = version
+					target.warnedVersion = version
+				}
+			}))
+		}()
 	}
 }
 
