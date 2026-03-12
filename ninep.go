@@ -244,7 +244,7 @@ func (p *NineP) RunInternal(path, cmd, input string, winid int) (string, error) 
 	}); ok {
 		return runner.Run(rel, cmd, input, winid)
 	}
-	return "", fmt.Errorf("%s: does not support command execution", path)
+	return "", fmt.Errorf("%s: virtual path cannot execute external command", path)
 }
 
 type SimpleFileInfo struct {
