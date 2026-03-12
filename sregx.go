@@ -8,10 +8,10 @@ package main
 import (
 	"fmt"
 	"io"
-	"os/exec"
 	"strings"
 
 	"github.com/aleksana/peak/regexp"
+	"github.com/gdamore/tcell/v2"
 )
 
 type Range struct {
@@ -778,14 +778,19 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 		}
 		return addr, true
 	case '!':
-		if isPeakPath(ctx.Window.GetFilename()) {
-			ctx.Editor.showError(ctx.Column, ctx.Window, "", ctx.Window.GetFilename()+": cannot execute external command in virtual filesystem")
-			return addr, false
-		}
 		dir := ctx.Window.GetDir()
-		ctx.Editor.runAsync(cmd.text, dir, func(out string) {
-			ctx.Editor.showError(ctx.Column, ctx.Window, dir, out)
-		})
+		go func() {
+			out, err := runCommand(cmd.text, dir, "")
+			if err != nil || len(out) > 0 {
+				msg := out
+				if msg == "" && err != nil {
+					msg = err.Error()
+				}
+				ctx.Editor.screen.PostEvent(tcell.NewEventInterrupt(func() {
+					ctx.Editor.showError(ctx.Column, ctx.Window, dir, msg)
+				}))
+			}
+		}()
 		return addr, true
 	case '{':
 		curr := cmd.cmd
@@ -795,10 +800,6 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 		}
 		return addr, true
 	case '|', '>', '<':
-		if isPeakPath(ctx.Window.GetFilename()) {
-			ctx.Editor.showError(ctx.Column, ctx.Window, "", ctx.Window.GetFilename()+": cannot execute external command in virtual filesystem")
-			return addr, false
-		}
 		input := string(runes[addr.q0:addr.q1])
 		dir := ctx.Window.GetDir()
 		out, err := runPipe(cmd.cmdc, cmd.text, input, dir)
@@ -845,13 +846,11 @@ func expand(repl string, text []rune, match []int) string {
 }
 
 func runPipe(cmd rune, shellCmd, input, dir string) (string, error) {
-	c := exec.Command("sh", "-c", shellCmd)
-	c.Dir = dir
+	in := ""
 	if cmd == '|' || cmd == '>' {
-		c.Stdin = strings.NewReader(input)
+		in = input
 	}
-	out, err := c.CombinedOutput()
-	return string(out), err
+	return runCommand(shellCmd, dir, in)
 }
 
 func cmdaddress(ap *Addr, a Range, runes []rune, sign int) Range {

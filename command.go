@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -498,11 +497,6 @@ func (e *Editor) showError(col *Column, win *Window, dir, msg string) {
 }
 
 func (e *Editor) runExternal(col *Column, win *Window, cmd string) {
-	if win != nil && isPeakPath(win.GetFilename()) {
-		e.showError(col, win, "", win.GetFilename()+": cannot execute external command in virtual filesystem")
-		return
-	}
-
 	dir := ""
 	if win != nil {
 		dir = win.GetDir()
@@ -510,19 +504,15 @@ func (e *Editor) runExternal(col *Column, win *Window, cmd string) {
 		dir = getwd()
 	}
 
-	e.runAsync(cmd, dir, func(out string) {
-		e.showError(col, win, dir, out)
-	})
-}
-
-func (e *Editor) runAsync(cmd, dir string, callback func(string)) {
 	go func() {
-		c := exec.Command("sh", "-c", cmd)
-		c.Dir = dir
-		out, _ := c.CombinedOutput()
-		if len(out) > 0 {
+		out, err := runCommand(cmd, dir, "")
+		if err != nil || len(out) > 0 {
+			msg := out
+			if msg == "" && err != nil {
+				msg = err.Error()
+			}
 			e.screen.PostEvent(tcell.NewEventInterrupt(func() {
-				callback(string(out))
+				e.showError(col, win, dir, msg)
 			}))
 		}
 	}()

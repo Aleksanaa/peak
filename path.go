@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -247,4 +249,20 @@ func (m *mockDirEntry) Info() (os.FileInfo, error) { return nil, nil }
 
 func join(elem ...string) string {
 	return filepath.Join(elem...)
+}
+
+// runCommand runs a command with sh -c and returns the output and error.
+func runCommand(cmd, dir, input string) (string, error) {
+	if isPeakPath(dir) {
+		return "", fmt.Errorf("%s: cannot execute external command in virtual filesystem", dir)
+	}
+
+	c := exec.Command("sh", "-c", cmd)
+	c.Dir = dir
+	if input != "" {
+		c.Stdin = strings.NewReader(input)
+	}
+
+	out, err := c.CombinedOutput()
+	return string(out), err
 }
