@@ -231,11 +231,13 @@ func (tv *TextView) Draw(s tcell.Screen) {
 }
 
 func (tv *TextView) GetClickWord(mx, my int) string {
-	word := strings.TrimSpace(tv.buffer.GetSelectedText())
-	if word != "" {
-		return word
-	}
 	bx, by := tv.visualToBuffer(mx-tv.x, my-tv.y+tv.scroll)
+	if tv.buffer.IsSelected(bx, by) {
+		word := strings.TrimSpace(tv.buffer.GetSelectedText())
+		if word != "" {
+			return word
+		}
+	}
 	return strings.TrimSpace(tv.buffer.GetWordAt(bx, by))
 }
 
