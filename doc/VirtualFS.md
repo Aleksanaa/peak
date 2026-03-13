@@ -23,6 +23,10 @@ Note: You must expand $HOME and use single quotes if you are using bash.
 
 Note: 9pfuse is recommended because Peak cannot unmount itself; you must manually clear the mountpoint.
 
+### Shell Compatibility Note
+
+If you want to inspect the filesystem, please use pure shells (you can enter sh for bash), instead of configured shells. Highly configured shells often check for specific files or folders in the current path, which could trigger unwanted logic. For example, in /peak/ssh, it could make Peak attempt to connect to non-existent hosts.
+
 ## Acme Compatibility
 
 The Peak VFS is designed to be a functional superset of the Acme 9P interface. However, this implementation is currently in progress. While the structure is in place to support per-window directories (e.g., /peak/1/body, /peak/1/tag), only the index file is currently fully available for session management.
@@ -70,3 +74,7 @@ Allows transparent, read-only access to remote Git+HTTPS repositories. Paths fol
 Use :: for default branch.
 
 It clones the specified branch into memory, without leaving any files on disk. This is particularly useful for quickly inspecting code or comparing versions across different branches without cloning.
+
+### /peak/mirage
+
+A virtual filesystem residing in memory. You can write text here, however, it will be lost after the editor closes.

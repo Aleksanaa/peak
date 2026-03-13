@@ -40,6 +40,7 @@ func NewNineP(e *Editor) *NineP {
 	vfs.Mount("/peak/doc", afero.NewBasePathFs(docFs, "doc"), false)
 	vfs.Mount("/peak/ssh", NewSftpMountFs(), true)
 	vfs.Mount("/peak/git", NewGitFs(), false)
+	vfs.Mount("/peak/mirage", afero.NewMemMapFs(), true)
 
 	return p
 }
@@ -407,7 +408,10 @@ func (c *CompositeFs) Stat(name string) (os.FileInfo, error) {
 func (c *CompositeFs) Remove(n string) error               { f, r, _ := c.getFs(n); return f.Remove(r) }
 func (c *CompositeFs) RemoveAll(n string) error            { f, r, _ := c.getFs(n); return f.RemoveAll(r) }
 func (c *CompositeFs) Create(n string) (afero.File, error) { f, r, _ := c.getFs(n); return f.Create(r) }
-func (c *CompositeFs) Mkdir(n string, p os.FileMode) error { f, r, _ := c.getFs(n); return f.Mkdir(r, p) }
+func (c *CompositeFs) Mkdir(n string, p os.FileMode) error {
+	f, r, _ := c.getFs(n)
+	return f.Mkdir(r, p)
+}
 func (c *CompositeFs) MkdirAll(n string, p os.FileMode) error {
 	f, r, _ := c.getFs(n)
 	return f.MkdirAll(r, p)
@@ -420,8 +424,11 @@ func (c *CompositeFs) Rename(o, n string) error {
 	}
 	return f1.Rename(r1, r2)
 }
-func (c *CompositeFs) Chmod(n string, m os.FileMode) error { f, r, _ := c.getFs(n); return f.Chmod(r, m) }
-func (c *CompositeFs) Chown(n string, u, g int) error      { f, r, _ := c.getFs(n); return f.Chown(r, u, g) }
+func (c *CompositeFs) Chmod(n string, m os.FileMode) error {
+	f, r, _ := c.getFs(n)
+	return f.Chmod(r, m)
+}
+func (c *CompositeFs) Chown(n string, u, g int) error { f, r, _ := c.getFs(n); return f.Chown(r, u, g) }
 func (c *CompositeFs) Chtimes(n string, a, m time.Time) error {
 	f, r, _ := c.getFs(n)
 	return f.Chtimes(r, a, m)
