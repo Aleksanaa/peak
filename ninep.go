@@ -39,6 +39,7 @@ func NewNineP(e *Editor) *NineP {
 	docFs := afero.FromIOFS{FS: docFS}
 	vfs.Mount("/peak/doc", afero.NewBasePathFs(docFs, "doc"))
 	vfs.Mount("/peak/ssh", NewSftpMountFs())
+	vfs.Mount("/peak/git", NewGitFs())
 
 	return p
 }

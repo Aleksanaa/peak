@@ -82,28 +82,28 @@ func (r *Repo) Resolve(ref string) (Hash, error) {
 	fail := func(err error) (Hash, error) {
 		return Hash{}, fmt.Errorf("resolve %s: %v", ref, err)
 	}
-	refs, err := r.refs(ref)
+	refs, err := r.Refs(ref)
 	if err != nil {
 		return fail(err)
 	}
 	for _, known := range refs {
-		if known.name == ref {
-			return known.hash, nil
+		if known.Name == ref {
+			return known.Hash, nil
 		}
 	}
 	return fail(fmt.Errorf("unknown ref"))
 }
 
-// A ref is a single Git reference, like refs/heads/main, refs/tags/v1.0.0, or HEAD.
-type ref struct {
-	name string // "refs/heads/main", "refs/tags/v1.0.0", "HEAD"
-	hash Hash   // hexadecimal hash
+// A Ref is a single Git reference, like refs/heads/main, refs/tags/v1.0.0, or HEAD.
+type Ref struct {
+	Name string // "refs/heads/main", "refs/tags/v1.0.0", "HEAD"
+	Hash Hash   // hexadecimal hash
 }
 
-// refs executes an ls-refs command on the remote server
+// Refs executes an ls-refs command on the remote server
 // to look up refs with the given prefixes.
 // See https://git-scm.com/docs/protocol-v2#_ls_refs.
-func (r *Repo) refs(prefixes ...string) ([]ref, error) {
+func (r *Repo) Refs(prefixes ...string) ([]Ref, error) {
 	if _, ok := r.caps["ls-refs"]; !ok {
 		return nil, fmt.Errorf("refs: server does not support ls-refs")
 	}
@@ -141,7 +141,7 @@ func (r *Repo) refs(prefixes ...string) ([]ref, error) {
 		return nil, fmt.Errorf("refs: invalid response Content-Type: %v", ct)
 	}
 
-	var refs []ref
+	var refs []Ref
 	lines, err := newPktLineReader(bytes.NewReader(data)).Lines()
 	if err != nil {
 		return nil, fmt.Errorf("refs: parsing response: %v %d\n%s\n%s", err, len(data), hex.Dump(postbody), hex.Dump(data))
@@ -156,7 +156,7 @@ func (r *Repo) refs(prefixes ...string) ([]ref, error) {
 			return nil, fmt.Errorf("refs: parsing response: invalid line: %q", line)
 		}
 		name, _, _ := strings.Cut(rest, " ")
-		refs = append(refs, ref{hash: h, name: name})
+		refs = append(refs, Ref{Hash: h, Name: name})
 	}
 	return refs, nil
 }
@@ -256,15 +256,14 @@ func (r *Repo) fetch(h Hash) (fs.FS, error) {
 			continue
 		}
 		if len(line) == 0 || line[0] == 0 || line[0] > 3 {
-			fmt.Printf("%q\n", line)
+			// fmt.Printf("%q\n", line)
 			continue
-			return nil, fmt.Errorf("fetch: malformed response: invalid sideband: %q", line)
 		}
 		switch line[0] {
 		case 1:
 			data = append(data, line[1:]...)
 		case 2:
-			fmt.Printf("%s\n", line[1:])
+			// fmt.Printf("%s\n", line[1:])
 		case 3:
 			return nil, fmt.Errorf("fetch: server error: %s", line[1:])
 		}
