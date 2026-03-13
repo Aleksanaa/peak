@@ -35,6 +35,19 @@ func isPeakPath(path string) bool {
 	return strings.HasPrefix(path, "/peak/") || path == "/peak"
 }
 
+func hasVersion(path string) bool {
+	if isSpecial(path) || isDir(path) {
+		return false
+	}
+	if !isPeakPath(path) {
+		return true
+	}
+	if c, ok := vfs().(*CompositeFs); ok {
+		return c.HasVersion(path)
+	}
+	return false
+}
+
 func isDir(path string) bool {
 	if isSpecial(path) {
 		return false

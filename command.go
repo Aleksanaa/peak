@@ -144,7 +144,7 @@ func (e *Editor) OpenLine(win *Window, path string, line int, fallback func()) {
 					newWin := target.AddWindow(" "+tagPath+" Get Put Undo Redo Snarf Zerox Del ", content)
 					e.ActivateWindow(newWin)
 					newWin.isDir = isDir
-					newWin.hasVersion = !isDir && !isPeakPath(full) && !isSpecial(full)
+					newWin.hasVersion = hasVersion(full)
 					newWin.savedVersion = newWin.body.buffer.version
 					if line >= 0 {
 						newWin.body.GotoLine(line)
@@ -222,7 +222,7 @@ func (e *Editor) cmdGet(win *Window, cmd string) {
 				}
 				target.body.buffer.SetText(content)
 				target.isDir = isDir
-				target.hasVersion = !isDir && !isPeakPath(path) && !isSpecial(path)
+				target.hasVersion = hasVersion(path)
 				target.savedVersion = target.body.buffer.version
 				target.warnedVersion = target.savedVersion
 			} else {
@@ -252,7 +252,7 @@ func (e *Editor) cmdPut(win *Window, cmd string) {
 				if err != nil {
 					e.showError(target.parent, target, "", normalizeError(err))
 				} else {
-					target.hasVersion = !isPeakPath(path) && !isSpecial(path)
+					target.hasVersion = hasVersion(path)
 					target.savedVersion = version
 					target.warnedVersion = version
 				}

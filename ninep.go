@@ -33,13 +33,13 @@ func NewNineP(e *Editor) *NineP {
 	p.index.Store("")
 
 	// Create /peak container
-	vfs.Mount("/peak", &PeakDirectoryFs{Fs: afero.NewMemMapFs(), p: p})
+	vfs.Mount("/peak", &PeakDirectoryFs{Fs: afero.NewMemMapFs(), p: p}, false)
 
 	// Mount virtual filesystems
 	docFs := afero.FromIOFS{FS: docFS}
-	vfs.Mount("/peak/doc", afero.NewBasePathFs(docFs, "doc"))
-	vfs.Mount("/peak/ssh", NewSftpMountFs())
-	vfs.Mount("/peak/git", NewGitFs())
+	vfs.Mount("/peak/doc", afero.NewBasePathFs(docFs, "doc"), false)
+	vfs.Mount("/peak/ssh", NewSftpMountFs(), true)
+	vfs.Mount("/peak/git", NewGitFs(), false)
 
 	return p
 }
@@ -239,7 +239,7 @@ func (f *indexFile) Stat() (os.FileInfo, error) {
 }
 
 func (p *NineP) RunInternal(path, cmd, input string, winid int) (string, error) {
-	fs, rel := p.vfs.getFs(path)
+	fs, rel, _ := p.vfs.getFs(path)
 	if runner, ok := fs.(interface {
 		Run(path, cmd, input string, winid int) (string, error)
 	}); ok {
@@ -313,37 +313,42 @@ func convertEntries(raw []os.FileInfo) []os.FileInfo {
 	return res
 }
 
+type vfsMount struct {
+	fs         afero.Fs
+	hasVersion bool
+}
+
 type CompositeFs struct {
 	base   afero.Fs
-	mounts sync.Map // string -> afero.Fs
+	mounts sync.Map // string -> *vfsMount
 }
 
 func NewCompositeFs(base afero.Fs) *CompositeFs {
 	return &CompositeFs{base: base}
 }
 
-func (c *CompositeFs) Mount(path string, fs afero.Fs) {
+func (c *CompositeFs) Mount(path string, fs afero.Fs, hasVersion bool) {
 	path = filepath.ToSlash(filepath.Clean(path))
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
-	c.mounts.Store(path, fs)
+	c.mounts.Store(path, &vfsMount{fs: fs, hasVersion: hasVersion})
 	_ = c.base.MkdirAll(path, 0755)
 }
 
-func (c *CompositeFs) getFs(name string) (afero.Fs, string) {
+func (c *CompositeFs) getFs(name string) (afero.Fs, string, bool) {
 	name = filepath.ToSlash(filepath.Clean(name))
 	if !strings.HasPrefix(name, "/") {
-		return c.base, name
+		return c.base, name, false
 	}
 
 	var bestPath string
-	var bestFs afero.Fs
+	var bestFs *vfsMount
 	c.mounts.Range(func(key, value interface{}) bool {
 		mpath := key.(string)
 		if name == mpath || strings.HasPrefix(name, mpath+"/") {
 			if len(mpath) > len(bestPath) {
-				bestPath, bestFs = mpath, value.(afero.Fs)
+				bestPath, bestFs = mpath, value.(*vfsMount)
 			}
 		}
 		return true
@@ -352,11 +357,11 @@ func (c *CompositeFs) getFs(name string) (afero.Fs, string) {
 	if bestFs != nil {
 		rel := strings.TrimPrefix(name, bestPath)
 		if rel == "" || rel == "/" {
-			return bestFs, "."
+			return bestFs.fs, ".", bestFs.hasVersion
 		}
-		return bestFs, strings.TrimPrefix(rel, "/")
+		return bestFs.fs, strings.TrimPrefix(rel, "/"), bestFs.hasVersion
 	}
-	return c.base, name
+	return c.base, name, false
 }
 
 func (c *CompositeFs) Open(name string) (afero.File, error) {
@@ -365,7 +370,7 @@ func (c *CompositeFs) Open(name string) (afero.File, error) {
 
 func (c *CompositeFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
 	name = filepath.ToSlash(filepath.Clean(name))
-	fs, rel := c.getFs(name)
+	fs, rel, _ := c.getFs(name)
 	f, err := fs.OpenFile(rel, flag, perm)
 	if err != nil {
 		return nil, err
@@ -395,32 +400,38 @@ func (c *CompositeFs) OpenFile(name string, flag int, perm os.FileMode) (afero.F
 }
 
 func (c *CompositeFs) Stat(name string) (os.FileInfo, error) {
-	fs, rel := c.getFs(name)
+	fs, rel, _ := c.getFs(name)
 	return fs.Stat(rel)
 }
 
-func (c *CompositeFs) Remove(n string) error               { f, r := c.getFs(n); return f.Remove(r) }
-func (c *CompositeFs) RemoveAll(n string) error            { f, r := c.getFs(n); return f.RemoveAll(r) }
-func (c *CompositeFs) Create(n string) (afero.File, error) { f, r := c.getFs(n); return f.Create(r) }
-func (c *CompositeFs) Mkdir(n string, p os.FileMode) error { f, r := c.getFs(n); return f.Mkdir(r, p) }
+func (c *CompositeFs) Remove(n string) error               { f, r, _ := c.getFs(n); return f.Remove(r) }
+func (c *CompositeFs) RemoveAll(n string) error            { f, r, _ := c.getFs(n); return f.RemoveAll(r) }
+func (c *CompositeFs) Create(n string) (afero.File, error) { f, r, _ := c.getFs(n); return f.Create(r) }
+func (c *CompositeFs) Mkdir(n string, p os.FileMode) error { f, r, _ := c.getFs(n); return f.Mkdir(r, p) }
 func (c *CompositeFs) MkdirAll(n string, p os.FileMode) error {
-	f, r := c.getFs(n)
+	f, r, _ := c.getFs(n)
 	return f.MkdirAll(r, p)
 }
 func (c *CompositeFs) Rename(o, n string) error {
-	f1, r1 := c.getFs(o)
-	f2, r2 := c.getFs(n)
+	f1, r1, _ := c.getFs(o)
+	f2, r2, _ := c.getFs(n)
 	if f1 != f2 {
 		return fmt.Errorf("cross-fs rename not supported")
 	}
 	return f1.Rename(r1, r2)
 }
-func (c *CompositeFs) Chmod(n string, m os.FileMode) error { f, r := c.getFs(n); return f.Chmod(r, m) }
-func (c *CompositeFs) Chown(n string, u, g int) error      { f, r := c.getFs(n); return f.Chown(r, u, g) }
+func (c *CompositeFs) Chmod(n string, m os.FileMode) error { f, r, _ := c.getFs(n); return f.Chmod(r, m) }
+func (c *CompositeFs) Chown(n string, u, g int) error      { f, r, _ := c.getFs(n); return f.Chown(r, u, g) }
 func (c *CompositeFs) Chtimes(n string, a, m time.Time) error {
-	f, r := c.getFs(n)
+	f, r, _ := c.getFs(n)
 	return f.Chtimes(r, a, m)
 }
+
+func (c *CompositeFs) HasVersion(name string) bool {
+	_, _, hv := c.getFs(name)
+	return hv
+}
+
 func (c *CompositeFs) Name() string { return "CompositeFs" }
 
 type mergedDirFile struct {
