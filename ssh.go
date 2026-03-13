@@ -109,7 +109,16 @@ func (s *SftpMountFs) parse(name string) (string, string) {
 	if len(parts) == 1 {
 		return parts[0], "/"
 	}
-	return parts[0], "/" + parts[1]
+	rel := parts[1]
+	if rel == "~" || strings.HasPrefix(rel, "~/") {
+		rel = strings.TrimPrefix(rel, "~")
+		rel = strings.TrimPrefix(rel, "/")
+		if rel == "" {
+			rel = "."
+		}
+		return parts[0], rel
+	}
+	return parts[0], "/" + rel
 }
 
 func (s *SftpMountFs) withClient(name string, fn func(cli *sftp.Client, rel string) error) error {

@@ -55,6 +55,8 @@ Allows transparent access to remote filesystems via SFTP. Paths follow the forma
 If user is not specified, current username will be used.
 This functionality requires SSH_AUTH_SOCK to connect to SSH server.
 
+The symbol `~` can be used in the path to refer to the home directory of the user on the remote host (e.g., /peak/ssh/user@host/~/.bashrc).
+
 If the window is inside a SFTP filesystem, all external commands will be run on remote server.
 
 Note: If you need to specify a non-standard SSH port, it is recommended to use the host::port format (e.g., /peak/ssh/user@host::2222/path/to/file) to avoid ambiguity with the plumb syntax, which uses a single colon for line and column numbers. Alternatively, you can also add a trailing slash.
