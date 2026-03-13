@@ -66,13 +66,32 @@ func (s *SftpMountFs) getClient(connStr string) (*SSHClient, error) {
 
 	sshConn, err := ssh.Dial("tcp", host, config)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Unable to connect to remote host: %v", err)
 	}
-	sftpClient, err := sftp.NewClient(sshConn)
-	if err != nil {
+
+	type sftpRes struct {
+		client *sftp.Client
+		err    error
+	}
+	ch := make(chan sftpRes, 1)
+	go func() {
+		sc, err := sftp.NewClient(sshConn)
+		ch <- sftpRes{sc, err}
+	}()
+
+	var sftpClient *sftp.Client
+	select {
+	case res := <-ch:
+		if res.err != nil {
+			sshConn.Close()
+			return nil, fmt.Errorf("Unable to connect to remote host: %v", res.err)
+		}
+		sftpClient = res.client
+	case <-time.After(10 * time.Second):
 		sshConn.Close()
-		return nil, err
+		return nil, fmt.Errorf("Unable to connect to remote host: sftp connection timeout")
 	}
+
 	client := &SSHClient{ssh: sshConn, sftp: sftpClient}
 	s.conns.Store(connStr, client)
 	return client, nil
@@ -109,9 +128,6 @@ func (s *SftpMountFs) Stat(name string) (os.FileInfo, error) {
 	}
 	client, err := s.getClient(conn)
 	if err != nil {
-		if rel == "" || rel == "/" {
-			return &SimpleFileInfo{name: conn, isDir: true}, nil
-		}
 		return nil, err
 	}
 	fi, err := client.sftp.Stat(rel)
@@ -141,9 +157,6 @@ func (s *SftpMountFs) OpenFile(name string, flag int, perm os.FileMode) (afero.F
 
 	client, err := s.getClient(conn)
 	if err != nil {
-		if rel == "" || rel == "/" {
-			return &memDirFile{name: conn}, nil
-		}
 		return nil, err
 	}
 
@@ -162,7 +175,9 @@ func (s *SftpMountFs) OpenFile(name string, flag int, perm os.FileMode) (afero.F
 	return &sftpFile{File: f, client: client.sftp, name: rel}, nil
 }
 
-func (s *SftpMountFs) Remove(n string) error    { return s.withClient(n, func(c *sftp.Client, r string) error { return c.Remove(r) }) }
+func (s *SftpMountFs) Remove(n string) error {
+	return s.withClient(n, func(c *sftp.Client, r string) error { return c.Remove(r) })
+}
 func (s *SftpMountFs) RemoveAll(n string) error { return s.Remove(n) }
 func (s *SftpMountFs) Create(n string) (afero.File, error) {
 	return s.OpenFile(n, os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0666)

@@ -14,7 +14,12 @@ import (
 	"io/ioutil"
 	"net/http"
 	"strings"
+	"time"
 )
+
+var httpClient = &http.Client{
+	Timeout: 10 * time.Second,
+}
 
 // A Repo is a connection to a remote repository served over HTTP or HTTPS.
 type Repo struct {
@@ -38,7 +43,7 @@ func (r *Repo) handshake() error {
 	req.Header.Set("Accept", "*/*")
 	req.Header.Set("Git-Protocol", "version=2")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("handshake: %v", err)
 	}
@@ -125,7 +130,7 @@ func (r *Repo) Refs(prefixes ...string) ([]Ref, error) {
 	req.Header.Set("Accept", "application/x-git-upload-pack-result")
 	req.Header.Set("Git-Protocol", "version=2")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("refs: %v", err)
 	}
@@ -216,7 +221,7 @@ func (r *Repo) fetch(h Hash) (fs.FS, error) {
 	req.Header.Set("Accept", "application/x-git-upload-pack-result")
 	req.Header.Set("Git-Protocol", "version=2")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch: %v", err)
 	}

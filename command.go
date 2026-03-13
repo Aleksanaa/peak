@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -109,7 +110,11 @@ func (e *Editor) getArg(win *Window, cmd string) string {
 
 // resolvePathWithContext is now in plumb.go
 
-func (e *Editor) Open(win *Window, path string) *Window {
+func (e *Editor) Open(win *Window, path string) {
+	e.OpenLine(win, path, -1, nil)
+}
+
+func (e *Editor) OpenLine(win *Window, path string, line int, fallback func()) {
 	full := e.resolvePathWithContext(win, path)
 
 	// 1. Try to find existing window
@@ -117,26 +122,44 @@ func (e *Editor) Open(win *Window, path string) *Window {
 		for _, w := range c.windows {
 			if e.resolvePathWithContext(nil, w.GetFilename()) == full {
 				e.ActivateWindow(w)
-				return w
+				if line >= 0 {
+					w.body.GotoLine(line)
+				}
+				return
 			}
 		}
 	}
 
 	// 2. Try to open new window
-	if content, err := readFileOrDir(full); err == nil {
-		target := e.getTargetColumn(nil, win)
-		if target != nil {
-			tagPath := e.formatPathForTag(win, full)
-			newWin := target.AddWindow(" "+tagPath+" Get Put Undo Redo Snarf Zerox Del ", content)
-			e.ActivateWindow(newWin)
-			newWin.hasVersion = hasVersion(full)
-			newWin.isDir = isDir(full)
-			newWin.savedVersion = newWin.body.buffer.version
-			target.Resize(target.x, target.y, target.w, target.h)
-			return newWin
-		}
-	}
-	return nil
+	go func() {
+		content, isDir, err := readFileOrDir(full)
+		e.screen.PostEvent(tcell.NewEventInterrupt(func() {
+			if err == nil {
+				target := e.getTargetColumn(nil, win)
+				if target != nil {
+					if isDir {
+						full = toDir(full)
+					}
+					tagPath := e.formatPathForTag(win, full)
+					newWin := target.AddWindow(" "+tagPath+" Get Put Undo Redo Snarf Zerox Del ", content)
+					e.ActivateWindow(newWin)
+					newWin.isDir = isDir
+					newWin.hasVersion = !isDir && !isPeakPath(full) && !isSpecial(full)
+					newWin.savedVersion = newWin.body.buffer.version
+					if line >= 0 {
+						newWin.body.GotoLine(line)
+					}
+					target.Resize(target.x, target.y, target.w, target.h)
+				}
+			} else {
+				if fallback != nil && os.IsNotExist(err) {
+					fallback()
+				} else {
+					e.showError(nil, win, "", full+": "+normalizeError(err))
+				}
+			}
+		}))
+	}()
 }
 
 func (e *Editor) formatPathForTag(contextWin *Window, fullPath string) string {
@@ -169,6 +192,16 @@ func (e *Editor) getTargetColumn(col *Column, win *Window) *Column {
 	return nil
 }
 
+func normalizeError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if os.IsNotExist(err) {
+		return "No such file or directory"
+	}
+	return err.Error()
+}
+
 func (e *Editor) cmdGet(win *Window, cmd string) {
 	target := e.getTargetWindow(win)
 	if target == nil {
@@ -179,13 +212,24 @@ func (e *Editor) cmdGet(win *Window, cmd string) {
 		arg = target.GetFilename()
 	}
 	path := e.resolvePathWithContext(target, arg)
-	if content, err := readFileOrDir(path); err == nil {
-		target.body.buffer.SetText(content)
-		target.hasVersion = hasVersion(path)
-		target.isDir = isDir(path)
-		target.savedVersion = target.body.buffer.version
-		target.warnedVersion = target.savedVersion
-	}
+	go func() {
+		content, isDir, err := readFileOrDir(path)
+		e.screen.PostEvent(tcell.NewEventInterrupt(func() {
+			if err == nil {
+				if isDir {
+					path = toDir(path)
+					target.SetName(path)
+				}
+				target.body.buffer.SetText(content)
+				target.isDir = isDir
+				target.hasVersion = !isDir && !isPeakPath(path) && !isSpecial(path)
+				target.savedVersion = target.body.buffer.version
+				target.warnedVersion = target.savedVersion
+			} else {
+				e.showError(target.parent, target, "", path+": "+normalizeError(err))
+			}
+		}))
+	}()
 }
 
 func (e *Editor) cmdPut(win *Window, cmd string) {
@@ -198,17 +242,17 @@ func (e *Editor) cmdPut(win *Window, cmd string) {
 		arg = target.GetFilename()
 	}
 	path := e.resolvePathWithContext(target, arg)
-	if path != "" && !isDir(path) {
+	if path != "" {
 		text := target.body.buffer.GetText()
 		version := target.body.buffer.version
 		go func() {
+			// In cmdPut, we don't know if it's a dir yet, but writeFile handles it.
 			err := writeFile(path, []byte(text))
 			e.screen.PostEvent(tcell.NewEventInterrupt(func() {
 				if err != nil {
-					e.showError(target.parent, target, "", err.Error())
+					e.showError(target.parent, target, "", normalizeError(err))
 				} else {
-					target.hasVersion = hasVersion(path)
-					target.isDir = isDir(path)
+					target.hasVersion = !isPeakPath(path) && !isSpecial(path)
 					target.savedVersion = version
 					target.warnedVersion = version
 				}
@@ -302,9 +346,8 @@ func (e *Editor) cmdNewCol() {
 func (e *Editor) cmdNew(col *Column, win *Window, cmd string) {
 	arg := e.getArg(win, cmd)
 	if arg != "" {
-		if target := e.Open(win, arg); target != nil {
-			return
-		}
+		e.Open(win, arg)
+		return
 	}
 
 	targetCol := e.getTargetColumn(col, win)

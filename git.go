@@ -78,7 +78,7 @@ func (fs *GitFs) getRepo(spec string) (*GitRepo, error) {
 
 	repoSrv, err := gitfs.NewRepo(url)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Unable to open remote repository: %v", err)
 	}
 
 	r := &GitRepo{url: url, repoSrv: repoSrv}
@@ -96,7 +96,7 @@ func (r *GitRepo) getBranches() ([]string, error) {
 
 	refs, err := r.repoSrv.Refs("refs/heads/")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Unable to list branches: %v", err)
 	}
 
 	var branches []string
@@ -127,7 +127,7 @@ func (r *GitRepo) getBranchFs(branch string) (afero.Fs, error) {
 		_, iofs, err = r.repoSrv.Clone(branch)
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Unable to clone branch %s: %v", branch, err)
 	}
 
 	fs := afero.NewReadOnlyFs(afero.FromIOFS{FS: iofs})
@@ -164,7 +164,13 @@ func (fs *GitFs) Stat(name string) (os.FileInfo, error) {
 	if spec == "" {
 		return &SimpleFileInfo{name: "git", isDir: true}, nil
 	}
+
+	// We check if the repo is valid when we stat the repo directory itself.
 	if branch == "" {
+		_, err := fs.getRepo(spec)
+		if err != nil {
+			return nil, err
+		}
 		return &SimpleFileInfo{name: spec, isDir: true}, nil
 	}
 	return &SimpleFileInfo{name: branch, isDir: true}, nil
@@ -199,9 +205,7 @@ func (fs *GitFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, 
 		}
 		branches, err := repo.getBranches()
 		if err != nil {
-			return &memDirFile{name: spec, entries: []os.FileInfo{
-				&SimpleFileInfo{name: "::", isDir: true},
-			}}, nil
+			return nil, err
 		}
 		var entries []os.FileInfo
 		entries = append(entries, &SimpleFileInfo{name: "::", isDir: true})
@@ -213,13 +217,13 @@ func (fs *GitFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, 
 	return nil, os.ErrNotExist
 }
 
-func (fs *GitFs) Remove(n string) error                { return os.ErrPermission }
-func (fs *GitFs) RemoveAll(n string) error             { return os.ErrPermission }
-func (fs *GitFs) Create(n string) (afero.File, error)  { return nil, os.ErrPermission }
-func (fs *GitFs) Mkdir(n string, p os.FileMode) error  { return os.ErrPermission }
+func (fs *GitFs) Remove(n string) error                  { return os.ErrPermission }
+func (fs *GitFs) RemoveAll(n string) error               { return os.ErrPermission }
+func (fs *GitFs) Create(n string) (afero.File, error)    { return nil, os.ErrPermission }
+func (fs *GitFs) Mkdir(n string, p os.FileMode) error    { return os.ErrPermission }
 func (fs *GitFs) MkdirAll(n string, p os.FileMode) error { return os.ErrPermission }
-func (fs *GitFs) Rename(o, n string) error             { return os.ErrPermission }
-func (fs *GitFs) Chmod(n string, m os.FileMode) error  { return os.ErrPermission }
-func (fs *GitFs) Chown(n string, u, g int) error       { return os.ErrPermission }
+func (fs *GitFs) Rename(o, n string) error               { return os.ErrPermission }
+func (fs *GitFs) Chmod(n string, m os.FileMode) error    { return os.ErrPermission }
+func (fs *GitFs) Chown(n string, u, g int) error         { return os.ErrPermission }
 func (fs *GitFs) Chtimes(n string, a, m time.Time) error { return os.ErrPermission }
-func (fs *GitFs) Name() string                         { return "GitFs" }
+func (fs *GitFs) Name() string                           { return "GitFs" }

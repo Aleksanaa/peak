@@ -57,13 +57,11 @@ func (e *Editor) Plumb(win *Window, word string) bool {
 		}
 	}
 
-	if target := e.Open(win, pathPart); target != nil {
-		if lineNum >= 0 {
-			target.body.GotoLine(lineNum)
-		}
-		return false
-	}
+	// Always try to open as a path first, but asynchronously.
+	// If it doesn't exist, fallback to search.
+	e.OpenLine(win, pathPart, lineNum, func() {
+		e.Execute(nil, win, "Look "+word)
+	})
 
-	// 3. Fallback: Search
-	return e.Execute(nil, win, "Look "+word)
+	return false
 }

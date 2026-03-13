@@ -43,18 +43,6 @@ func isDir(path string) bool {
 	return err == nil && fi.IsDir()
 }
 
-func isFile(path string) bool {
-	if isSpecial(path) {
-		return false
-	}
-	fi, err := vfs().Stat(path)
-	return err == nil && !fi.IsDir()
-}
-
-func hasVersion(path string) bool {
-	return isFile(path) && !isPeakPath(path) && !isSpecial(path)
-}
-
 // getPathDir returns the directory associated with a path.
 func getPathDir(path string) string {
 	if path == "" {
@@ -63,17 +51,21 @@ func getPathDir(path string) string {
 	if isSpecial(path) {
 		return toDir(filepath.Dir(path))
 	}
-	abs := resolvePath(path)
-	if isDir(abs) {
-		return toDir(abs)
+	// Purely string-based. If it ends in /, it's a dir.
+	// Otherwise, we take the directory part of the path.
+	if strings.HasSuffix(path, "/") {
+		return path
 	}
-	return toDir(filepath.Dir(abs))
+	return toDir(filepath.Dir(resolvePath(path)))
 }
 
 // resolvePath returns an absolute path, expanding ~ and handling relative segments.
 func resolvePath(path string) string {
-	if path == "" || isPeakPath(path) {
+	if path == "" {
 		return path
+	}
+	if isPeakPath(path) {
+		return filepath.ToSlash(filepath.Clean(path))
 	}
 	if strings.HasPrefix(path, "~") {
 		home, err := os.UserHomeDir()
@@ -94,18 +86,15 @@ func resolveWithContext(path, contextDir string) string {
 		return ""
 	}
 	if isPeakPath(path) || filepath.IsAbs(path) || strings.HasPrefix(path, "~") {
-		res := resolvePath(path)
-		if isDir(res) {
-			return toDir(res)
-		}
-		return res
+		return resolvePath(path)
 	}
 	if contextDir == "" {
 		contextDir = getwd()
 	}
+	// Pure string joining and cleaning.
 	res := filepath.Join(contextDir, path)
-	if isDir(res) {
-		return toDir(res)
+	if isPeakPath(res) {
+		return filepath.ToSlash(filepath.Clean(res))
 	}
 	return res
 }
@@ -118,11 +107,7 @@ func formatPath(fullPath, contextPath string) string {
 
 	if strings.HasPrefix(contextPath, "~") {
 		if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(fullPath, home) {
-			res := "~" + fullPath[len(home):]
-			if isDir(fullPath) {
-				return toDir(res)
-			}
-			return res
+			return "~" + fullPath[len(home):]
 		}
 	} else if !filepath.IsAbs(contextPath) {
 		cwd, _ := os.Getwd()
@@ -130,14 +115,8 @@ func formatPath(fullPath, contextPath string) string {
 			if !strings.HasPrefix(rel, ".") && !strings.HasPrefix(rel, "/") {
 				rel = "./" + rel
 			}
-			if isDir(fullPath) {
-				return toDir(rel)
-			}
 			return rel
 		}
-	}
-	if isDir(fullPath) {
-		return toDir(fullPath)
 	}
 	return fullPath
 }
@@ -150,30 +129,32 @@ func getwd() string {
 
 // readFile reads data from a file.
 func readFile(path string) ([]byte, error) {
-	if isDir(path) || isSpecial(path) {
-		return nil, os.ErrInvalid
-	}
 	return afero.ReadFile(vfs(), path)
 }
 
 // writeFile writes data to a file.
 func writeFile(path string, data []byte) error {
-	if isSpecial(path) || isDir(path) {
+	if isSpecial(path) {
 		return os.ErrInvalid
 	}
 	return afero.WriteFile(vfs(), path, data, 0644)
 }
 
 // readFileOrDir returns the content of a file or a listing if it's a directory.
-func readFileOrDir(path string) (string, error) {
-	if isDir(path) {
-		return listDir(path)
+func readFileOrDir(path string) (string, bool, error) {
+	fi, err := vfs().Stat(path)
+	if err != nil {
+		return "", false, err
+	}
+	if fi.IsDir() {
+		content, err := listDir(path)
+		return content, true, err
 	}
 	data, err := readFile(path)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	return string(data), nil
+	return string(data), false, nil
 }
 
 // listDir returns a formatted string listing the contents of a directory.
@@ -200,10 +181,17 @@ func join(elem ...string) string {
 
 // runCommand runs a command with sh -c and returns the output and error.
 func runCommand(cmd, path, input string, winid int) (string, error) {
-	if appEditor != nil && appEditor.ninep != nil {
-		return appEditor.ninep.RunInternal(path, cmd, input, winid)
+	if isPeakPath(path) {
+		if appEditor != nil && appEditor.ninep != nil {
+			return appEditor.ninep.RunInternal(path, cmd, input, winid)
+		}
+		return "", fmt.Errorf("%s: virtual path is not initialized to run command", path)
 	}
+	return runLocalCommand(cmd, path, input, winid)
+}
 
+// runLocalCommand executes a command on the local OS.
+func runLocalCommand(cmd, path, input string, winid int) (string, error) {
 	dir := getPathDir(path)
 	wrappedCmd := fmt.Sprintf("env samfile=%s winid=%d sh -c %s",
 		shellescape.Quote(path),
