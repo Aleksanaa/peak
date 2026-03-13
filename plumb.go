@@ -7,7 +7,7 @@ import (
 	"unicode"
 )
 
-var plumbRx = regexp.MustCompile(`^(.+?)(?::(\d+)(?::(\d+))?)?$`)
+var plumbRx = regexp.MustCompile(`^(.*?)(?:([^:]):(\d+)(?::(\d+))?)?$`)
 
 // GetWordAt returns the word under the given x, y buffer coordinates.
 func (b *Buffer) GetWordAt(x, y int) string {
@@ -54,9 +54,10 @@ func (e *Editor) Plumb(win *Window, word string) bool {
 	if m == nil {
 		return false
 	}
-	line, _ := strconv.Atoi(m[2])
-	col, _ := strconv.Atoi(m[3])
-	e.OpenLine(win, m[1], line-1, col, func() {
+	path := m[1] + m[2]
+	line, _ := strconv.Atoi(m[3])
+	col, _ := strconv.Atoi(m[4])
+	e.OpenLine(win, path, line-1, col, func() {
 		e.Execute(nil, win, "Look "+word)
 	})
 	return false

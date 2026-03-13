@@ -46,6 +46,9 @@ func (s *SftpMountFs) getClient(connStr string) (*SSHClient, error) {
 			}
 		}
 	}
+	if idx := strings.LastIndex(host, "::"); idx != -1 {
+		host = host[:idx] + ":" + host[idx+2:]
+	}
 	if !strings.Contains(host, ":") {
 		host += ":22"
 	}
