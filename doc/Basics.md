@@ -32,7 +32,11 @@ Acme-style editors rely heavily on three mouse buttons to interact with text as 
 - Button 3 (Right Click): The "Plumb" button.
   - It "sends" the text to the plumber to decide what to do.
   - If the text is a filename or path that exists, Peak opens it.
-  - If the text is a path suffixed by a number (e.g., main.go:15), Peak opens the file and jumps to the line.
+  - Supports navigation to specific lines and columns:
+    - path           : Opens the file.
+    - path:line      : Opens the file and jumps to the specified line.
+    - path:line:col  : Opens the file and jumps to the specific line and column.
+  - SSH paths with ports can use host::port to avoid ambiguity with line numbers.
   - If it's a plain word, Peak searches for it (Look).
 
 ### Scrolling (The Scrollbar Handle)

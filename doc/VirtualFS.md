@@ -50,11 +50,21 @@ Provides access to Peak's built-in documentation. These files are embedded direc
 
 Allows transparent access to remote filesystems via SFTP. Paths follow the format:
 
-    /peak/ssh/user@host/path/to/file
+    /peak/ssh/[user@]host[::port]/path/to/file
 
-When you access a path under /peak/ssh, Peak automatically:
+If user is not specified, current username will be used.
+This functionality requires SSH_AUTH_SOCK to connect to SSH server.
 
-1. Parses the connection string (user@host).
-2. Establishes an SSH connection (using your SSH agent for authentication).
-3. Maps file operations to SFTP commands.
-4. Supports remote command execution.
+If the window is inside a SFTP filesystem, all external commands will be run on remote server.
+
+Note: If you need to specify a non-standard SSH port, it is recommended to use the host::port format (e.g., /peak/ssh/user@host::2222/path/to/file) to avoid ambiguity with the plumb syntax, which uses a single colon for line and column numbers. Alternatively, you can also add a trailing slash.
+
+### /peak/git
+
+Allows transparent, read-only access to remote Git+HTTPS repositories. Paths follow the format:
+
+    /peak/git/host[::port]:user:repo/branch/path/to/file
+
+Use :: for default branch.
+
+It clones the specified branch into memory, without leaving any files on disk. This is particularly useful for quickly inspecting code or comparing versions across different branches without cloning.
