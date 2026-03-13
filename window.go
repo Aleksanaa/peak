@@ -111,17 +111,11 @@ func (tv *TextView) Scroll(n int) {
 	}
 }
 
-func (tv *TextView) GotoLine(lineNum int) {
-	if lineNum < 0 {
-		lineNum = 0
-	}
-	if lineNum >= len(tv.buffer.lines) {
-		lineNum = len(tv.buffer.lines) - 1
-	}
-	if lineNum < 0 {
-		return
-	}
-	tv.buffer.cursor = Cursor{0, lineNum}
+func (tv *TextView) GotoLineCol(lineNum, colNum int) {
+	lineNum = max(0, min(lineNum, len(tv.buffer.lines)-1))
+	colNum = max(0, min(colNum, len(tv.buffer.lines[lineNum])))
+
+	tv.buffer.cursor = Cursor{colNum, lineNum}
 	tv.buffer.ClearSelection()
 	tv.UpdateLayout()
 	// Find the visual line for this buffer line and scroll to it

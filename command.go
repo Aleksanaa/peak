@@ -111,10 +111,10 @@ func (e *Editor) getArg(win *Window, cmd string) string {
 // resolvePathWithContext is now in plumb.go
 
 func (e *Editor) Open(win *Window, path string) {
-	e.OpenLine(win, path, -1, nil)
+	e.OpenLine(win, path, -1, 0, nil)
 }
 
-func (e *Editor) OpenLine(win *Window, path string, line int, fallback func()) {
+func (e *Editor) OpenLine(win *Window, path string, line, col int, fallback func()) {
 	full := e.resolvePathWithContext(win, path)
 
 	// 1. Try to find existing window
@@ -123,7 +123,7 @@ func (e *Editor) OpenLine(win *Window, path string, line int, fallback func()) {
 			if e.resolvePathWithContext(nil, w.GetFilename()) == full {
 				e.ActivateWindow(w)
 				if line >= 0 {
-					w.body.GotoLine(line)
+					w.body.GotoLineCol(line, col)
 				}
 				return
 			}
@@ -147,7 +147,7 @@ func (e *Editor) OpenLine(win *Window, path string, line int, fallback func()) {
 					newWin.hasVersion = hasVersion(full)
 					newWin.savedVersion = newWin.body.buffer.version
 					if line >= 0 {
-						newWin.body.GotoLine(line)
+						newWin.body.GotoLineCol(line, col)
 					}
 					target.Resize(target.x, target.y, target.w, target.h)
 				}

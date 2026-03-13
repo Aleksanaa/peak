@@ -1,10 +1,13 @@
 package main
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
 )
+
+var plumbRx = regexp.MustCompile(`^(.+?)(?::(\d+)(?::(\d+))?)?$`)
 
 // GetWordAt returns the word under the given x, y buffer coordinates.
 func (b *Buffer) GetWordAt(x, y int) string {
@@ -44,24 +47,17 @@ func (e *Editor) resolvePathWithContext(win *Window, path string) string {
 
 // Plumb attempts to handle a string (path or search).
 func (e *Editor) Plumb(win *Window, word string) bool {
-	word = strings.TrimSpace(word)
-	if word == "" {
+	if word = strings.TrimSpace(word); word == "" {
 		return false
 	}
-
-	pathPart, lineNum := word, -1
-	if idx := strings.LastIndex(word, ":"); idx != -1 {
-		lineStr := word[idx+1:]
-		if n, err := strconv.Atoi(lineStr); err == nil && n > 0 {
-			pathPart, lineNum = word[:idx], n-1
-		}
+	m := plumbRx.FindStringSubmatch(word)
+	if m == nil {
+		return false
 	}
-
-	// Always try to open as a path first, but asynchronously.
-	// If it doesn't exist, fallback to search.
-	e.OpenLine(win, pathPart, lineNum, func() {
+	line, _ := strconv.Atoi(m[2])
+	col, _ := strconv.Atoi(m[3])
+	e.OpenLine(win, m[1], line-1, col, func() {
 		e.Execute(nil, win, "Look "+word)
 	})
-
 	return false
 }
