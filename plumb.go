@@ -7,7 +7,7 @@ import (
 	"unicode"
 )
 
-var plumbRx = regexp.MustCompile(`^(.*?)(?:([^:]):(\d+)(?::(\d+))?)?$`)
+var plumbRx = regexp.MustCompile(`^([^\x00]*?)(?:([^:]):(\d+):(\d+))?$`)
 
 // GetWordAt returns the word under the given x, y buffer coordinates.
 func (b *Buffer) GetWordAt(x, y int) string {
@@ -30,7 +30,7 @@ func (b *Buffer) GetWordAt(x, y int) string {
 }
 
 func isWordChar(r rune) bool {
-	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '/' || r == '.' || r == '-' || r == '~' || r == ':'
+	return r != 0 && !unicode.IsSpace(r)
 }
 
 func (e *Editor) resolvePathWithContext(win *Window, path string) string {
