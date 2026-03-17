@@ -114,10 +114,10 @@ func (e *Editor) getArg(win *Window, cmd string) string {
 // resolvePathWithContext is now in plumb.go
 
 func (e *Editor) Open(win *Window, path string) {
-	e.OpenLine(win, path, -1, 0, nil)
+	e.OpenLine(win, path, -1, 0, nil, nil)
 }
 
-func (e *Editor) OpenLine(win *Window, path string, line, col int, fallback func()) {
+func (e *Editor) OpenLine(win *Window, path string, line, col int, binaryFallback, fallback func()) {
 	full := e.resolvePathWithContext(win, path)
 
 	// 1. Try to find existing window
@@ -143,7 +143,9 @@ func (e *Editor) OpenLine(win *Window, path string, line, col int, fallback func
 					e.createWindow(target, full, content, isDir, line, col)
 				}
 			} else {
-				if fallback != nil && os.IsNotExist(err) {
+				if binaryFallback != nil && err.Error() == "binary file" {
+					binaryFallback()
+				} else if fallback != nil && os.IsNotExist(err) {
 					fallback()
 				} else {
 					e.showError(nil, win, "", full+": "+normalizeError(err))

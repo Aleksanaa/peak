@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -163,10 +164,60 @@ func readFileOrDir(path string) (string, bool, error) {
 		content, err := listDir(path)
 		return content, true, err
 	}
-	data, err := readFile(path)
+
+	f, err := vfs().Open(path)
 	if err != nil {
 		return "", false, err
 	}
+	defer f.Close()
+
+	size := fi.Size()
+	if size <= 0 {
+		// Fallback for unknown size: read 512, check, then read all
+		header := make([]byte, 512)
+		n, err := f.Read(header)
+		if err != nil && err != io.EOF {
+			return "", false, err
+		}
+		for i := 0; i < n; i++ {
+			if header[i] == 0 {
+				return "", false, fmt.Errorf("binary file")
+			}
+		}
+		remainder, err := io.ReadAll(f)
+		if err != nil {
+			return "", false, err
+		}
+		data := make([]byte, n+len(remainder))
+		copy(data, header[:n])
+		copy(data[n:], remainder)
+		return string(data), false, nil
+	}
+
+	data := make([]byte, size)
+	checkLen := 512
+	if int64(checkLen) > size {
+		checkLen = int(size)
+	}
+
+	n, err := io.ReadAtLeast(f, data[:checkLen], checkLen)
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		return "", false, err
+	}
+
+	for i := 0; i < n; i++ {
+		if data[i] == 0 {
+			return "", false, fmt.Errorf("binary file")
+		}
+	}
+
+	if int64(n) < size {
+		_, err = io.ReadFull(f, data[n:])
+		if err != nil && err != io.ErrUnexpectedEOF {
+			return "", false, err
+		}
+	}
+
 	return string(data), false, nil
 }
 
