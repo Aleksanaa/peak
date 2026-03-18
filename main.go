@@ -19,7 +19,7 @@ type Theme struct {
 	Handle, ScrollThumb, ScrollGutter tcell.Color
 	HandleDirty, HandleError          tcell.Color
 	SelectionBG, SelectionFG          tcell.Color
-	Corner                            tcell.Color
+	HandleColumn                      tcell.Color
 }
 
 var defaultTheme = Theme{
@@ -38,7 +38,7 @@ var defaultTheme = Theme{
 	ScrollGutter: tcell.NewHexColor(0x181825),
 	SelectionBG:  tcell.NewHexColor(0x585b70),
 	SelectionFG:  tcell.NewHexColor(0xbac2de),
-	Corner:       tcell.NewHexColor(0xb4befe),
+	HandleColumn: tcell.NewHexColor(0xb4befe),
 }
 
 // Editor is the main application state.

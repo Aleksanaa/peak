@@ -643,7 +643,6 @@ func (win *Window) Draw(s tcell.Screen) {
 		visible := win.body.h
 
 		thumbStyle := tcell.StyleDefault.Background(win.editor.theme.ScrollThumb)
-		gutterStyle := tcell.StyleDefault.Background(win.editor.theme.ScrollGutter)
 
 		thumbStart, thumbHeight := -1, -1
 		if total > visible {
@@ -658,11 +657,9 @@ func (win *Window) Draw(s tcell.Screen) {
 		}
 
 		for i := 0; i < visible; i++ {
-			style := gutterStyle
 			if i >= thumbStart && i < thumbStart+thumbHeight {
-				style = thumbStyle
+				s.SetContent(win.x, win.body.y+i, ' ', nil, thumbStyle)
 			}
-			s.SetContent(win.x, win.body.y+i, ' ', nil, style)
 		}
 	}
 

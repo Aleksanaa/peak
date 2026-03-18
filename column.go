@@ -45,14 +45,14 @@ func (c *Column) AddWindow(tagText, bodyText string) *Window {
 }
 
 func (c *Column) Draw(s tcell.Screen) {
-	sepStyle := tcell.StyleDefault.Background(c.editor.theme.ScrollGutter).Foreground(c.editor.theme.Corner)
-	cornerStyle := tcell.StyleDefault.Background(c.editor.theme.Corner).Foreground(tcell.ColorBlack)
+	sepStyle := tcell.StyleDefault.Background(c.editor.theme.ScrollGutter).Foreground(c.editor.theme.HandleColumn)
+	handleStyle := tcell.StyleDefault.Background(c.editor.theme.HandleColumn).Foreground(tcell.ColorBlack)
 
 	// Draw vertical separator
 	for y := c.y; y < c.y+c.h; y++ {
 		style := sepStyle
 		if y == c.y {
-			style = cornerStyle
+			style = handleStyle
 		}
 		s.SetContent(c.x, y, ' ', nil, style)
 	}
