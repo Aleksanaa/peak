@@ -13,6 +13,17 @@ type VisualLine struct {
 	Start, End int
 }
 
+type View interface {
+	Draw(tcell.Screen)
+	ShowCursor(tcell.Screen)
+	Resize(x, y, w, h int)
+	HandleEvent(tcell.Event) bool
+	GetPos() (x, y, w, h int)
+	SetPos(x, y, w, h int)
+	GetClickWord(mx, my int) string
+	GetBuffer() *Buffer
+}
+
 type TextView struct {
 	buffer      *Buffer
 	x, y, w, h  int
@@ -253,6 +264,18 @@ func (tv *TextView) ShowCursor(s tcell.Screen) {
 func (tv *TextView) Resize(x, y, w, h int) {
 	tv.x, tv.y, tv.w, tv.h = x, y, w, h
 	tv.UpdateLayout()
+}
+
+func (tv *TextView) GetPos() (x, y, w, h int) {
+	return tv.x, tv.y, tv.w, tv.h
+}
+
+func (tv *TextView) SetPos(x, y, w, h int) {
+	tv.x, tv.y, tv.w, tv.h = x, y, w, h
+}
+
+func (tv *TextView) GetBuffer() *Buffer {
+	return tv.buffer
 }
 
 func (tv *TextView) prepareTyping() bool {
@@ -531,7 +554,7 @@ func (tv *TextView) ShowLineAt(lineNum int, vrow int) {
 type Window struct {
 	ID             int
 	tag            *TextView
-	body           *TextView
+	body           View
 	parent         *Column
 	editor         *Editor
 	x, y, w, h     int
@@ -544,6 +567,25 @@ type Window struct {
 	warnedVersion int
 }
 
+func NewTermWindow(tag string, parent *Column, editor *Editor, x, y, w, h int, cmd string, onExec func(*Column, *Window, string) bool) (*Window, error) {
+	tagStyle := tcell.StyleDefault.Background(editor.theme.TagBG).Foreground(editor.theme.TagFG)
+	win := &Window{
+		tag:    NewTextView(tag, x+1, y, w-1, 1, tagStyle, false, false),
+		parent: parent, editor: editor, x: x, y: y, w: w, h: h, onExec: onExec,
+	}
+	win.tag.theme = &editor.theme
+
+	term, err := NewTermView(editor, cmd, x+1, y+1, w-1, h-1, func() {
+		// Auto-delete window when terminal exits?
+		// For now, let's just let it stay there closed.
+	})
+	if err != nil {
+		return nil, err
+	}
+	win.body = term
+	return win, nil
+}
+
 func NewWindow(tag, body string, parent *Column, editor *Editor, x, y, w, h int, onExec func(*Column, *Window, string) bool) *Window {
 	tagStyle := tcell.StyleDefault.Background(editor.theme.TagBG).Foreground(editor.theme.TagFG)
 	bodyStyle := tcell.StyleDefault.Background(editor.theme.BodyBG).Foreground(editor.theme.BodyFG)
@@ -553,23 +595,40 @@ func NewWindow(tag, body string, parent *Column, editor *Editor, x, y, w, h int,
 		parent: parent, editor: editor, x: x, y: y, w: w, h: h, onExec: onExec,
 	}
 	win.tag.theme = &editor.theme
-	win.body.theme = &editor.theme
+	if tv, ok := win.body.(*TextView); ok {
+		tv.theme = &editor.theme
+	}
 	return win
+}
+
+func (win *Window) bodyTextView() *TextView {
+	if tv, ok := win.body.(*TextView); ok {
+		return tv
+	}
+	return nil
 }
 
 func (win *Window) IsDirty() bool {
 	if !win.hasVersion {
 		return false
 	}
-	return win.body.buffer.version != win.savedVersion
+	if buf := win.body.GetBuffer(); buf != nil {
+		return buf.version != win.savedVersion
+	}
+	return false
 }
 
 func (win *Window) Warned() bool {
-	return win.warnedVersion == win.body.buffer.version
+	if buf := win.body.GetBuffer(); buf != nil {
+		return win.warnedVersion == buf.version
+	}
+	return true
 }
 
 func (win *Window) Warn() {
-	win.warnedVersion = win.body.buffer.version
+	if buf := win.body.GetBuffer(); buf != nil {
+		win.warnedVersion = buf.version
+	}
 }
 
 func (win *Window) GetFilename() string {
@@ -613,11 +672,11 @@ func (win *Window) tagHeight() int {
 func (win *Window) layout() {
 	th := win.tagHeight()
 	win.tag.h = th
-	win.body.y = win.y + th
-	win.body.h = win.h - th
-	if win.body.h < 0 {
-		win.body.h = 0
+	bh := win.h - th
+	if bh < 0 {
+		bh = 0
 	}
+	win.body.SetPos(win.x+1, win.y+th, win.w-1, bh)
 }
 
 func (win *Window) Draw(s tcell.Screen) {
@@ -637,10 +696,10 @@ func (win *Window) Draw(s tcell.Screen) {
 	}
 
 	// Draw scrollbar/handle for the body
-	if win.body.h > 0 {
-		win.body.UpdateLayout() // Ensure layout is fresh for scroll calculation
-		total := len(win.body.layout)
-		visible := win.body.h
+	if tv, ok := win.body.(*TextView); ok && tv.h > 0 {
+		tv.UpdateLayout() // Ensure layout is fresh for scroll calculation
+		total := len(tv.layout)
+		visible := tv.h
 
 		thumbStyle := tcell.StyleDefault.Background(win.editor.theme.ScrollThumb)
 
@@ -650,7 +709,7 @@ func (win *Window) Draw(s tcell.Screen) {
 			if thumbHeight < 1 {
 				thumbHeight = 1
 			}
-			thumbStart = (win.body.scroll * visible) / total
+			thumbStart = (tv.scroll * visible) / total
 			if thumbStart+thumbHeight > visible {
 				thumbStart = visible - thumbHeight
 			}
@@ -658,7 +717,7 @@ func (win *Window) Draw(s tcell.Screen) {
 
 		for i := 0; i < visible; i++ {
 			if i >= thumbStart && i < thumbStart+thumbHeight {
-				s.SetContent(win.x, win.body.y+i, ' ', nil, thumbStyle)
+				s.SetContent(win.x, tv.y+i, ' ', nil, thumbStyle)
 			}
 		}
 	}
@@ -671,41 +730,45 @@ func (win *Window) Resize(x, y, w, h int) {
 	win.x, win.y, win.w, win.h = x, y, w, h
 	win.tag.Resize(x+1, y, w-1, win.tagHeight())
 	win.layout()
-	win.body.Resize(x+1, win.body.y, w-1, win.body.h)
+	_, by, bw, bh := win.body.GetPos()
+	win.body.Resize(x+1, by, bw, bh)
 }
 
 func (win *Window) HandleEvent(ev tcell.Event) bool {
 	if me, ok := ev.(*tcell.EventMouse); ok {
 		mx, my := me.Position()
 		win.tag.UpdateLayout()
-		win.body.UpdateLayout()
+		if tv, ok := win.body.(*TextView); ok {
+			tv.UpdateLayout()
+		}
 		th := win.tagHeight()
 
 		if mx == win.x && my >= win.y+th {
-			// Scrolling speed based on distance from top: closer = slower
-			amount := (my - (win.y + th)) + 1
-			if me.Buttons()&tcell.Button1 != 0 {
-				if win.editor.scrollWin == nil {
-					win.body.Scroll(-amount)
-					win.editor.scrollStartTime = time.Now()
-				}
-				win.editor.scrollWin, win.editor.scrollAmount, win.editor.scrollDir = win, amount, -1
-			} else if me.Buttons()&tcell.Button2 != 0 {
-				if win.editor.scrollWin == nil {
-					win.body.Scroll(amount)
-					win.editor.scrollStartTime = time.Now()
-				}
-				win.editor.scrollWin, win.editor.scrollAmount, win.editor.scrollDir = win, amount, 1
-			} else if me.Buttons()&tcell.Button3 != 0 {
-				// Middle-click: Align top of scrollbar (thumb) with click position
-				visible := win.body.h
-				win.body.UpdateLayout()
-				total := len(win.body.layout)
-				if visible > 0 && total > 0 {
-					yClick := my - (win.y + th)
-					// Use ceiling division (a + b - 1) / b to ensure the thumb aligns with the click
-					win.body.scroll = (yClick*total + visible - 1) / visible
-					win.body.Scroll(0) // Apply bounds check
+			if tv, ok := win.body.(*TextView); ok {
+				// Scrolling speed based on distance from top: closer = slower
+				amount := (my - (win.y + th)) + 1
+				if me.Buttons()&tcell.Button1 != 0 {
+					if win.editor.scrollWin == nil {
+						tv.Scroll(-amount)
+						win.editor.scrollStartTime = time.Now()
+					}
+					win.editor.scrollWin, win.editor.scrollAmount, win.editor.scrollDir = win, amount, -1
+				} else if me.Buttons()&tcell.Button2 != 0 {
+					if win.editor.scrollWin == nil {
+						tv.Scroll(amount)
+						win.editor.scrollStartTime = time.Now()
+					}
+					win.editor.scrollWin, win.editor.scrollAmount, win.editor.scrollDir = win, amount, 1
+				} else if me.Buttons()&tcell.Button3 != 0 {
+					// Middle-click: Align top of scrollbar (thumb) with click position
+					visible := tv.h
+					total := len(tv.layout)
+					if visible > 0 && total > 0 {
+						yClick := my - (win.y + th)
+						// Use ceiling division (a + b - 1) / b to ensure the thumb aligns with the click
+						tv.scroll = (yClick*total + visible - 1) / visible
+						tv.Scroll(0) // Apply bounds check
+					}
 				}
 			}
 			return false
@@ -716,13 +779,19 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 			return false
 		}
 
-		target := win.body
+		var target View
 		if my < win.y+th {
 			target = win.tag
+		} else {
+			target = win.body
 		}
+
 		target.HandleEvent(ev)
 		if me.Buttons() == tcell.Button3 || me.Buttons() == tcell.Button2 {
-			word := target.GetClickWord(mx, my)
+			var word string
+			if tv, ok := target.(*TextView); ok {
+				word = tv.GetClickWord(mx, my)
+			}
 			if word != "" {
 				if me.Buttons() == tcell.Button3 { // Middle-click (Execute)
 					if win.onExec != nil {
@@ -733,6 +802,9 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 				}
 			}
 		}
+	} else {
+		// Non-mouse events (keys) go to focused view, which is usually win.body
+		// This is handled in Editor.HandleEvent.
 	}
 	return false
 }

@@ -44,6 +44,25 @@ func (c *Column) AddWindow(tagText, bodyText string) *Window {
 	return newWin
 }
 
+func (c *Column) AddTermWindow(tagText, cmd string) (*Window, error) {
+	if tagText == "" {
+		tagPath := "win"
+		if cmd != "" {
+			tagPath = cmd
+		}
+		tagText = " " + tagPath + " Get Put Del "
+	}
+
+	newWin, err := NewTermWindow(tagText, c, c.editor, c.x, c.y, c.w, 0, cmd, c.onExec)
+	if err != nil {
+		return nil, err
+	}
+	newWin.ID = c.editor.nextWinID
+	c.editor.nextWinID++
+	c.windows = append(c.windows, newWin)
+	return newWin, nil
+}
+
 func (c *Column) Draw(s tcell.Screen) {
 	sepStyle := tcell.StyleDefault.Background(c.editor.theme.ScrollGutter).Foreground(c.editor.theme.HandleColumn)
 	handleStyle := tcell.StyleDefault.Background(c.editor.theme.HandleColumn).Foreground(tcell.ColorBlack)

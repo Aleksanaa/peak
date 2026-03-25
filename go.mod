@@ -16,9 +16,11 @@ require (
 
 require (
 	aqwari.net/retry v0.0.0-20180428204214-1281ce5d8df0 // indirect
+	github.com/creack/pty v1.1.18 // indirect
 	github.com/gdamore/encoding v1.0.1 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
+	github.com/micro-editor/terminal v0.0.0-20250324214352-e587e959c6b5 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/term v0.41.0 // indirect
 	golang.org/x/text v0.35.0 // indirect

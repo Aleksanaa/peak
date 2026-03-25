@@ -50,10 +50,10 @@ type Editor struct {
 	active      *Window
 	width       int
 	height      int
-	dragView    *TextView
+	dragView    View
 	dragWin     *Window
 	dragCol     *Column
-	focusedView *TextView
+	focusedView View
 
 	scrollWin       *Window
 	scrollAmount    int
@@ -171,8 +171,8 @@ func (e *Editor) Run() {
 			case *tcell.EventInterrupt:
 				if f, ok := ev.Data().(func()); ok {
 					f()
-					e.Draw()
 				}
+				e.Draw()
 			default:
 				if quit, redraw := e.HandleEvent(ev); quit {
 					return
@@ -188,8 +188,10 @@ func (e *Editor) Run() {
 			e.Draw()
 		case <-tick:
 			if e.scrollWin != nil && time.Since(e.scrollStartTime) > 200*time.Millisecond {
-				e.scrollWin.body.Scroll(e.scrollDir * e.scrollAmount)
-				e.Draw()
+				if tv, ok := e.scrollWin.body.(*TextView); ok {
+					tv.Scroll(e.scrollDir * e.scrollAmount)
+					e.Draw()
+				}
 			}
 		}
 	}
@@ -224,8 +226,10 @@ func (e *Editor) HandleEvent(ev tcell.Event) (bool, bool) {
 	switch ev := ev.(type) {
 	case *tcell.EventKey:
 		if ev.Key() == tcell.KeyCtrlF {
-			if e.focusedView != nil && e.focusedView.buffer.GetSelectedText() != "" {
-				return e.Execute(nil, nil, "Look"), true
+			if e.focusedView != nil {
+				if tv, ok := e.focusedView.(*TextView); ok && tv.buffer.GetSelectedText() != "" {
+					return e.Execute(nil, nil, "Look"), true
+				}
 			}
 		}
 		if e.focusedView != nil {

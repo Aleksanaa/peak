@@ -560,7 +560,7 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 			for _, win := range col.windows {
 				if win.GetFilename() == target {
 					ctx.Window = win
-					ctx.Buffer = win.body.buffer
+					ctx.Buffer = win.body.GetBuffer()
 					return Range{0, 0}, true
 				}
 			}
@@ -570,7 +570,7 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 			for _, win := range col.windows {
 				if strings.Contains(win.GetFilename(), target) {
 					ctx.Window = win
-					ctx.Buffer = win.body.buffer
+					ctx.Buffer = win.body.GetBuffer()
 					return Range{0, 0}, true
 				}
 			}
@@ -742,14 +742,18 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 				match := re.MatchString(filename)
 				if (cmd.cmdc == 'X' && match) || (cmd.cmdc == 'Y' && !match) {
 					subLog := &Elog{}
-					subCtx := &Context{Editor: ctx.Editor, Column: col, Window: win, Buffer: win.body.buffer, Out: ctx.Out, Log: subLog}
-					subDot := Range{win.body.buffer.CursorToRuneOffset(win.body.buffer.cursor), win.body.buffer.CursorToRuneOffset(win.body.buffer.cursor)}
-					if win.body.buffer.selectionStart != nil {
-						s, e := win.body.buffer.orderedSelection()
-						subDot = Range{win.body.buffer.CursorToRuneOffset(s), win.body.buffer.CursorToRuneOffset(e)}
+					buf := win.body.GetBuffer()
+					if buf == nil {
+						continue
+					}
+					subCtx := &Context{Editor: ctx.Editor, Column: col, Window: win, Buffer: buf, Out: ctx.Out, Log: subLog}
+					subDot := Range{buf.CursorToRuneOffset(buf.cursor), buf.CursorToRuneOffset(buf.cursor)}
+					if buf.selectionStart != nil {
+						s, e := buf.orderedSelection()
+						subDot = Range{buf.CursorToRuneOffset(s), buf.CursorToRuneOffset(e)}
 					}
 					cmd.cmd.Execute(subCtx, subDot)
-					subLog.Apply(win.body.buffer)
+					subLog.Apply(buf)
 				}
 			}
 		}

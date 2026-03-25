@@ -57,6 +57,8 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 		e.cmdNewCol()
 	case "New":
 		e.cmdNew(col, win, cmd)
+	case "Win":
+		e.cmdWin(col, win, cmd)
 	case "Zerox":
 		e.cmdZerox(col, win)
 	case "Snarf":
@@ -91,8 +93,10 @@ func (e *Editor) getArg(win *Window, cmd string) string {
 
 	// Prefer selection in the current focused view
 	if e.focusedView != nil {
-		if sel := e.focusedView.buffer.GetSelectedText(); sel != "" {
-			return sel
+		if buf := e.focusedView.GetBuffer(); buf != nil {
+			if sel := buf.GetSelectedText(); sel != "" {
+				return sel
+			}
 		}
 	}
 
@@ -101,8 +105,10 @@ func (e *Editor) getArg(win *Window, cmd string) string {
 		target = e.active
 	}
 	if target != nil {
-		if sel := target.body.buffer.GetSelectedText(); sel != "" {
-			return sel
+		if tv := target.bodyTextView(); tv != nil {
+			if sel := tv.buffer.GetSelectedText(); sel != "" {
+				return sel
+			}
 		}
 		if sel := target.tag.buffer.GetSelectedText(); sel != "" {
 			return sel
@@ -126,7 +132,9 @@ func (e *Editor) OpenLine(win *Window, path string, line, col int, binaryFallbac
 			if e.resolvePathWithContext(nil, w.GetFilename()) == full {
 				e.ActivateWindow(w)
 				if line >= 0 {
-					w.body.GotoLineCol(line, col)
+					if tv := w.bodyTextView(); tv != nil {
+						tv.GotoLineCol(line, col)
+					}
 				}
 				return
 			}
@@ -164,9 +172,11 @@ func (e *Editor) createWindow(target *Column, full string, content string, isDir
 	e.ActivateWindow(newWin)
 	newWin.isDir = isDir
 	newWin.hasVersion = hasVersion(full)
-	newWin.savedVersion = newWin.body.buffer.version
-	if line >= 0 {
-		newWin.body.GotoLineCol(line, col)
+	if tv := newWin.bodyTextView(); tv != nil {
+		newWin.savedVersion = tv.buffer.version
+		if line >= 0 {
+			tv.GotoLineCol(line, col)
+		}
 	}
 	target.Resize(target.x, target.y, target.w, target.h)
 	return newWin
@@ -236,11 +246,13 @@ func (e *Editor) cmdGet(win *Window, cmd string) {
 					path = toDir(path)
 					target.SetName(path)
 				}
-				target.body.buffer.SetText(content)
-				target.isDir = isDir
-				target.hasVersion = hasVersion(path)
-				target.savedVersion = target.body.buffer.version
-				target.warnedVersion = target.savedVersion
+				if tv := target.bodyTextView(); tv != nil {
+					tv.buffer.SetText(content)
+					target.isDir = isDir
+					target.hasVersion = hasVersion(path)
+					target.savedVersion = tv.buffer.version
+					target.warnedVersion = target.savedVersion
+				}
 			} else {
 				e.showError(target.parent, target, "", path+": "+normalizeError(err))
 			}
@@ -259,8 +271,12 @@ func (e *Editor) cmdPut(win *Window, cmd string) {
 	}
 	path := e.resolvePathWithContext(target, arg)
 	if path != "" {
-		text := target.body.buffer.GetText()
-		version := target.body.buffer.version
+		tv := target.bodyTextView()
+		if tv == nil {
+			return
+		}
+		text := tv.buffer.GetText()
+		version := tv.buffer.version
 		go func() {
 			// In cmdPut, we don't know if it's a dir yet, but writeFile handles it.
 			err := writeFile(path, []byte(text))
@@ -371,12 +387,36 @@ func (e *Editor) cmdNew(col *Column, win *Window, cmd string) {
 	}
 }
 
+func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {
+	arg := e.getArg(win, cmd)
+	targetCol := e.getTargetColumn(col, win)
+	if targetCol == nil {
+		return
+	}
+
+	newWin, err := targetCol.AddTermWindow("", arg)
+	if err != nil {
+		e.showError(targetCol, win, "", err.Error())
+		return
+	}
+
+	e.ActivateWindow(newWin)
+	targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
+}
+
 func (e *Editor) cmdZerox(col *Column, win *Window) {
 	target := e.getTargetWindow(win)
 	if target != nil {
-		newWin := target.parent.AddWindow(target.tag.buffer.GetText(), target.body.buffer.GetText())
-		newWin.body.scroll = target.body.scroll
-		newWin.body.buffer.cursor = target.body.buffer.cursor
+		tv := target.bodyTextView()
+		if tv == nil {
+			return
+		}
+		newWin := target.parent.AddWindow(target.tag.buffer.GetText(), tv.buffer.GetText())
+		newTv := newWin.bodyTextView()
+		if newTv != nil {
+			newTv.scroll = tv.scroll
+			newTv.buffer.cursor = tv.buffer.cursor
+		}
 		newWin.hasVersion = target.hasVersion
 		newWin.isDir = target.isDir
 		newWin.savedVersion = target.savedVersion
@@ -388,19 +428,25 @@ func (e *Editor) cmdZerox(col *Column, win *Window) {
 
 func (e *Editor) cmdSnarf() {
 	if e.focusedView != nil {
-		e.focusedView.buffer.Snarf()
+		if buf := e.focusedView.GetBuffer(); buf != nil {
+			buf.Snarf()
+		}
 	}
 }
 
 func (e *Editor) cmdCut() {
 	if e.focusedView != nil {
-		e.focusedView.buffer.Cut()
+		if buf := e.focusedView.GetBuffer(); buf != nil {
+			buf.Cut()
+		}
 	}
 }
 
 func (e *Editor) cmdPaste() {
 	if e.focusedView != nil {
-		e.focusedView.buffer.Paste()
+		if buf := e.focusedView.GetBuffer(); buf != nil {
+			buf.Paste()
+		}
 	}
 }
 
@@ -426,30 +472,39 @@ func (e *Editor) cmdTab(col *Column, win *Window, cmd string) {
 	fields := strings.Fields(cmd)
 	if len(fields) == 1 {
 		// Show current tab width
-		msg := target.GetFilename() + ": Tab " + strconv.Itoa(target.body.tabWidth) + "\n"
-		e.showError(col, target, "", msg)
+		tv := target.bodyTextView()
+		if tv != nil {
+			msg := target.GetFilename() + ": Tab " + strconv.Itoa(tv.tabWidth) + "\n"
+			e.showError(col, target, "", msg)
+		}
 		return
 	}
 
 	// Set new tab width
 	newTab, err := strconv.Atoi(fields[1])
 	if err == nil && newTab > 0 {
-		target.body.tabWidth = newTab
-		target.body.UpdateLayout()
+		if tv := target.bodyTextView(); tv != nil {
+			tv.tabWidth = newTab
+			tv.UpdateLayout()
+		}
 	}
 }
 
 func (e *Editor) cmdUndo(win *Window) {
 	target := e.getTargetWindow(win)
 	if target != nil {
-		target.body.buffer.Undo()
+		if tv := target.bodyTextView(); tv != nil {
+			tv.buffer.Undo()
+		}
 	}
 }
 
 func (e *Editor) cmdRedo(win *Window) {
 	target := e.getTargetWindow(win)
 	if target != nil {
-		target.body.buffer.Redo()
+		if tv := target.bodyTextView(); tv != nil {
+			tv.buffer.Redo()
+		}
 	}
 }
 
@@ -464,9 +519,11 @@ func (e *Editor) cmdLook(win *Window, cmd string) {
 		return
 	}
 
-	foundLine := target.body.Search(arg)
-	if foundLine != -1 {
-		e.alignWindow(target, foundLine)
+	if tv := target.bodyTextView(); tv != nil {
+		foundLine := tv.Search(arg)
+		if foundLine != -1 {
+			e.alignWindow(target, foundLine)
+		}
 	}
 }
 
@@ -488,7 +545,11 @@ func (e *Editor) cmdEdit(col *Column, win *Window, cmd string) {
 		return
 	}
 
-	buf := target.body.buffer
+	tv := target.bodyTextView()
+	if tv == nil {
+		return
+	}
+	buf := tv.buffer
 	dot := Range{buf.CursorToRuneOffset(buf.cursor), buf.CursorToRuneOffset(buf.cursor)}
 	if buf.selectionStart != nil && buf.selectionEnd != nil {
 		s, end := buf.orderedSelection()
@@ -520,13 +581,17 @@ func (e *Editor) cmdEdit(col *Column, win *Window, cmd string) {
 }
 
 func (e *Editor) alignWindow(target *Window, line int) {
-	vrow := e.lastClickY - target.body.y
+	tv := target.bodyTextView()
+	if tv == nil {
+		return
+	}
+	vrow := e.lastClickY - tv.y
 	if vrow < 0 {
 		vrow = 0
-	} else if vrow >= target.body.h {
-		vrow = target.body.h / 2
+	} else if vrow >= tv.h {
+		vrow = tv.h / 2
 	}
-	target.body.ShowLineAt(line, vrow)
+	tv.ShowLineAt(line, vrow)
 }
 
 func (e *Editor) showError(col *Column, win *Window, dir, msg string) {
@@ -547,8 +612,10 @@ func (e *Editor) showError(col *Column, win *Window, dir, msg string) {
 	}
 
 	if reuse != nil {
-		reuse.body.buffer.SetText(msg)
-		e.focusedView = reuse.body
+		if tv := reuse.bodyTextView(); tv != nil {
+			tv.buffer.SetText(msg)
+			e.focusedView = tv
+		}
 		return
 	}
 

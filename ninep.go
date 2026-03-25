@@ -53,16 +53,22 @@ func (p *NineP) UpdateIndex() {
 	for _, col := range p.editor.columns {
 		for _, win := range col.windows {
 			dirty := 0
-			if win.hasVersion && win.body.buffer.version != win.savedVersion {
+			tagBuf := win.tag.buffer
+			bodyBuf := win.body.GetBuffer()
+
+			if win.hasVersion && bodyBuf != nil && bodyBuf.version != win.savedVersion {
 				dirty = 1
 			}
-			tagLen := win.tag.buffer.Len()
-			bodyLen := win.body.buffer.Len()
+			tagLen := tagBuf.Len()
+			bodyLen := 0
+			if bodyBuf != nil {
+				bodyLen = bodyBuf.Len()
+			}
 			isdir := 0
 			if win.isDir {
 				isdir = 1
 			}
-			tagText := win.tag.buffer.GetText()
+			tagText := tagBuf.GetText()
 			if i := strings.Index(tagText, "\n"); i >= 0 {
 				tagText = tagText[:i]
 			}
