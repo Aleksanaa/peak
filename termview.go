@@ -253,14 +253,17 @@ func (tv *TermView) SyncScroll() {
 		return
 	}
 
-	_, cy := tv.state.Cursor()
 	eh := tv.getContentHeight()
+	_, cy := tv.state.Cursor()
 
 	// Ensure cursor is visible
 	if cy < tv.scroll {
 		tv.scroll = cy
 	} else if cy >= tv.scroll+tv.h {
-		tv.scroll = cy - tv.h + 1
+		// Only follow the cursor if we were already at the bottom
+		if tv.scroll >= eh-tv.h-1 {
+			tv.scroll = cy - tv.h + 1
+		}
 	}
 
 	// Bounds check
@@ -323,6 +326,74 @@ func (tv *TermView) GetPos() (x, y, w, h int) {
 
 func (tv *TermView) SetPos(x, y, w, h int) {
 	tv.x, tv.y, tv.w, tv.h = x, y, w, h
+}
+
+func (tv *TermView) Search(word string) int {
+	if word == "" {
+		return -1
+	}
+
+	tv.state.Lock()
+	defer tv.state.Unlock()
+
+	eh := tv.getContentHeight()
+	startRX, startRY := 0, 0
+	if tv.hasSelection {
+		startRX, startRY = tv.selectionEnd.x+1, tv.selectionEnd.y
+	}
+	if startRY >= eh {
+		startRY, startRX = 0, 0
+	}
+
+	for y := startRY; y < eh; y++ {
+		var line strings.Builder
+		for x := 0; x < tv.w; x++ {
+			c, _, _ := tv.state.Cell(x, y)
+			line.WriteRune(c)
+		}
+		lineStr := line.String()
+		sx := 0
+		if y == startRY {
+			sx = startRX
+			if sx > len(lineStr) {
+				sx = len(lineStr)
+			}
+		}
+		if x := strings.Index(lineStr[sx:], word); x != -1 {
+			tv.hasSelection = true
+			tv.selectionStart = struct{ x, y int }{sx + x, y}
+			tv.selectionEnd = struct{ x, y int }{sx + x + len(word) - 1, y}
+			return y
+		}
+	}
+
+	for y := 0; y <= startRY && y < eh; y++ {
+		var line strings.Builder
+		for x := 0; x < tv.w; x++ {
+			c, _, _ := tv.state.Cell(x, y)
+			line.WriteRune(c)
+		}
+		lineStr := line.String()
+		limit := len(lineStr)
+		if y == startRY {
+			limit = startRX
+		}
+		if x := strings.Index(lineStr[:limit], word); x != -1 {
+			tv.hasSelection = true
+			tv.selectionStart = struct{ x, y int }{x, y}
+			tv.selectionEnd = struct{ x, y int }{x + len(word) - 1, y}
+			return y
+		}
+	}
+
+	return -1
+}
+
+func (tv *TermView) ShowLineAt(lineNum int, vrow int) {
+	tv.scroll = lineNum - vrow
+	if tv.scroll < 0 {
+		tv.scroll = 0
+	}
 }
 
 func (tv *TermView) GetClickWord(mx, my int) string {

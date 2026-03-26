@@ -21,9 +21,12 @@ type View interface {
 	GetPos() (x, y, w, h int)
 	SetPos(x, y, w, h int)
 	GetClickWord(mx, my int) string
+	GetSelectedText() string
 	GetBuffer() *Buffer
 	Scroll(n int)
 	GetScroll() (scroll, total, visible int)
+	Search(word string) int
+	ShowLineAt(lineNum, vrow int)
 }
 
 type TextView struct {
@@ -283,6 +286,10 @@ func (tv *TextView) SetPos(x, y, w, h int) {
 
 func (tv *TextView) GetBuffer() *Buffer {
 	return tv.buffer
+}
+
+func (tv *TextView) GetSelectedText() string {
+	return tv.buffer.GetSelectedText()
 }
 
 func (tv *TextView) prepareTyping() bool {

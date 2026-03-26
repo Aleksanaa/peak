@@ -93,10 +93,8 @@ func (e *Editor) getArg(win *Window, cmd string) string {
 
 	// Prefer selection in the current focused view
 	if e.focusedView != nil {
-		if buf := e.focusedView.GetBuffer(); buf != nil {
-			if sel := buf.GetSelectedText(); sel != "" {
-				return sel
-			}
+		if sel := e.focusedView.GetSelectedText(); sel != "" {
+			return sel
 		}
 	}
 
@@ -105,12 +103,12 @@ func (e *Editor) getArg(win *Window, cmd string) string {
 		target = e.active
 	}
 	if target != nil {
-		if tv := target.bodyTextView(); tv != nil {
-			if sel := tv.buffer.GetSelectedText(); sel != "" {
+		if target.body != nil {
+			if sel := target.body.GetSelectedText(); sel != "" {
 				return sel
 			}
 		}
-		if sel := target.tag.buffer.GetSelectedText(); sel != "" {
+		if sel := target.tag.GetSelectedText(); sel != "" {
 			return sel
 		}
 	}
@@ -519,8 +517,8 @@ func (e *Editor) cmdLook(win *Window, cmd string) {
 		return
 	}
 
-	if tv := target.bodyTextView(); tv != nil {
-		foundLine := tv.Search(arg)
+	if target.body != nil {
+		foundLine := target.body.Search(arg)
 		if foundLine != -1 {
 			e.alignWindow(target, foundLine)
 		}
@@ -581,17 +579,17 @@ func (e *Editor) cmdEdit(col *Column, win *Window, cmd string) {
 }
 
 func (e *Editor) alignWindow(target *Window, line int) {
-	tv := target.bodyTextView()
-	if tv == nil {
+	if target.body == nil {
 		return
 	}
-	vrow := e.lastClickY - tv.y
+	_, ty, _, th := target.body.GetPos()
+	vrow := e.lastClickY - ty
 	if vrow < 0 {
 		vrow = 0
-	} else if vrow >= tv.h {
-		vrow = tv.h / 2
+	} else if vrow >= th {
+		vrow = th / 2
 	}
-	tv.ShowLineAt(line, vrow)
+	target.body.ShowLineAt(line, vrow)
 }
 
 func (e *Editor) showError(col *Column, win *Window, dir, msg string) {
