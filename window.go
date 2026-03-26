@@ -22,6 +22,8 @@ type View interface {
 	SetPos(x, y, w, h int)
 	GetClickWord(mx, my int) string
 	GetBuffer() *Buffer
+	Scroll(n int)
+	GetScroll() (scroll, total, visible int)
 }
 
 type TextView struct {
@@ -108,6 +110,11 @@ func (tv *TextView) UpdateLayout() {
 	if tv.scroll < 0 {
 		tv.scroll = 0
 	}
+}
+
+func (tv *TextView) GetScroll() (scroll, total, visible int) {
+	tv.UpdateLayout()
+	return tv.scroll, len(tv.layout), tv.h
 }
 
 func (tv *TextView) Scroll(n int) {
@@ -696,28 +703,27 @@ func (win *Window) Draw(s tcell.Screen) {
 	}
 
 	// Draw scrollbar/handle for the body
-	if tv, ok := win.body.(*TextView); ok && tv.h > 0 {
-		tv.UpdateLayout() // Ensure layout is fresh for scroll calculation
-		total := len(tv.layout)
-		visible := tv.h
+	if win.body != nil {
+		scroll, total, visible := win.body.GetScroll()
+		if visible > 0 {
+			thumbStyle := tcell.StyleDefault.Background(win.editor.theme.ScrollThumb)
 
-		thumbStyle := tcell.StyleDefault.Background(win.editor.theme.ScrollThumb)
-
-		thumbStart, thumbHeight := -1, -1
-		if total > visible {
-			thumbHeight = (visible * visible) / total
-			if thumbHeight < 1 {
-				thumbHeight = 1
+			thumbStart, thumbHeight := -1, -1
+			if total > visible {
+				thumbHeight = (visible * visible) / total
+				if thumbHeight < 1 {
+					thumbHeight = 1
+				}
+				thumbStart = (scroll * visible) / total
+				if thumbStart+thumbHeight > visible {
+					thumbStart = visible - thumbHeight
+				}
 			}
-			thumbStart = (tv.scroll * visible) / total
-			if thumbStart+thumbHeight > visible {
-				thumbStart = visible - thumbHeight
-			}
-		}
 
-		for i := 0; i < visible; i++ {
-			if i >= thumbStart && i < thumbStart+thumbHeight {
-				s.SetContent(win.x, tv.y+i, ' ', nil, thumbStyle)
+			for i := 0; i < visible; i++ {
+				if i >= thumbStart && i < thumbStart+thumbHeight {
+					s.SetContent(win.x, win.y+win.tagHeight()+i, ' ', nil, thumbStyle)
+				}
 			}
 		}
 	}
@@ -738,37 +744,31 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 	if me, ok := ev.(*tcell.EventMouse); ok {
 		mx, my := me.Position()
 		win.tag.UpdateLayout()
-		if tv, ok := win.body.(*TextView); ok {
-			tv.UpdateLayout()
-		}
 		th := win.tagHeight()
 
 		if mx == win.x && my >= win.y+th {
-			if tv, ok := win.body.(*TextView); ok {
-				// Scrolling speed based on distance from top: closer = slower
-				amount := (my - (win.y + th)) + 1
-				if me.Buttons()&tcell.Button1 != 0 {
-					if win.editor.scrollWin == nil {
-						tv.Scroll(-amount)
-						win.editor.scrollStartTime = time.Now()
-					}
-					win.editor.scrollWin, win.editor.scrollAmount, win.editor.scrollDir = win, amount, -1
-				} else if me.Buttons()&tcell.Button2 != 0 {
-					if win.editor.scrollWin == nil {
-						tv.Scroll(amount)
-						win.editor.scrollStartTime = time.Now()
-					}
-					win.editor.scrollWin, win.editor.scrollAmount, win.editor.scrollDir = win, amount, 1
-				} else if me.Buttons()&tcell.Button3 != 0 {
-					// Middle-click: Align top of scrollbar (thumb) with click position
-					visible := tv.h
-					total := len(tv.layout)
-					if visible > 0 && total > 0 {
-						yClick := my - (win.y + th)
-						// Use ceiling division (a + b - 1) / b to ensure the thumb aligns with the click
-						tv.scroll = (yClick*total + visible - 1) / visible
-						tv.Scroll(0) // Apply bounds check
-					}
+			// Scrolling speed based on distance from top: closer = slower
+			amount := (my - (win.y + th)) + 1
+			if me.Buttons()&tcell.Button1 != 0 {
+				if win.editor.scrollWin == nil {
+					win.body.Scroll(-amount)
+					win.editor.scrollStartTime = time.Now()
+				}
+				win.editor.scrollWin, win.editor.scrollAmount, win.editor.scrollDir = win, amount, -1
+			} else if me.Buttons()&tcell.Button2 != 0 {
+				if win.editor.scrollWin == nil {
+					win.body.Scroll(amount)
+					win.editor.scrollStartTime = time.Now()
+				}
+				win.editor.scrollWin, win.editor.scrollAmount, win.editor.scrollDir = win, amount, 1
+			} else if me.Buttons()&tcell.Button3 != 0 {
+				// Middle-click: Align top of scrollbar (thumb) with click position
+				scroll, total, visible := win.body.GetScroll()
+				if visible > 0 && total > 0 {
+					yClick := my - (win.y + th)
+					// Use ceiling division (a + b - 1) / b to ensure the thumb aligns with the click
+					newScroll := (yClick*total + visible - 1) / visible
+					win.body.Scroll(newScroll - scroll)
 				}
 			}
 			return false
