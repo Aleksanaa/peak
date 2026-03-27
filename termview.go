@@ -152,6 +152,10 @@ func (tv *TermView) toTcellColor(c terminal.Color, isFG bool) tcell.Color {
 		}
 		return tv.editor.theme.BodyBG
 	}
+	if c.IsRGB() {
+		r, g, b := c.RGBComponents()
+		return tcell.NewRGBColor(int32(r), int32(g), int32(b))
+	}
 	if c < 256 {
 		return tcell.PaletteColor(int(c))
 	}

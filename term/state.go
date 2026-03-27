@@ -616,12 +616,19 @@ func (t *State) setAttr(attr []int) {
 		case 27:
 			t.cur.attr.mode &^= attrReverse
 		case 38:
-			if i+2 < len(attr) && attr[i+1] == 5 {
-				i += 2
-				if between(attr[i], 0, 255) {
-					t.cur.attr.fg = Color(attr[i])
+			if i+2 < len(attr) {
+				if attr[i+1] == 5 {
+					i += 2
+					if between(attr[i], 0, 255) {
+						t.cur.attr.fg = Color(attr[i])
+					} else {
+						t.logf("bad fgcolor %d\n", attr[i])
+					}
+				} else if attr[i+1] == 2 && i+4 < len(attr) {
+					t.cur.attr.fg = RGB(uint8(attr[i+2]), uint8(attr[i+3]), uint8(attr[i+4]))
+					i += 4
 				} else {
-					t.logf("bad fgcolor %d\n", attr[i])
+					t.logf("gfx attr %d unknown\n", a)
 				}
 			} else {
 				t.logf("gfx attr %d unknown\n", a)
@@ -629,12 +636,19 @@ func (t *State) setAttr(attr []int) {
 		case 39:
 			t.cur.attr.fg = DefaultFG
 		case 48:
-			if i+2 < len(attr) && attr[i+1] == 5 {
-				i += 2
-				if between(attr[i], 0, 255) {
-					t.cur.attr.bg = Color(attr[i])
+			if i+2 < len(attr) {
+				if attr[i+1] == 5 {
+					i += 2
+					if between(attr[i], 0, 255) {
+						t.cur.attr.bg = Color(attr[i])
+					} else {
+						t.logf("bad bgcolor %d\n", attr[i])
+					}
+				} else if attr[i+1] == 2 && i+4 < len(attr) {
+					t.cur.attr.bg = RGB(uint8(attr[i+2]), uint8(attr[i+3]), uint8(attr[i+4]))
+					i += 4
 				} else {
-					t.logf("bad bgcolor %d\n", attr[i])
+					t.logf("gfx attr %d unknown\n", a)
 				}
 			} else {
 				t.logf("gfx attr %d unknown\n", a)
