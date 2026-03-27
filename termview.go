@@ -9,7 +9,7 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/creack/pty"
 	"github.com/gdamore/tcell/v2"
-	"github.com/micro-editor/terminal"
+	"github.com/aleksana/peak/term"
 )
 
 const maxHistory = 1000
