@@ -6,16 +6,16 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/aleksana/peak/term"
 	"github.com/atotto/clipboard"
 	"github.com/creack/pty"
 	"github.com/gdamore/tcell/v2"
-	"github.com/aleksana/peak/term"
 )
 
 const maxHistory = 1000
 
 type TermView struct {
-	x, y, w, h  int
+	BaseView
 	state       terminal.State
 	vt          *terminal.VT
 	ptyFile     *os.File
@@ -29,8 +29,7 @@ type TermView struct {
 	selection Selection
 	selecting bool
 
-	scroll     ScrollState
-	lastMode   terminal.ModeFlag
+	lastMode terminal.ModeFlag
 
 	contentHeight int
 }
@@ -43,10 +42,9 @@ func (tv *TermView) IsRaw() bool {
 
 func NewTermView(editor *Editor, cmdStr, dir string, x, y, w, h int, onClose func()) (*TermView, error) {
 	tv := &TermView{
-		x:             x,
-		y:             y,
-		w:             w,
-		h:             h,
+		BaseView: BaseView{
+			x: x, y: y, w: w, h: h,
+		},
 		onClose:       onClose,
 		editor:        editor,
 		contentHeight: h,
@@ -119,10 +117,7 @@ func (tv *TermView) Draw(s tcell.Screen) {
 	tv.state.Lock()
 	defer tv.state.Unlock()
 
-	limit := maxHistory
-	if tv.h > limit {
-		limit = tv.h
-	}
+	limit := max(maxHistory, tv.h)
 
 	for y := 0; y < tv.h; y++ {
 		screenY := tv.scroll.Pos + y
@@ -160,10 +155,7 @@ func (tv *TermView) toTcellColor(c terminal.Color, isFG bool) tcell.Color {
 		r, g, b := c.RGBComponents()
 		return tcell.NewRGBColor(int32(r), int32(g), int32(b))
 	}
-	if c < 256 {
-		return tcell.PaletteColor(int(c))
-	}
-	return tcell.Color(c)
+	return tcell.PaletteColor(int(c))
 }
 
 func (tv *TermView) ShowCursor(s tcell.Screen) {
@@ -175,12 +167,10 @@ func (tv *TermView) ShowCursor(s tcell.Screen) {
 		ry := cy - tv.scroll.Pos
 		if cx >= 0 && cx < tv.w && ry >= 0 && ry < tv.h {
 			s.ShowCursor(tv.x+cx, tv.y+ry)
-		} else {
-			s.HideCursor()
+			return
 		}
-	} else {
-		s.HideCursor()
 	}
+	s.HideCursor()
 }
 
 func (tv *TermView) getContentHeight() int {
@@ -228,11 +218,7 @@ func (tv *TermView) Resize(x, y, w, h int) {
 	if tv.vt != nil {
 		// Always keep emulator at maxHistory to avoid losing Primary buffer data
 		// when switching screens or resizing.
-		emuH := maxHistory
-		if h > emuH {
-			emuH = h
-		}
-		tv.vt.Resize(w, emuH)
+		tv.vt.Resize(w, max(maxHistory, h))
 
 		// Tell the process the visible size. This must be called AFTER tv.vt.Resize
 		// to override any PTY size changes the emulator might have made.
@@ -255,8 +241,7 @@ func (tv *TermView) SyncScroll() {
 		return
 	}
 
-	isAlt := tv.state.Mode(terminal.ModeAltScreen)
-	if isAlt {
+	if tv.state.Mode(terminal.ModeAltScreen) {
 		tv.scroll.Pos = 0
 		return
 	}
@@ -275,34 +260,20 @@ func (tv *TermView) Scroll(n int) {
 	}
 	tv.state.Unlock()
 
-	if isAlt {
-		return
+	if !isAlt {
+		tv.scroll.Scroll(n, eh, tv.h)
 	}
-
-	tv.scroll.Scroll(n, eh, tv.h)
 }
 
 func (tv *TermView) GetScroll() (scroll, total, visible int) {
 	tv.state.Lock()
 	defer tv.state.Unlock()
 
-	isAlt := tv.state.Mode(terminal.ModeAltScreen)
 	totalH := tv.h
-	if !isAlt {
+	if !tv.state.Mode(terminal.ModeAltScreen) {
 		totalH = tv.getContentHeight()
 	}
-	if totalH < 0 {
-		totalH = 0
-	}
-	return tv.scroll.Pos, totalH, tv.h
-}
-
-func (tv *TermView) GetPos() (x, y, w, h int) {
-	return tv.x, tv.y, tv.w, tv.h
-}
-
-func (tv *TermView) SetPos(x, y, w, h int) {
-	tv.x, tv.y, tv.w, tv.h = x, y, w, h
+	return tv.scroll.Pos, max(0, totalH), tv.h
 }
 
 func (tv *TermView) LineCount() int {
@@ -314,10 +285,7 @@ func (tv *TermView) LineCount() int {
 func (tv *TermView) GetLine(y int) string {
 	tv.state.Lock()
 	defer tv.state.Unlock()
-	limit := maxHistory
-	if tv.h > limit {
-		limit = tv.h
-	}
+	limit := max(maxHistory, tv.h)
 	if y < 0 || y >= limit {
 		return ""
 	}
@@ -481,90 +449,83 @@ func (tv *TermView) HandleEvent(ev tcell.Event) bool {
 		// Wheel handling
 		if buttons&(tcell.WheelUp|tcell.WheelDown) != 0 {
 			if isAlt {
+				seq := "\x1b[A"
+				if buttons&tcell.WheelDown != 0 {
+					seq = "\x1b[B"
+				}
 				if isMouseMode && sgrMode {
 					btn := 64
 					if buttons&tcell.WheelDown != 0 {
 						btn = 65
 					}
-					esc := tv.encodeSGR(btn, rx, ry, false, false, mod)
-					tv.vt.File().Write([]byte(esc))
+					seq = tv.encodeSGR(btn, rx, ry, false, false, mod)
 				} else {
-					seq := "\x1b[A"
-					if buttons&tcell.WheelDown != 0 {
-						seq = "\x1b[B"
-					}
-					tv.vt.File().Write([]byte(seq + seq + seq))
+					seq = seq + seq + seq
 				}
+				tv.vt.File().Write([]byte(seq))
 			} else {
-				if buttons&tcell.WheelUp != 0 {
-					tv.Scroll(-1)
-				} else {
-					tv.Scroll(1)
+				dir := -1
+				if buttons&tcell.WheelDown != 0 {
+					dir = 1
 				}
+				tv.Scroll(dir)
 			}
-			tv.lastMX, tv.lastMY = mx, my
-			tv.lastButtons = buttons
+			tv.lastMX, tv.lastMY, tv.lastButtons = mx, my, buttons
 			return false
 		}
 
 		if tv.vt != nil && tv.vt.File() != nil && isMouseMode && !ctrlPressed && !tv.selecting {
 			motion := mx != tv.lastMX || my != tv.lastMY
-
 			handled := false
-			isMotion := false
-			isRelease := false
+			isMotion, isRelease := false, false
 			btnReport := 0
 
 			if buttons != tv.lastButtons {
+				handled = true
 				if buttons == tcell.ButtonNone {
 					isRelease = true
-					if tv.lastButtons&tcell.Button1 != 0 {
+					switch {
+					case tv.lastButtons&tcell.Button1 != 0:
 						btnReport = 0
-					} else if tv.lastButtons&tcell.Button3 != 0 {
+					case tv.lastButtons&tcell.Button3 != 0:
 						btnReport = 1
-					} else if tv.lastButtons&tcell.Button2 != 0 {
+					case tv.lastButtons&tcell.Button2 != 0:
 						btnReport = 2
 					}
 				} else {
-					if buttons&tcell.Button1 != 0 {
+					switch {
+					case buttons&tcell.Button1 != 0:
 						btnReport = 0
-					} else if buttons&tcell.Button3 != 0 {
+					case buttons&tcell.Button3 != 0:
 						btnReport = 1
-					} else if buttons&tcell.Button2 != 0 {
+					case buttons&tcell.Button2 != 0:
 						btnReport = 2
 					}
 				}
-				handled = true
 			} else if motion {
 				tv.state.Lock()
 				motionMode := tv.state.Mode(terminal.ModeMouseMotion | terminal.ModeMouseMany)
 				manyMode := tv.state.Mode(terminal.ModeMouseMany)
 				tv.state.Unlock()
 
-				if buttons != tcell.ButtonNone {
-					if motionMode {
-						if buttons&tcell.Button1 != 0 {
-							btnReport = 0
-						} else if buttons&tcell.Button3 != 0 {
-							btnReport = 1
-						} else if buttons&tcell.Button2 != 0 {
-							btnReport = 2
-						}
-						isMotion = true
-						handled = true
+				if buttons != tcell.ButtonNone && motionMode {
+					switch {
+					case buttons&tcell.Button1 != 0:
+						btnReport = 0
+					case buttons&tcell.Button3 != 0:
+						btnReport = 1
+					case buttons&tcell.Button2 != 0:
+						btnReport = 2
 					}
+					isMotion, handled = true, true
 				} else if manyMode {
-					btnReport = 3
-					isMotion = true
-					handled = true
+					btnReport, isMotion, handled = 3, true, true
 				}
 			}
 
-			if handled && sgrMode {
-				if rx >= 0 && rx < tv.w && ry >= 0 && ry < tv.h {
-					esc := tv.encodeSGR(btnReport, rx, ry, isMotion, isRelease, mod)
-					tv.vt.File().Write([]byte(esc))
-				}
+			if handled && sgrMode && rx >= 0 && rx < tv.w && ry >= 0 && ry < tv.h {
+				esc := tv.encodeSGR(btnReport, rx, ry, isMotion, isRelease, mod)
+				tv.vt.File().Write([]byte(esc))
 			}
 
 			if buttons&tcell.Button1 != 0 {
@@ -574,23 +535,18 @@ func (tv *TermView) HandleEvent(ev tcell.Event) bool {
 			if buttons&tcell.Button1 != 0 {
 				if !tv.selecting {
 					tv.selecting = true
-					tv.selection.Active = true
-					tv.selection.Start = Cursor{rx, realRY}
+					tv.selection = Selection{Start: Cursor{rx, realRY}, Active: true}
 				}
 				tv.selection.End = Cursor{rx, realRY}
-			} else {
-				if tv.selecting {
-					tv.selecting = false
-					if tv.selection.Start == tv.selection.End {
-						tv.selection.Active = false
-					}
+			} else if tv.selecting {
+				tv.selecting = false
+				if tv.selection.Start == tv.selection.End {
+					tv.selection.Active = false
 				}
 			}
 		}
 
-		tv.lastMX, tv.lastMY = mx, my
-		tv.lastButtons = buttons
-		return false
+		tv.lastMX, tv.lastMY, tv.lastButtons = mx, my, buttons
 	}
 	return false
 }

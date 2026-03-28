@@ -53,18 +53,18 @@ type ScrollState struct {
 	AutoScroll bool
 }
 
+// BaseView provides common fields and methods for all views.
+type BaseView struct {
+	x, y, w, h int
+	scroll     ScrollState
+}
+
+func (v *BaseView) GetPos() (x, y, w, h int) { return v.x, v.y, v.w, v.h }
+func (v *BaseView) SetPos(x, y, w, h int)    { v.x, v.y, v.w, v.h = x, y, w, h }
+
 func (s *ScrollState) Scroll(n int, total, visible int) {
-	s.Pos += n
-	limit := total - visible
-	if limit < 0 {
-		limit = 0
-	}
-	if s.Pos > limit {
-		s.Pos = limit
-	}
-	if s.Pos < 0 {
-		s.Pos = 0
-	}
+	limit := max(0, total-visible)
+	s.Pos = max(0, min(limit, s.Pos+n))
 
 	if s.Pos >= limit {
 		s.AutoScroll = true
@@ -81,17 +81,7 @@ func (s *ScrollState) Sync(cursorY int, total, visible int) {
 			s.Pos = cursorY - visible + 1
 		}
 	}
-
-	limit := total - visible
-	if limit < 0 {
-		limit = 0
-	}
-	if s.Pos > limit {
-		s.Pos = limit
-	}
-	if s.Pos < 0 {
-		s.Pos = 0
-	}
+	s.Pos = max(0, min(max(0, total-visible), s.Pos))
 }
 
 // LineProvider is an interface for types that can provide lines for searching.

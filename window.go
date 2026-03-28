@@ -31,10 +31,9 @@ type View interface {
 }
 
 type TextView struct {
+	BaseView
 	buffer      *Buffer
-	x, y, w, h  int
 	style       tcell.Style
-	scroll      ScrollState
 	drag        bool
 	singleLine  bool
 	scrollable  bool
@@ -52,8 +51,10 @@ func (tv *TextView) IsRaw() bool {
 
 func NewTextView(text string, x, y, w, h int, style tcell.Style, singleLine, scrollable bool) *TextView {
 	tv := &TextView{
-		buffer: NewBuffer(text),
-		x:      x, y: y, w: w, h: h,
+		BaseView: BaseView{
+			x: x, y: y, w: w, h: h,
+		},
+		buffer:      NewBuffer(text),
 		style:       style,
 		singleLine:  singleLine,
 		scrollable:  scrollable,
@@ -109,13 +110,9 @@ func (tv *TextView) UpdateLayout() {
 		tv.layout = append(tv.layout, VisualLine{i, start, len(line)})
 	}
 
-	if len(tv.layout) > 0 && ratio > 0 {
-		tv.scroll.Pos = int(ratio * float64(len(tv.layout)))
-		if tv.scroll.Pos >= len(tv.layout) {
-			tv.scroll.Pos = len(tv.layout) - 1
-		}
-	}
-	if tv.scroll.Pos < 0 {
+	if len(tv.layout) > 0 {
+		tv.scroll.Pos = max(0, min(len(tv.layout)-1, int(ratio*float64(len(tv.layout)))))
+	} else {
 		tv.scroll.Pos = 0
 	}
 }
@@ -274,14 +271,6 @@ func (tv *TextView) Resize(x, y, w, h int) {
 	tv.UpdateLayout()
 }
 
-func (tv *TextView) GetPos() (x, y, w, h int) {
-	return tv.x, tv.y, tv.w, tv.h
-}
-
-func (tv *TextView) SetPos(x, y, w, h int) {
-	tv.x, tv.y, tv.w, tv.h = x, y, w, h
-}
-
 func (tv *TextView) GetBuffer() *Buffer {
 	return tv.buffer
 }
@@ -312,9 +301,8 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 				tv.typingStart = nil
 			} else if tv.buffer.selection.Active {
 				start, _ := tv.buffer.orderedSelection()
-				tv.buffer.cursor = start
+				tv.buffer.cursor, tv.typingStart = start, nil
 				tv.buffer.ClearSelection()
-				tv.typingStart = nil
 			}
 		case tcell.KeyCtrlZ:
 			tv.typingStart = nil
@@ -351,10 +339,7 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 		case tcell.KeyPgUp:
 			tv.typingStart = nil
 			tv.buffer.ClearSelection()
-			tv.scroll.Pos -= tv.h
-			if tv.scroll.Pos < 0 {
-				tv.scroll.Pos = 0
-			}
+			tv.scroll.Pos = max(0, tv.scroll.Pos-tv.h)
 			_, vrow := tv.bufferToVisual(tv.buffer.cursor.x, tv.buffer.cursor.y)
 			if vrow >= tv.scroll.Pos+tv.h {
 				bx, by := tv.visualToBuffer(0, tv.scroll.Pos)
@@ -363,13 +348,8 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 		case tcell.KeyPgDn:
 			tv.typingStart = nil
 			tv.buffer.ClearSelection()
-			tv.scroll.Pos += tv.h
-			if tv.scroll.Pos >= len(tv.layout) {
-				tv.scroll.Pos = len(tv.layout) - 1
-			}
-			if tv.scroll.Pos < 0 {
-				tv.scroll.Pos = 0
-			}
+			tv.scroll.Pos = min(len(tv.layout)-1, tv.scroll.Pos+tv.h)
+			tv.scroll.Pos = max(0, tv.scroll.Pos)
 			_, vrow := tv.bufferToVisual(tv.buffer.cursor.x, tv.buffer.cursor.y)
 			if vrow < tv.scroll.Pos {
 				bx, by := tv.visualToBuffer(0, tv.scroll.Pos)
@@ -440,15 +420,11 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 		}
 		if tv.scrollable {
 			if buttons&tcell.WheelUp != 0 {
-				if tv.scroll.Pos > 0 {
-					tv.scroll.Pos--
-				}
+				tv.scroll.Pos = max(0, tv.scroll.Pos-1)
 				return false
 			}
 			if buttons&tcell.WheelDown != 0 {
-				if tv.scroll.Pos < len(tv.layout)-1 {
-					tv.scroll.Pos++
-				}
+				tv.scroll.Pos = min(max(0, len(tv.layout)-1), tv.scroll.Pos+1)
 				return false
 			}
 		}
@@ -460,8 +436,7 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 			}
 			if buttons == tcell.Button1 {
 				if !tv.drag {
-					tv.drag = true
-					tv.buffer.cursor = Cursor{bx, by}
+					tv.drag, tv.buffer.cursor = true, Cursor{bx, by}
 					tv.buffer.SetSelection(tv.buffer.cursor, tv.buffer.cursor)
 				} else {
 					tv.buffer.cursor = Cursor{bx, by}
@@ -472,10 +447,8 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 			}
 		} else {
 			tv.drag = false
-			if tv.buffer.selection.Active {
-				if tv.buffer.selection.Start == tv.buffer.selection.End {
-					tv.buffer.ClearSelection()
-				}
+			if tv.buffer.selection.Active && tv.buffer.selection.Start == tv.buffer.selection.End {
+				tv.buffer.ClearSelection()
 			}
 		}
 	}
@@ -677,25 +650,13 @@ func (win *Window) Draw(s tcell.Screen) {
 	// Draw scrollbar/handle for the body
 	if win.body != nil {
 		scroll, total, visible := win.body.GetScroll()
-		if visible > 0 {
+		if visible > 0 && total > visible {
 			thumbStyle := tcell.StyleDefault.Background(win.editor.theme.ScrollThumb)
+			thumbHeight := max(1, (visible*visible)/total)
+			thumbStart := min(visible-thumbHeight, (scroll*visible)/total)
 
-			thumbStart, thumbHeight := -1, -1
-			if total > visible {
-				thumbHeight = (visible * visible) / total
-				if thumbHeight < 1 {
-					thumbHeight = 1
-				}
-				thumbStart = (scroll * visible) / total
-				if thumbStart+thumbHeight > visible {
-					thumbStart = visible - thumbHeight
-				}
-			}
-
-			for i := 0; i < visible; i++ {
-				if i >= thumbStart && i < thumbStart+thumbHeight {
-					s.SetContent(win.x, win.y+win.tagHeight()+i, ' ', nil, thumbStyle)
-				}
+			for i := 0; i < thumbHeight; i++ {
+				s.SetContent(win.x, win.y+win.tagHeight()+thumbStart+i, ' ', nil, thumbStyle)
 			}
 		}
 	}
@@ -738,8 +699,7 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 				scroll, total, visible := win.body.GetScroll()
 				if visible > 0 && total > 0 {
 					yClick := my - (win.y + th)
-					// Use ceiling division (a + b - 1) / b to ensure the thumb aligns with the click
-					newScroll := (yClick*total + visible - 1) / visible
+					newScroll := (yClick * total) / visible
 					win.body.Scroll(newScroll - scroll)
 				}
 			}
