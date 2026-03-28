@@ -6,7 +6,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"unicode"
 )
 
 var (
@@ -31,22 +30,8 @@ func (b *Buffer) GetWordAt(x, y int) string {
 		return ""
 	}
 	line := b.lines[y]
-	if x < 0 || x >= len(line) {
-		return ""
-	}
-
-	start, end := x, x
-	for start > 0 && IsWordChar(line[start-1]) {
-		start--
-	}
-	for end < len(line) && IsWordChar(line[end]) {
-		end++
-	}
+	start, end := GetWordBoundaries(x, len(line), func(i int) rune { return line[i] })
 	return string(line[start:end])
-}
-
-func IsWordChar(r rune) bool {
-	return r != 0 && !unicode.IsSpace(r)
 }
 
 func (e *Editor) resolvePathWithContext(win *Window, path string) string {

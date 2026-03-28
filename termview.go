@@ -235,34 +235,23 @@ func (tv *TermView) Resize(x, y, w, h int) {
 
 func (tv *TermView) SyncScroll() {
 	tv.state.Lock()
-	defer tv.state.Unlock()
-
-	if tv.selecting {
-		return
-	}
-
-	if tv.state.Mode(terminal.ModeAltScreen) {
-		tv.scroll.Pos = 0
+	if tv.selecting || tv.state.Mode(terminal.ModeAltScreen) {
+		if tv.state.Mode(terminal.ModeAltScreen) {
+			tv.scroll.Pos = 0
+		}
+		tv.state.Unlock()
 		return
 	}
 
 	eh := tv.getContentHeight()
 	_, cy := tv.state.Cursor()
+	tv.state.Unlock()
 	tv.scroll.Sync(cy, eh, tv.h)
 }
 
 func (tv *TermView) Scroll(n int) {
-	tv.state.Lock()
-	isAlt := tv.state.Mode(terminal.ModeAltScreen)
-	eh := tv.h
-	if !isAlt {
-		eh = tv.getContentHeight()
-	}
-	tv.state.Unlock()
-
-	if !isAlt {
-		tv.scroll.Scroll(n, eh, tv.h)
-	}
+	_, total, visible := tv.GetScroll()
+	tv.scroll.Scroll(n, total, visible)
 }
 
 func (tv *TermView) GetScroll() (scroll, total, visible int) {
@@ -285,6 +274,11 @@ func (tv *TermView) LineCount() int {
 func (tv *TermView) GetLine(y int) string {
 	tv.state.Lock()
 	defer tv.state.Unlock()
+	return tv.getLine(y)
+}
+
+func (tv *TermView) getLine(y int) string {
+	// Must be called with lock
 	limit := max(maxHistory, tv.h)
 	if y < 0 || y >= limit {
 		return ""
@@ -312,9 +306,8 @@ func (tv *TermView) Search(word string) int {
 
 func (tv *TermView) ShowLineAt(lineNum int, vrow int) {
 	tv.scroll.Pos = lineNum - vrow
-	if tv.scroll.Pos < 0 {
-		tv.scroll.Pos = 0
-	}
+	_, total, visible := tv.GetScroll()
+	tv.scroll.Clamp(total, visible)
 }
 
 func (tv *TermView) GetClickWord(mx, my int) string {
@@ -325,34 +318,18 @@ func (tv *TermView) GetClickWord(mx, my int) string {
 	realRY := ry + tv.scroll.Pos
 
 	if tv.selection.Contains(rx, realRY, true) {
-		return tv.getSelectedText()
+		return tv.GetSelectedText()
 	}
 
-	limit := maxHistory
-	if tv.h > limit {
-		limit = tv.h
-	}
-
+	limit := max(maxHistory, tv.h)
 	if realRY < 0 || realRY >= limit {
 		return ""
 	}
 
-	// Find word boundaries
-	start, end := rx, rx
-	for start > 0 {
-		c, _, _ := tv.state.Cell(start-1, realRY)
-		if !IsWordChar(c) {
-			break
-		}
-		start--
-	}
-	for end < tv.w {
-		c, _, _ := tv.state.Cell(end, realRY)
-		if !IsWordChar(c) {
-			break
-		}
-		end++
-	}
+	start, end := GetWordBoundaries(rx, tv.w, func(x int) rune {
+		c, _, _ := tv.state.Cell(x, realRY)
+		return c
+	})
 
 	var sb strings.Builder
 	for x := start; x < end; x++ {
@@ -368,54 +345,17 @@ func (tv *TermView) GetBuffer() *Buffer {
 	return nil
 }
 
+type termLineProvider struct {
+	tv *TermView
+}
+
+func (p termLineProvider) LineCount() int       { return p.tv.getContentHeight() }
+func (p termLineProvider) GetLine(y int) string { return p.tv.getLine(y) }
+
 func (tv *TermView) GetSelectedText() string {
 	tv.state.Lock()
 	defer tv.state.Unlock()
-	return tv.getSelectedText()
-}
-
-func (tv *TermView) getSelectedText() string {
-	// Must be called with lock
-	if !tv.selection.Active {
-		return ""
-	}
-
-	start, end := tv.selection.Ordered()
-
-	limit := maxHistory
-	if tv.h > limit {
-		limit = tv.h
-	}
-
-	var sb strings.Builder
-	for y := start.y; y <= end.y; y++ {
-		if y >= limit {
-			break
-		}
-		x1, x2 := 0, tv.w-1
-		if y == start.y {
-			x1 = start.x
-		}
-		if y == end.y {
-			x2 = end.x
-		}
-
-		line := ""
-		for x := x1; x <= x2; x++ {
-			if x < 0 || x >= tv.w || y < 0 || y >= limit {
-				continue
-			}
-			char, _, _ := tv.state.Cell(x, y)
-			if char != 0 {
-				line += string(char)
-			}
-		}
-		sb.WriteString(strings.TrimRight(line, " "))
-		if y < end.y {
-			sb.WriteRune('\n')
-		}
-	}
-	return sb.String()
+	return GetTextInSelection(termLineProvider{tv}, tv.selection, true)
 }
 
 func (tv *TermView) HandleEvent(ev tcell.Event) bool {

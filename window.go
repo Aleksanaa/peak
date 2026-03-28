@@ -123,8 +123,8 @@ func (tv *TextView) GetScroll() (scroll, total, visible int) {
 }
 
 func (tv *TextView) Scroll(n int) {
-	tv.UpdateLayout()
-	tv.scroll.Scroll(n, len(tv.layout), tv.h)
+	_, total, visible := tv.GetScroll()
+	tv.scroll.Scroll(n, total, visible)
 }
 
 func (tv *TextView) GotoLineCol(lineNum, colNum int) {
@@ -494,12 +494,7 @@ func (tv *TextView) ShowLineAt(lineNum int, vrow int) {
 	}
 	if vidx != -1 {
 		tv.scroll.Pos = vidx - vrow
-		if tv.scroll.Pos < 0 {
-			tv.scroll.Pos = 0
-		}
-		if len(tv.layout) > 0 && tv.scroll.Pos >= len(tv.layout) {
-			tv.scroll.Pos = len(tv.layout) - 1
-		}
+		tv.scroll.Clamp(len(tv.layout), tv.h)
 	}
 	tv.SyncScroll()
 }

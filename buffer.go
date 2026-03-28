@@ -84,33 +84,23 @@ func (b *Buffer) SetSelection(start, end Cursor) {
 	b.selection.Active = true
 }
 
-func (b *Buffer) GetSelectedText() string {
-	if !b.selection.Active {
+func (b *Buffer) LineCount() int {
+	return len(b.lines)
+}
+
+func (b *Buffer) GetLine(y int) string {
+	if y < 0 || y >= len(b.lines) {
 		return ""
 	}
-	start, end := b.selection.Ordered()
-	return b.GetTextInRange(start, end)
+	return string(b.lines[y])
+}
+
+func (b *Buffer) GetSelectedText() string {
+	return GetTextInSelection(b, b.selection, false)
 }
 
 func (b *Buffer) GetTextInRange(start, end Cursor) string {
-	var sb strings.Builder
-	for y := start.y; y <= end.y; y++ {
-		line := b.lines[y]
-		x1, x2 := 0, len(line)
-		if y == start.y {
-			x1 = start.x
-		}
-		if y == end.y {
-			x2 = end.x
-		}
-		if x1 < x2 {
-			sb.WriteString(string(line[x1:x2]))
-		}
-		if y < end.y {
-			sb.WriteRune('\n')
-		}
-	}
-	return sb.String()
+	return GetTextInSelection(b, Selection{Start: start, End: end, Active: true}, false)
 }
 
 func (b *Buffer) IsSelected(x, y int) bool {
@@ -408,10 +398,10 @@ func (b *Buffer) MoveWordLeft() {
 		return
 	}
 	line, x := b.lines[b.cursor.y], b.cursor.x
-	for x > 0 && line[x-1] == ' ' {
+	for x > 0 && !IsWordChar(line[x-1]) {
 		x--
 	}
-	for x > 0 && line[x-1] != ' ' {
+	for x > 0 && IsWordChar(line[x-1]) {
 		x--
 	}
 	b.cursor.x = x
@@ -423,10 +413,10 @@ func (b *Buffer) MoveWordRight() {
 		b.MoveRight()
 		return
 	}
-	for x < len(line) && line[x] != ' ' {
+	for x < len(line) && IsWordChar(line[x]) {
 		x++
 	}
-	for x < len(line) && line[x] == ' ' {
+	for x < len(line) && !IsWordChar(line[x]) {
 		x++
 	}
 	b.cursor.x = x
