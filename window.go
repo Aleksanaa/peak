@@ -110,11 +110,11 @@ func (tv *TextView) UpdateLayout() {
 		tv.layout = append(tv.layout, VisualLine{i, start, len(line)})
 	}
 
-	if len(tv.layout) > 0 {
-		tv.scroll.Pos = max(0, min(len(tv.layout)-1, int(ratio*float64(len(tv.layout)))))
-	} else {
-		tv.scroll.Pos = 0
+	limit := len(tv.layout)
+	if len(tv.layout) <= tv.h {
+		limit = 0
 	}
+	tv.scroll.Pos = max(0, min(limit, int(ratio*float64(len(tv.layout)))))
 }
 
 func (tv *TextView) GetScroll() (scroll, total, visible int) {

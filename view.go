@@ -63,10 +63,13 @@ func (v *BaseView) GetPos() (x, y, w, h int) { return v.x, v.y, v.w, v.h }
 func (v *BaseView) SetPos(x, y, w, h int)    { v.x, v.y, v.w, v.h = x, y, w, h }
 
 func (s *ScrollState) Scroll(n int, total, visible int) {
-	limit := max(0, total-visible)
+	limit := total
+	if total <= visible {
+		limit = 0
+	}
 	s.Pos = max(0, min(limit, s.Pos+n))
 
-	if s.Pos >= limit {
+	if s.Pos >= max(0, total-visible) {
 		s.AutoScroll = true
 	} else if n < 0 {
 		s.AutoScroll = false
@@ -74,6 +77,10 @@ func (s *ScrollState) Scroll(n int, total, visible int) {
 }
 
 func (s *ScrollState) Sync(cursorY int, total, visible int) {
+	limit := total
+	if total <= visible {
+		limit = 0
+	}
 	if cursorY < s.Pos {
 		s.Pos = cursorY
 	} else if cursorY >= s.Pos+visible {
@@ -81,7 +88,7 @@ func (s *ScrollState) Sync(cursorY int, total, visible int) {
 			s.Pos = cursorY - visible + 1
 		}
 	}
-	s.Pos = max(0, min(max(0, total-visible), s.Pos))
+	s.Pos = max(0, min(limit, s.Pos))
 }
 
 // LineProvider is an interface for types that can provide lines for searching.
