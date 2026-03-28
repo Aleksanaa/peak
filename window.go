@@ -625,6 +625,11 @@ func (win *Window) layout() {
 func (win *Window) Draw(s tcell.Screen) {
 	win.layout()
 
+	win.tag.style = tcell.StyleDefault.Background(win.editor.theme.TagBG).Foreground(win.editor.theme.TagFG)
+	if win.editor.active == win {
+		win.tag.style = win.tag.style.Underline(true)
+	}
+
 	handleColor := win.editor.theme.Handle
 	if fn := win.GetFilename(); isSpecial(fn) {
 		handleColor = win.editor.theme.HandleError
