@@ -32,17 +32,18 @@ type View interface {
 
 type TextView struct {
 	BaseView
-	buffer      *Buffer
-	style       tcell.Style
-	drag        bool
-	singleLine  bool
-	scrollable  bool
-	layout      []VisualLine
-	lastWidth   int
-	lastVersion int
-	theme       *Theme
-	tabWidth    int
-	typingStart *Cursor
+	buffer        *Buffer
+	style         tcell.Style
+	drag          bool
+	singleLine    bool
+	scrollable    bool
+	underlineLast bool
+	layout        []VisualLine
+	lastWidth     int
+	lastVersion   int
+	theme         *Theme
+	tabWidth      int
+	typingStart   *Cursor
 }
 
 func (tv *TextView) IsRaw() bool {
@@ -200,8 +201,12 @@ func (tv *TextView) Draw(s tcell.Screen) {
 	for lidx := tv.scroll.Pos; lidx < len(tv.layout) && vrow < tv.h; lidx++ {
 		vl, vcol := tv.layout[lidx], 0
 		line := tv.buffer.lines[vl.BufferLine]
+		lineStyle := tv.style
+		if tv.underlineLast && lidx == len(tv.layout)-1 {
+			lineStyle = lineStyle.Underline(true)
+		}
 		for idx := vl.Start; idx < vl.End && vcol < tv.w; idx++ {
-			r, style := line[idx], tv.style
+			r, style := line[idx], lineStyle
 			if tv.buffer.IsSelected(idx, vl.BufferLine) {
 				style = selStyle
 			}
@@ -221,7 +226,7 @@ func (tv *TextView) Draw(s tcell.Screen) {
 			}
 		}
 		for ; vcol < tv.w; vcol++ {
-			style := tv.style
+			style := lineStyle
 			if tv.buffer.IsSelected(vl.End, vl.BufferLine) {
 				style = selStyle
 			}
@@ -625,10 +630,7 @@ func (win *Window) layout() {
 func (win *Window) Draw(s tcell.Screen) {
 	win.layout()
 
-	win.tag.style = tcell.StyleDefault.Background(win.editor.theme.TagBG).Foreground(win.editor.theme.TagFG)
-	if win.editor.active == win {
-		win.tag.style = win.tag.style.Underline(true)
-	}
+	win.tag.underlineLast = win.editor.active == win
 
 	handleColor := win.editor.theme.Handle
 	if fn := win.GetFilename(); isSpecial(fn) {
