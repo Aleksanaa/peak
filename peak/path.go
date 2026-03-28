@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"al.essio.dev/pkg/shellescape"
-	"github.com/spf13/afero"
+	"github.com/aleksana/peak/internal/vfs/afero"
 )
 
 func getVFS() afero.Fs {

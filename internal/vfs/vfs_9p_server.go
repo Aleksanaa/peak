@@ -12,7 +12,7 @@ import (
 
 	"github.com/knusbaum/go9p"
 	"github.com/knusbaum/go9p/proto"
-	"github.com/spf13/afero"
+	"github.com/aleksana/peak/internal/vfs/afero"
 )
 
 // Qid type constants

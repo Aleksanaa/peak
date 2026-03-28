@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/aleksana/peak/internal/vfs"
-	"github.com/spf13/afero"
+	"github.com/aleksana/peak/internal/vfs/afero"
 )
 
 //go:embed doc
@@ -188,6 +188,8 @@ func (f *indexFile) Seek(offset int64, whence int) (int64, error) {
 }
 
 func (p *NineP) Mount(socket, path string) error {
+	socket = resolvePath(socket)
+	path = resolvePath(path)
 	clientFs, err := vfs.NewNinePClientFs("unix", socket)
 	if err != nil {
 		return err
@@ -197,10 +199,12 @@ func (p *NineP) Mount(socket, path string) error {
 }
 
 func (p *NineP) Umount(path string) {
-	p.vfs.Umount(path)
+	p.vfs.Umount(resolvePath(path))
 }
 
 func (p *NineP) Bind(src, dest string) error {
+	src = resolvePath(src)
+	dest = resolvePath(dest)
 	// For local bind, we use NewBasePathFs on top of OsFs
 	p.vfs.Mount(dest, afero.NewBasePathFs(afero.NewOsFs(), src))
 	return nil

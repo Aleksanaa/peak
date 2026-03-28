@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/spf13/afero"
+	"github.com/aleksana/peak/internal/vfs/afero"
 )
 
 // CompositeFs merges multiple afero.Fs into a single view.

@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/pkg/sftp"
-	"github.com/spf13/afero"
+	"github.com/aleksana/peak/internal/vfs/afero"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 )
