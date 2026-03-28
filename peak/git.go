@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aleksana/peak/gitfs"
+	"github.com/aleksana/peak/peak/gitfs"
 	"github.com/spf13/afero"
 )
 

@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/aleksana/peak/term"
+	"github.com/aleksana/peak/peak/term"
 	"github.com/atotto/clipboard"
 	"github.com/creack/pty"
 	"github.com/gdamore/tcell/v2"

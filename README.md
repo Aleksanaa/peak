@@ -12,6 +12,7 @@
 ## How
 
 ```bash
+cd peak
 CGO_ENABLED=0 go build .
 ./peak
 ```

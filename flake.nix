@@ -27,6 +27,8 @@
 
                 src = lib.cleanSource ./.;
 
+                subPackages = [ "peak" ];
+
                 vendorHash = "sha256-idMk2ZtUb7lMO/1bo59OJk2oQG03PyB5egYoSaphLzw=";
 
                 env.CGO_ENABLED = 0;

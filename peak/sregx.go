@@ -10,7 +10,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/aleksana/peak/regexp"
+	"github.com/aleksana/peak/peak/regexp"
 	"github.com/gdamore/tcell/v2"
 )
 
