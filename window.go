@@ -190,6 +190,7 @@ func (tv *TextView) Draw(s tcell.Screen) {
 	if !tv.scrollable {
 		tv.scroll.Pos = 0
 	}
+
 	selStyle := tcell.StyleDefault.Background(tcell.ColorSilver).Foreground(tcell.ColorBlack)
 	if tv.theme != nil {
 		selStyle = tcell.StyleDefault.Background(tv.theme.SelectionBG).Foreground(tv.theme.SelectionFG)
@@ -197,31 +198,26 @@ func (tv *TextView) Draw(s tcell.Screen) {
 
 	vrow := 0
 	for lidx := tv.scroll.Pos; lidx < len(tv.layout) && vrow < tv.h; lidx++ {
-		vl := tv.layout[lidx]
+		vl, vcol := tv.layout[lidx], 0
 		line := tv.buffer.lines[vl.BufferLine]
-		vcol := 0
 		for idx := vl.Start; idx < vl.End && vcol < tv.w; idx++ {
 			r, style := line[idx], tv.style
 			if tv.buffer.IsSelected(idx, vl.BufferLine) {
 				style = selStyle
 			}
+
 			width := tv.runeWidth(r, vcol)
+			char := r
 			if r == '\t' {
-				for k := 0; k < width && vcol < tv.w; k++ {
-					s.SetContent(tv.x+vcol, tv.y+vrow, ' ', nil, style)
-					vcol++
-				}
-			} else {
-				if vcol+width <= tv.w {
-					s.SetContent(tv.x+vcol, tv.y+vrow, r, nil, style)
-					vcol += width
-				} else {
-					// Character doesn't fit, fill with spaces
-					for vcol < tv.w {
-						s.SetContent(tv.x+vcol, tv.y+vrow, ' ', nil, style)
-						vcol++
-					}
-				}
+				char = ' '
+			}
+
+			for k := 0; k < width && vcol < tv.w; k++ {
+				s.SetContent(tv.x+vcol, tv.y+vrow, char, nil, style)
+				vcol++
+				if r != '\t' {
+					char = ' '
+				} // Only draw character once if it's wide
 			}
 		}
 		for ; vcol < tv.w; vcol++ {
@@ -267,6 +263,9 @@ func (tv *TextView) ShowCursor(s tcell.Screen) {
 }
 
 func (tv *TextView) Resize(x, y, w, h int) {
+	if tv.x == x && tv.y == y && tv.w == w && tv.h == h {
+		return
+	}
 	tv.x, tv.y, tv.w, tv.h = x, y, w, h
 	tv.UpdateLayout()
 }
@@ -623,20 +622,16 @@ func (win *Window) tagHeight() int {
 
 func (win *Window) layout() {
 	th := win.tagHeight()
-	win.tag.h = th
-	bh := win.h - th
-	if bh < 0 {
-		bh = 0
-	}
-	win.body.SetPos(win.x+1, win.y+th, win.w-1, bh)
+	win.tag.Resize(win.x+1, win.y, win.w-1, th)
+	bh := max(0, win.h-th)
+	win.body.Resize(win.x+1, win.y+th, win.w-1, bh)
 }
 
 func (win *Window) Draw(s tcell.Screen) {
 	win.layout()
 
 	handleColor := win.editor.theme.Handle
-	fn := win.GetFilename()
-	if isSpecial(fn) {
+	if fn := win.GetFilename(); isSpecial(fn) {
 		handleColor = win.editor.theme.HandleError
 	} else if win.IsDirty() {
 		handleColor = win.editor.theme.HandleDirty
@@ -667,75 +662,60 @@ func (win *Window) Draw(s tcell.Screen) {
 
 func (win *Window) Resize(x, y, w, h int) {
 	win.x, win.y, win.w, win.h = x, y, w, h
-	win.tag.Resize(x+1, y, w-1, win.tagHeight())
 	win.layout()
-	_, by, bw, bh := win.body.GetPos()
-	win.body.Resize(x+1, by, bw, bh)
 }
 
 func (win *Window) HandleEvent(ev tcell.Event) bool {
-	if me, ok := ev.(*tcell.EventMouse); ok {
-		mx, my := me.Position()
-		win.tag.UpdateLayout()
-		th := win.tagHeight()
+	me, ok := ev.(*tcell.EventMouse)
+	if !ok {
+		return false
+	}
 
-		if mx == win.x && my >= win.y+th {
-			// Scrolling speed based on distance from top: closer = slower
-			amount := (my - (win.y + th)) + 1
-			if me.Buttons()&tcell.Button1 != 0 {
-				if win.editor.scrollWin == nil {
-					win.body.Scroll(-amount)
-					win.editor.scrollStartTime = time.Now()
-				}
-				win.editor.scrollWin, win.editor.scrollAmount, win.editor.scrollDir = win, amount, -1
-			} else if me.Buttons()&tcell.Button2 != 0 {
-				if win.editor.scrollWin == nil {
-					win.body.Scroll(amount)
-					win.editor.scrollStartTime = time.Now()
-				}
-				win.editor.scrollWin, win.editor.scrollAmount, win.editor.scrollDir = win, amount, 1
-			} else if me.Buttons()&tcell.Button3 != 0 {
-				// Middle-click: Align top of scrollbar (thumb) with click position
-				scroll, total, visible := win.body.GetScroll()
-				if visible > 0 && total > 0 {
-					yClick := my - (win.y + th)
-					newScroll := (yClick * total) / visible
-					win.body.Scroll(newScroll - scroll)
-				}
-			}
-			return false
-		}
+	mx, my := me.Position()
+	win.tag.UpdateLayout()
+	th := win.tagHeight()
 
-		// If click was on the vertical separator (handle area), stop here
-		if mx == win.x {
-			return false
-		}
-
-		var target View
+	if mx == win.x {
 		if my < win.y+th {
-			target = win.tag
-		} else {
-			target = win.body
+			return false
 		}
-
-		target.HandleEvent(ev)
-		if me.Buttons() == tcell.Button3 || me.Buttons() == tcell.Button2 {
-			if !target.IsRaw() || me.Modifiers()&tcell.ModCtrl != 0 {
-				word := target.GetClickWord(mx, my)
-				if word != "" {
-					if me.Buttons() == tcell.Button3 { // Middle-click (Execute)
-						if win.onExec != nil {
-							return win.onExec(win.parent, win, word)
-						}
-					} else { // Right-click (Plumb)
-						return win.editor.Plumb(win, word)
-					}
-				}
+		amount := my - (win.y + th) + 1
+		btns := me.Buttons()
+		if btns&tcell.Button1 != 0 {
+			if win.editor.scrollWin == nil {
+				win.body.Scroll(-amount)
+				win.editor.scrollStartTime = time.Now()
+			}
+			win.editor.scrollWin, win.editor.scrollAmount, win.editor.scrollDir = win, amount, -1
+		} else if btns&tcell.Button2 != 0 {
+			if win.editor.scrollWin == nil {
+				win.body.Scroll(amount)
+				win.editor.scrollStartTime = time.Now()
+			}
+			win.editor.scrollWin, win.editor.scrollAmount, win.editor.scrollDir = win, amount, 1
+		} else if btns&tcell.Button3 != 0 {
+			if scroll, total, visible := win.body.GetScroll(); visible > 0 && total > 0 {
+				newScroll := ((my - (win.y + th)) * total) / visible
+				win.body.Scroll(newScroll - scroll)
 			}
 		}
-	} else {
-		// Non-mouse events (keys) go to focused view, which is usually win.body
-		// This is handled in Editor.HandleEvent.
+		return false
+	}
+
+	target := win.body
+	if my < win.y+th {
+		target = win.tag
+	}
+
+	target.HandleEvent(ev)
+	btns := me.Buttons()
+	if btns&(tcell.Button3|tcell.Button2) != 0 && (!target.IsRaw() || me.Modifiers()&tcell.ModCtrl != 0) {
+		if word := target.GetClickWord(mx, my); word != "" {
+			if btns&tcell.Button3 != 0 {
+				return win.onExec != nil && win.onExec(win.parent, win, word)
+			}
+			return win.editor.Plumb(win, word)
+		}
 	}
 	return false
 }

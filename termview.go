@@ -118,16 +118,14 @@ func (tv *TermView) Draw(s tcell.Screen) {
 	defer tv.state.Unlock()
 
 	limit := max(maxHistory, tv.h)
-
 	for y := 0; y < tv.h; y++ {
 		screenY := tv.scroll.Pos + y
-		if screenY >= limit {
-			break
-		}
 		for x := 0; x < tv.w; x++ {
-			char, fg, bg := tv.state.Cell(x, screenY)
-			if char == 0 {
-				continue
+			char, fg, bg := ' ', terminal.DefaultFG, terminal.DefaultBG
+			if screenY >= 0 && screenY < limit {
+				if c, f, b := tv.state.Cell(x, screenY); c != 0 {
+					char, fg, bg = c, f, b
+				}
 			}
 
 			style := tcell.StyleDefault.
@@ -138,7 +136,6 @@ func (tv *TermView) Draw(s tcell.Screen) {
 				style = style.Background(tv.editor.theme.SelectionBG).
 					Foreground(tv.editor.theme.SelectionFG)
 			}
-
 			s.SetContent(tv.x+x, tv.y+y, char, nil, style)
 		}
 	}
@@ -214,6 +211,9 @@ func (tv *TermView) updateContentHeight() {
 }
 
 func (tv *TermView) Resize(x, y, w, h int) {
+	if tv.x == x && tv.y == y && tv.w == w && tv.h == h {
+		return
+	}
 	tv.x, tv.y, tv.w, tv.h = x, y, w, h
 	if tv.vt != nil {
 		// Always keep emulator at maxHistory to avoid losing Primary buffer data
