@@ -5,15 +5,13 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/halfwit/styx"
+	"github.com/aleksana/peak/internal/vfs"
 	"github.com/spf13/afero"
 )
 
@@ -23,24 +21,27 @@ var docFS embed.FS
 // NineP handles the 9P filesystem for Peak.
 type NineP struct {
 	editor *Editor
-	vfs    *CompositeFs
+	vfs    *vfs.CompositeFs
 	index  atomic.Value // holds string
 }
 
 func NewNineP(e *Editor) *NineP {
-	vfs := NewCompositeFs(afero.NewOsFs())
-	p := &NineP{editor: e, vfs: vfs}
+	fs := vfs.NewCompositeFs()
+	p := &NineP{editor: e, vfs: fs}
 	p.index.Store("")
 
+	// Mount the real OS filesystem as the root
+	p.vfs.Mount("/", afero.NewOsFs())
+
 	// Create /peak container
-	vfs.Mount("/peak", &PeakDirectoryFs{Fs: afero.NewMemMapFs(), p: p}, false)
+	p.vfs.Mount("/peak", &PeakDirectoryFs{Fs: afero.NewMemMapFs(), p: p})
 
 	// Mount virtual filesystems
 	docFs := afero.FromIOFS{FS: docFS}
-	vfs.Mount("/peak/doc", afero.NewBasePathFs(docFs, "doc"), false)
-	vfs.Mount("/peak/ssh", NewSftpMountFs(), true)
-	vfs.Mount("/peak/git", NewGitFs(), false)
-	vfs.Mount("/peak/mirage", afero.NewMemMapFs(), true)
+	p.vfs.Mount("/peak/doc", afero.NewBasePathFs(docFs, "doc"))
+	// p.vfs.Mount("/peak/ssh", NewSftpMountFs())
+	// p.vfs.Mount("/peak/git", NewGitFs())
+	p.vfs.Mount("/peak/mirage", afero.NewMemMapFs())
 
 	return p
 }
@@ -91,70 +92,12 @@ func (p *NineP) Listen() {
 	os.MkdirAll(filepath.Dir(sockPath), 0700)
 	os.Remove(sockPath)
 
-	l, err := net.Listen("unix", sockPath)
-	if err != nil {
-		log.Printf("failed to listen on %s: %v", sockPath, err)
-		return
-	}
-
+	srv := vfs.NewNinePSrv(p.vfs)
 	go func() {
-		defer l.Close()
-		handler := New9PHandler(afero.NewBasePathFs(p.vfs, "/peak"))
-		srv := &styx.Server{Handler: handler}
-		if err := srv.Serve(l); err != nil {
+		if err := srv.Serve("unix", sockPath); err != nil {
 			log.Printf("9P server error: %v", err)
 		}
 	}()
-}
-
-func New9PHandler(vfs afero.Fs) styx.Handler {
-	return styx.HandlerFunc(func(s *styx.Session) {
-		for s.Next() {
-			req := s.Request()
-			path := req.Path()
-			switch msg := req.(type) {
-			case styx.Twalk:
-				fi, err := vfs.Stat(path)
-				msg.Rwalk(fi, err)
-			case styx.Topen:
-				flags := os.O_RDWR
-				if msg.Flag&0x10 != 0 {
-					flags |= os.O_TRUNC
-				}
-				f, err := vfs.OpenFile(path, flags, 0)
-				msg.Ropen(f, err)
-			case styx.Tstat:
-				fi, err := vfs.Stat(path)
-				msg.Rstat(fi, err)
-			case styx.Tremove:
-				msg.Rremove(vfs.Remove(path))
-			case styx.Tsync:
-				msg.Rsync(nil)
-			case styx.Ttruncate:
-				f, err := vfs.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0)
-				if err == nil {
-					f.Close()
-				}
-				msg.Rtruncate(err)
-			case styx.Tcreate:
-				// Use O_RDWR by default to ensure file creation works
-				f, err := vfs.OpenFile(filepath.Join(path, msg.Name), os.O_CREATE|os.O_TRUNC|os.O_RDWR, msg.Mode)
-				msg.Rcreate(f, err)
-			case styx.Tchmod:
-				msg.Rchmod(vfs.Chmod(path, msg.Mode))
-			case styx.Tchown:
-				msg.Rchown(nil)
-			case styx.Tutimes:
-				msg.Rutimes(vfs.Chtimes(path, msg.Atime, msg.Mtime))
-			case styx.Trename:
-				newPath := msg.NewPath
-				if !filepath.IsAbs(newPath) && !strings.HasPrefix(newPath, "/") {
-					newPath = filepath.Join(filepath.Dir(msg.OldPath), newPath)
-				}
-				msg.Rrename(vfs.Rename(msg.OldPath, newPath))
-			}
-		}
-	})
 }
 
 type PeakDirectoryFs struct {
@@ -246,12 +189,6 @@ func (f *indexFile) Stat() (os.FileInfo, error) {
 }
 
 func (p *NineP) RunInternal(path, cmd, input string, winid int) (string, error) {
-	fs, rel, _ := p.vfs.getFs(path)
-	if runner, ok := fs.(interface {
-		Run(path, cmd, input string, winid int) (string, error)
-	}); ok {
-		return runner.Run(rel, cmd, input, winid)
-	}
 	return "", fmt.Errorf("%s: virtual path cannot execute external command", path)
 }
 
@@ -269,7 +206,6 @@ func (s *SimpleFileInfo) IsDir() bool        { return s.isDir }
 func (s *SimpleFileInfo) ModTime() time.Time { return s.modTime }
 func (s *SimpleFileInfo) Sys() interface{}   { return nil }
 func (s *SimpleFileInfo) Mode() os.FileMode {
-	// Just some simple modes to make 9pfuse happy
 	mode := s.mode.Perm()
 	if mode == 0 {
 		if s.isDir {
@@ -283,169 +219,6 @@ func (s *SimpleFileInfo) Mode() os.FileMode {
 	}
 	return mode
 }
-
-func NewFileInfo(fi os.FileInfo) *SimpleFileInfo {
-	return &SimpleFileInfo{
-		name:    fi.Name(),
-		isDir:   fi.IsDir(),
-		size:    fi.Size(),
-		modTime: fi.ModTime(),
-		mode:    fi.Mode(),
-	}
-}
-
-func sliceReaddir(offset *int, entries []os.FileInfo, count int) ([]os.FileInfo, error) {
-	if count <= 0 {
-		return entries, nil
-	}
-	if *offset >= len(entries) {
-		return nil, io.EOF
-	}
-	end := *offset + count
-	if end > len(entries) {
-		end = len(entries)
-	}
-	res := entries[*offset:end]
-	*offset = end
-	return res, nil
-}
-
-func convertEntries(raw []os.FileInfo) []os.FileInfo {
-	res := make([]os.FileInfo, 0, len(raw))
-	for _, fi := range raw {
-		if name := fi.Name(); name != "." && name != ".." {
-			res = append(res, NewFileInfo(fi))
-		}
-	}
-	return res
-}
-
-type vfsMount struct {
-	fs         afero.Fs
-	hasVersion bool
-}
-
-type CompositeFs struct {
-	base   afero.Fs
-	mounts sync.Map // string -> *vfsMount
-}
-
-func NewCompositeFs(base afero.Fs) *CompositeFs {
-	return &CompositeFs{base: base}
-}
-
-func (c *CompositeFs) Mount(path string, fs afero.Fs, hasVersion bool) {
-	path = filepath.ToSlash(filepath.Clean(path))
-	if !strings.HasPrefix(path, "/") {
-		path = "/" + path
-	}
-	c.mounts.Store(path, &vfsMount{fs: fs, hasVersion: hasVersion})
-	_ = c.base.MkdirAll(path, 0755)
-}
-
-func (c *CompositeFs) getFs(name string) (afero.Fs, string, bool) {
-	name = filepath.ToSlash(filepath.Clean(name))
-	if !strings.HasPrefix(name, "/") {
-		return c.base, name, false
-	}
-
-	var bestPath string
-	var bestFs *vfsMount
-	c.mounts.Range(func(key, value interface{}) bool {
-		mpath := key.(string)
-		if name == mpath || strings.HasPrefix(name, mpath+"/") {
-			if len(mpath) > len(bestPath) {
-				bestPath, bestFs = mpath, value.(*vfsMount)
-			}
-		}
-		return true
-	})
-
-	if bestFs != nil {
-		rel := strings.TrimPrefix(name, bestPath)
-		if rel == "" || rel == "/" {
-			return bestFs.fs, ".", bestFs.hasVersion
-		}
-		return bestFs.fs, strings.TrimPrefix(rel, "/"), bestFs.hasVersion
-	}
-	return c.base, name, false
-}
-
-func (c *CompositeFs) Open(name string) (afero.File, error) {
-	return c.OpenFile(name, os.O_RDONLY, 0)
-}
-
-func (c *CompositeFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
-	name = filepath.ToSlash(filepath.Clean(name))
-	fs, rel, _ := c.getFs(name)
-	f, err := fs.OpenFile(rel, flag, perm)
-	if err != nil {
-		return nil, err
-	}
-
-	fi, err := f.Stat()
-	if err == nil && fi.IsDir() {
-		var extra []os.FileInfo
-		prefix := name
-		if !strings.HasSuffix(prefix, "/") {
-			prefix += "/"
-		}
-		c.mounts.Range(func(key, value interface{}) bool {
-			mpath := key.(string)
-			if mpath != name && strings.HasPrefix(mpath, prefix) {
-				if relM := strings.TrimPrefix(mpath, prefix); !strings.Contains(relM, "/") && relM != "" {
-					extra = append(extra, &SimpleFileInfo{name: relM, isDir: true})
-				}
-			}
-			return true
-		})
-		if len(extra) > 0 {
-			return &mergedDirFile{File: f, extra: extra}, nil
-		}
-	}
-	return f, nil
-}
-
-func (c *CompositeFs) Stat(name string) (os.FileInfo, error) {
-	fs, rel, _ := c.getFs(name)
-	return fs.Stat(rel)
-}
-
-func (c *CompositeFs) Remove(n string) error               { f, r, _ := c.getFs(n); return f.Remove(r) }
-func (c *CompositeFs) RemoveAll(n string) error            { f, r, _ := c.getFs(n); return f.RemoveAll(r) }
-func (c *CompositeFs) Create(n string) (afero.File, error) { f, r, _ := c.getFs(n); return f.Create(r) }
-func (c *CompositeFs) Mkdir(n string, p os.FileMode) error {
-	f, r, _ := c.getFs(n)
-	return f.Mkdir(r, p)
-}
-func (c *CompositeFs) MkdirAll(n string, p os.FileMode) error {
-	f, r, _ := c.getFs(n)
-	return f.MkdirAll(r, p)
-}
-func (c *CompositeFs) Rename(o, n string) error {
-	f1, r1, _ := c.getFs(o)
-	f2, r2, _ := c.getFs(n)
-	if f1 != f2 {
-		return fmt.Errorf("cross-fs rename not supported")
-	}
-	return f1.Rename(r1, r2)
-}
-func (c *CompositeFs) Chmod(n string, m os.FileMode) error {
-	f, r, _ := c.getFs(n)
-	return f.Chmod(r, m)
-}
-func (c *CompositeFs) Chown(n string, u, g int) error { f, r, _ := c.getFs(n); return f.Chown(r, u, g) }
-func (c *CompositeFs) Chtimes(n string, a, m time.Time) error {
-	f, r, _ := c.getFs(n)
-	return f.Chtimes(r, a, m)
-}
-
-func (c *CompositeFs) HasVersion(name string) bool {
-	_, _, hv := c.getFs(name)
-	return hv
-}
-
-func (c *CompositeFs) Name() string { return "CompositeFs" }
 
 type mergedDirFile struct {
 	afero.File
@@ -488,27 +261,3 @@ func (m *mergedDirFile) Readdir(count int) ([]os.FileInfo, error) {
 	}
 	return res, nil
 }
-
-type memDirFile struct {
-	name    string
-	entries []os.FileInfo
-	offset  int
-}
-
-func (v *memDirFile) Close() error                                   { return nil }
-func (v *memDirFile) Read(p []byte) (n int, err error)               { return 0, io.EOF }
-func (v *memDirFile) ReadAt(p []byte, off int64) (n int, err error)  { return 0, io.EOF }
-func (v *memDirFile) Seek(offset int64, whence int) (int64, error)   { return 0, nil }
-func (v *memDirFile) Write(p []byte) (n int, err error)              { return 0, os.ErrPermission }
-func (v *memDirFile) WriteAt(p []byte, off int64) (n int, err error) { return 0, os.ErrPermission }
-func (v *memDirFile) Name() string                                   { return v.name }
-func (v *memDirFile) Readdir(count int) ([]os.FileInfo, error) {
-	return sliceReaddir(&v.offset, v.entries, count)
-}
-func (v *memDirFile) Readdirnames(n int) ([]string, error) { return nil, nil }
-func (v *memDirFile) Stat() (os.FileInfo, error) {
-	return &SimpleFileInfo{name: v.name, isDir: true}, nil
-}
-func (v *memDirFile) Sync() error                               { return nil }
-func (v *memDirFile) Truncate(size int64) error                 { return os.ErrPermission }
-func (v *memDirFile) WriteString(s string) (ret int, err error) { return 0, os.ErrPermission }

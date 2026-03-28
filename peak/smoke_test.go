@@ -541,7 +541,7 @@ func TestSimpleEdit(t *testing.T) {
 	path := "/peak/mirage/1.txt"
 
 	// Pre-create the directory and file in memory FS so Open succeeds
-	vfs().MkdirAll("/peak/mirage", 0755)
+	getVFS().MkdirAll("/peak/mirage", 0755)
 	writeFile(path, []byte(""))
 
 	for i := 1; i <= 2; i++ {
@@ -740,7 +740,7 @@ func TestSimplePlumb(t *testing.T) {
 	path := "/peak/mirage/2.txt"
 	testString := "DirListing Test Content"
 
-	vfs().MkdirAll("/peak/mirage", 0755)
+	getVFS().MkdirAll("/peak/mirage", 0755)
 	writeFile(path, []byte(""))
 
 	// 1. Open and Write

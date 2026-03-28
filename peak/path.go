@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/afero"
 )
 
-func vfs() afero.Fs {
+func getVFS() afero.Fs {
 	if appEditor != nil && appEditor.ninep != nil {
 		return appEditor.ninep.vfs
 	}
@@ -43,9 +43,6 @@ func hasVersion(path string) bool {
 	if !isPeakPath(path) {
 		return true
 	}
-	if c, ok := vfs().(*CompositeFs); ok {
-		return c.HasVersion(path)
-	}
 	return false
 }
 
@@ -53,7 +50,7 @@ func isDir(path string) bool {
 	if isSpecial(path) {
 		return false
 	}
-	fi, err := vfs().Stat(path)
+	fi, err := getVFS().Stat(path)
 	return err == nil && fi.IsDir()
 }
 
@@ -143,7 +140,7 @@ func getwd() string {
 
 // readFile reads data from a file.
 func readFile(path string) ([]byte, error) {
-	return afero.ReadFile(vfs(), path)
+	return afero.ReadFile(getVFS(), path)
 }
 
 // writeFile writes data to a file.
@@ -151,12 +148,12 @@ func writeFile(path string, data []byte) error {
 	if isSpecial(path) {
 		return os.ErrInvalid
 	}
-	return afero.WriteFile(vfs(), path, data, 0644)
+	return afero.WriteFile(getVFS(), path, data, 0644)
 }
 
 // readFileOrDir returns the content of a file or a listing if it's a directory.
 func readFileOrDir(path string) (string, bool, error) {
-	fi, err := vfs().Stat(path)
+	fi, err := getVFS().Stat(path)
 	if err != nil {
 		return "", false, err
 	}
@@ -165,7 +162,7 @@ func readFileOrDir(path string) (string, bool, error) {
 		return content, true, err
 	}
 
-	f, err := vfs().Open(path)
+	f, err := getVFS().Open(path)
 	if err != nil {
 		return "", false, err
 	}
@@ -223,7 +220,7 @@ func readFileOrDir(path string) (string, bool, error) {
 
 // listDir returns a formatted string listing the contents of a directory.
 func listDir(path string) (string, error) {
-	entries, err := afero.ReadDir(vfs(), path)
+	entries, err := afero.ReadDir(getVFS(), path)
 	if err != nil {
 		return "", err
 	}
