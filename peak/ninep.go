@@ -151,6 +151,9 @@ func (f *indexFile) Sync() error                            { return nil }
 func (f *indexFile) Name() string                           { return f.name }
 func (f *indexFile) Readdir(n int) ([]os.FileInfo, error)   { return nil, nil }
 func (f *indexFile) Readdirnames(n int) ([]string, error)   { return nil, nil }
+func (f *indexFile) Stat() (os.FileInfo, error) {
+	return &SimpleFileInfo{name: f.name, size: int64(len(f.p.getIndex())), mode: 0444}, nil
+}
 
 func (f *indexFile) Read(p []byte) (n int, err error) {
 	content := f.p.getIndex()
@@ -184,8 +187,23 @@ func (f *indexFile) Seek(offset int64, whence int) (int64, error) {
 	return f.offset, nil
 }
 
-func (f *indexFile) Stat() (os.FileInfo, error) {
-	return &SimpleFileInfo{name: f.name, size: int64(len(f.p.getIndex())), mode: 0444}, nil
+func (p *NineP) Mount(socket, path string) error {
+	clientFs, err := vfs.NewNinePClientFs("unix", socket)
+	if err != nil {
+		return err
+	}
+	p.vfs.Mount(path, clientFs)
+	return nil
+}
+
+func (p *NineP) Umount(path string) {
+	p.vfs.Umount(path)
+}
+
+func (p *NineP) Bind(src, dest string) error {
+	// For local bind, we use NewBasePathFs on top of OsFs
+	p.vfs.Mount(dest, afero.NewBasePathFs(afero.NewOsFs(), src))
+	return nil
 }
 
 func (p *NineP) RunInternal(path, cmd, input string, winid int) (string, error) {

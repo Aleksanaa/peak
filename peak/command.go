@@ -77,12 +77,60 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 		e.cmdRedo(win)
 	case "Look":
 		e.cmdLook(win, cmd)
+	case "Mount":
+		e.cmdMount(win, cmd)
+	case "Bind":
+		e.cmdBind(win, cmd)
+	case "Umount":
+		e.cmdUmount(win, cmd)
 	case "Help":
 		e.Open(win, "/peak/doc/README.md")
 	default:
 		e.runExternal(col, win, cmd)
 	}
 	return false
+}
+
+func (e *Editor) cmdMount(win *Window, cmd string) {
+	arg := e.getArg(win, cmd)
+	if arg == "" {
+		return
+	}
+	parts := strings.SplitN(arg, ":", 2)
+	if len(parts) != 2 {
+		e.showError(nil, win, "", "Usage: Mount socket:path")
+		return
+	}
+	socket, path := parts[0], parts[1]
+	err := e.ninep.Mount(socket, path)
+	if err != nil {
+		e.showError(nil, win, "", "Mount failed: "+err.Error())
+	}
+}
+
+func (e *Editor) cmdBind(win *Window, cmd string) {
+	arg := e.getArg(win, cmd)
+	if arg == "" {
+		return
+	}
+	parts := strings.SplitN(arg, ":", 2)
+	if len(parts) != 2 {
+		e.showError(nil, win, "", "Usage: Bind src:dest")
+		return
+	}
+	src, dest := parts[0], parts[1]
+	err := e.ninep.Bind(src, dest)
+	if err != nil {
+		e.showError(nil, win, "", "Bind failed: "+err.Error())
+	}
+}
+
+func (e *Editor) cmdUmount(win *Window, cmd string) {
+	arg := e.getArg(win, cmd)
+	if arg == "" {
+		return
+	}
+	e.ninep.Umount(arg)
 }
 
 func (e *Editor) getArg(win *Window, cmd string) string {

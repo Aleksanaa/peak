@@ -2,6 +2,7 @@ package vfs
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,11 +29,20 @@ func NewCompositeFs() *CompositeFs {
 // Mount attaches an afero.Fs at the given path.
 func (fs *CompositeFs) Mount(path string, mountFs afero.Fs) {
 	cleanPath := filepath.Clean(path)
+	// Ensure the mount point exists in the root memory FS
+	_ = fs.root.MkdirAll(cleanPath, 0755)
+
 	fs.mu.Lock()
 	fs.mounts[cleanPath] = mountFs
 	fs.mu.Unlock()
-	// Ensure the mount point exists in the root
-	fs.root.MkdirAll(cleanPath, 0755)
+}
+
+// Umount detaches an afero.Fs from the given path.
+func (fs *CompositeFs) Umount(path string) {
+	cleanPath := filepath.Clean(path)
+	fs.mu.Lock()
+	delete(fs.mounts, cleanPath)
+	fs.mu.Unlock()
 }
 
 func (fs *CompositeFs) getFs(name string) (afero.Fs, string) {
@@ -146,5 +156,29 @@ type CompositeFile struct {
 }
 
 func (f *CompositeFile) Readdir(count int) ([]os.FileInfo, error) {
-	return f.File.Readdir(count)
+	entries, err := f.File.Readdir(count)
+	if count > 0 || (err != nil && err != io.EOF) {
+		return entries, err
+	}
+
+	// Merge with root FS entries to show mount points and other structure
+	targetFs, _ := f.fs.getFs(f.name)
+	if targetFs == f.fs.root {
+		return entries, err
+	}
+
+	rootEntries, rerr := afero.ReadDir(f.fs.root, f.name)
+	if rerr == nil {
+		seen := make(map[string]bool)
+		for _, e := range entries {
+			seen[e.Name()] = true
+		}
+		for _, e := range rootEntries {
+			if !seen[e.Name()] {
+				entries = append(entries, e)
+				seen[e.Name()] = true
+			}
+		}
+	}
+	return entries, err
 }
