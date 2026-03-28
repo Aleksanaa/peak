@@ -433,6 +433,43 @@ func (tv *TermView) HandleEvent(ev tcell.Event) bool {
 	switch e := ev.(type) {
 	case *tcell.EventKey:
 		tv.scroll.AutoScroll = true
+		mod := e.Modifiers()
+		if mod&(tcell.ModAlt|tcell.ModMeta) != 0 {
+			key, r := e.Key(), e.Rune()
+			isC := key == tcell.KeyCtrlC || (key == tcell.KeyRune && (r == 'c' || r == 'C') && mod&tcell.ModCtrl != 0)
+			isX := key == tcell.KeyCtrlX || (key == tcell.KeyRune && (r == 'x' || r == 'X') && mod&tcell.ModCtrl != 0)
+			isV := key == tcell.KeyCtrlV || (key == tcell.KeyRune && (r == 'v' || r == 'V') && mod&tcell.ModCtrl != 0)
+			isF := key == tcell.KeyCtrlF || (key == tcell.KeyRune && (r == 'f' || r == 'F') && mod&tcell.ModCtrl != 0)
+
+			if isC || isX {
+				tv.Snarf()
+				return false
+			}
+			if isV {
+				tv.Paste()
+				return false
+			}
+			if isF {
+				if tv.GetSelectedText() != "" {
+					tv.editor.Execute(nil, nil, "Look")
+				}
+				return false
+			}
+
+			switch key {
+			case tcell.KeyEsc:
+				tv.state.Lock()
+				tv.selection.Active = false
+				tv.state.Unlock()
+				return false
+			case tcell.KeyPgUp:
+				tv.Scroll(-tv.h)
+				return false
+			case tcell.KeyPgDn:
+				tv.Scroll(tv.h)
+				return false
+			}
+		}
 		if tv.vt != nil && tv.vt.File() != nil {
 			tv.vt.File().Write([]byte(keyToEscSeq(e)))
 		}
@@ -582,6 +619,13 @@ func (tv *TermView) Close() {
 func (tv *TermView) Snarf() {
 	if text := tv.GetSelectedText(); text != "" {
 		go clipboard.WriteAll(text)
+	}
+}
+
+func (tv *TermView) Paste() {
+	text, _ := clipboard.ReadAll()
+	if text != "" && tv.vt != nil && tv.vt.File() != nil {
+		tv.vt.File().Write([]byte(text))
 	}
 }
 
