@@ -25,7 +25,11 @@ func NewNinePClientFs(network, address string) (*NinePClientFs, error) {
 	if err != nil {
 		return nil, err
 	}
-	c, err := client.NewClient(conn, "guest", "")
+	userStr := os.Getenv("USER")
+	if userStr == "" {
+		userStr = "guest"
+	}
+	c, err := client.NewClient(conn, userStr, "")
 	if err != nil {
 		return nil, err
 	}
