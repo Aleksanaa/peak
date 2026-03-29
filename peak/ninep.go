@@ -92,7 +92,7 @@ func (p *NineP) Listen() {
 	os.MkdirAll(filepath.Dir(sockPath), 0700)
 	os.Remove(sockPath)
 
-	srv := vfs.NewNinePSrv(p.vfs)
+	srv := vfs.NewNinePSrv(afero.NewBasePathFs(p.vfs, "/peak"))
 	go func() {
 		if err := srv.Serve("unix", sockPath); err != nil {
 			log.Printf("9P server error: %v", err)
