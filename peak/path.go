@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"al.essio.dev/pkg/shellescape"
@@ -36,19 +37,58 @@ func isPeakPath(path string) bool {
 	return strings.HasPrefix(path, "/peak/") || path == "/peak"
 }
 
+// parseWinPath returns the window ID and optional file name for paths of the
+// form /peak/<id> or /peak/<id>/<file>. Returns ok=false for any other path.
+func parseWinPath(path string) (id int, file string, ok bool) {
+	rest, found := strings.CutPrefix(path, "/peak/")
+	if !found {
+		return 0, "", false
+	}
+	idStr, file, _ := strings.Cut(rest, "/")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		return 0, "", false
+	}
+	return id, file, true
+}
+
+// findWinByID returns the window with the given ID, or nil.
+func findWinByID(id int) *Window {
+	if appEditor == nil {
+		return nil
+	}
+	for _, col := range appEditor.columns {
+		for _, win := range col.windows {
+			if win.ID == id {
+				return win
+			}
+		}
+	}
+	return nil
+}
+
 func hasVersion(path string) bool {
-	if isSpecial(path) || isDir(path) {
+	if isSpecial(path) {
 		return false
 	}
-	if !isPeakPath(path) {
-		return true
+	// Window namespace files are virtual — they have no on-disk version.
+	if _, _, ok := parseWinPath(path); ok {
+		return false
 	}
-	return false
+	if isDir(path) {
+		return false
+	}
+	return !isPeakPath(path)
 }
 
 func isDir(path string) bool {
 	if isSpecial(path) {
 		return false
+	}
+	// /peak/<id> is a directory; /peak/<id>/<file> is not.
+	// Resolved without touching the VFS to avoid editor.Call on the main goroutine.
+	if id, file, ok := parseWinPath(path); ok {
+		return file == "" && findWinByID(id) != nil
 	}
 	fi, err := getVFS().Stat(path)
 	return err == nil && fi.IsDir()
@@ -151,8 +191,38 @@ func writeFile(path string, data []byte) error {
 	return afero.WriteFile(getVFS(), path, data, 0644)
 }
 
+// readWinPath reads content directly from a window's in-memory state without
+// going through the VFS. This avoids editor.Call deadlocks when called from
+// the main goroutine, and avoids the Read-vs-ReadAt mismatch in windowFs.
+func readWinPath(id int, file string) (string, bool, error) {
+	win := findWinByID(id)
+	if win == nil {
+		return "", false, fmt.Errorf("/peak/%d: no such window", id)
+	}
+	switch file {
+	case "":
+		return "body\ntag\nctl\n", true, nil
+	case "body":
+		if buf := win.body.GetBuffer(); buf != nil {
+			return buf.GetText(), false, nil
+		}
+		return "", false, nil
+	case "tag":
+		return win.tag.buffer.GetText(), false, nil
+	case "ctl":
+		return "", false, nil
+	default:
+		return "", false, os.ErrNotExist
+	}
+}
+
 // readFileOrDir returns the content of a file or a listing if it's a directory.
 func readFileOrDir(path string) (string, bool, error) {
+	// Window namespace paths are handled directly to avoid VFS/editor.Call interaction.
+	if id, file, ok := parseWinPath(path); ok {
+		return readWinPath(id, file)
+	}
+
 	fi, err := getVFS().Stat(path)
 	if err != nil {
 		return "", false, err

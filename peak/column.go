@@ -41,6 +41,7 @@ func (c *Column) AddWindow(tagText, bodyText string) *Window {
 	newWin.ID = c.editor.nextWinID
 	c.editor.nextWinID++
 	c.windows = append(c.windows, newWin)
+	c.editor.ninep.MountWindow(newWin)
 	return newWin
 }
 
@@ -57,6 +58,7 @@ func (c *Column) AddTermWindow(tagText, cmd, dir string) (*Window, error) {
 	newWin.ID = c.editor.nextWinID
 	c.editor.nextWinID++
 	c.windows = append(c.windows, newWin)
+	c.editor.ninep.MountWindow(newWin)
 	return newWin, nil
 }
 
