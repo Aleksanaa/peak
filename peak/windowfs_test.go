@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -229,6 +230,48 @@ func TestWindowFsCtlExec(t *testing.T) {
 
 	if after != before-1 {
 		t.Errorf("after Del: %d windows, want %d", after, before-1)
+	}
+}
+
+func TestWindowFsCtlRead(t *testing.T) {
+	_, _, win, _ := setupWindowTest(t)
+	wfs := &windowFs{win: win}
+
+	// Direct windowFs path.
+	got := readAll(t, wfs, "ctl")
+	if got == "" {
+		t.Fatal("ctl read returned empty string")
+	}
+
+	// Format: "<id> <taglen> <bodylen> <isdir> <isdirty> <width> terminal <maxtab>\n"
+	var id, tagLen, bodyLen, isDir, isDirty, width, maxtab int
+	var font string
+	n, err := fmt.Sscanf(got, "%d %d %d %d %d %d %s %d",
+		&id, &tagLen, &bodyLen, &isDir, &isDirty, &width, &font, &maxtab)
+	if err != nil || n != 8 {
+		t.Fatalf("ctl line %q: parsed %d fields, err %v", got, n, err)
+	}
+	if id != win.ID {
+		t.Errorf("id: got %d, want %d", id, win.ID)
+	}
+	if font != "terminal" {
+		t.Errorf("font: got %q, want %q", font, "terminal")
+	}
+	if maxtab != 4 {
+		t.Errorf("maxtab: got %d, want %d", maxtab, 4)
+	}
+	if isDir != 0 {
+		t.Errorf("isdir: got %d, want 0", isDir)
+	}
+
+	// Via readWinPath (the fast path peak uses when navigating to /peak/<id>/ctl internally).
+	vfsPath := fmt.Sprintf("/peak/%d/ctl", win.ID)
+	viaWin, _, err := readFileOrDir(vfsPath)
+	if err != nil {
+		t.Fatalf("readFileOrDir(%q): %v", vfsPath, err)
+	}
+	if viaWin != got {
+		t.Errorf("readWinPath returned %q, want %q", viaWin, got)
 	}
 }
 

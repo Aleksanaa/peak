@@ -37,7 +37,8 @@ func (fs *windowFs) Stat(name string) (os.FileInfo, error) {
 		})
 		return &simpleFileInfo{name: "tag", mode: 0644, size: size}, nil
 	case "ctl":
-		return &simpleFileInfo{name: "ctl", mode: 0200}, nil
+		snap := ctlSnap(fs.win)
+		return &simpleFileInfo{name: "ctl", mode: 0600, size: int64(len(snap))}, nil
 	case "event":
 		return &simpleFileInfo{name: "event", mode: 0644}, nil
 	case "addr":
@@ -100,7 +101,11 @@ func (fs *windowFs) OpenFile(name string, flag int, perm os.FileMode) (afero.Fil
 		}
 		return f, nil
 	case "ctl":
-		return &winCtlFile{win: fs.win}, nil
+		f := &winCtlFile{win: fs.win}
+		if flag&os.O_WRONLY == 0 {
+			f.snap = ctlSnap(fs.win)
+		}
+		return f, nil
 	case "event":
 		var sub *eventSub
 		if flag&os.O_WRONLY == 0 {
@@ -194,7 +199,7 @@ func (f *winDirFile) Readdir(count int) ([]os.FileInfo, error) {
 	all := []os.FileInfo{
 		&simpleFileInfo{name: "body", mode: 0644},
 		&simpleFileInfo{name: "tag", mode: 0644},
-		&simpleFileInfo{name: "ctl", mode: 0200},
+		&simpleFileInfo{name: "ctl", mode: 0600},
 		&simpleFileInfo{name: "event", mode: 0644},
 		&simpleFileInfo{name: "addr", mode: 0644},
 		&simpleFileInfo{name: "data", mode: 0644},
@@ -342,15 +347,54 @@ func (f *winTagFile) Close() error {
 
 // ---- ctl ----
 
+// ctlSnap returns the structured read payload for /<id>/ctl:
+// "<id> <taglen> <bodylen> <isdir> <isdirty> <width> terminal <maxtab>\n"
+// All lengths are rune counts; width is terminal columns.
+func ctlSnap(win *Window) []byte {
+	var tagLen, bodyLen, width, maxtab int
+	isDir, isDirty := 0, 0
+	win.editor.Call(func() {
+		tagLen = len([]rune(win.tag.buffer.GetText()))
+		if buf := win.body.GetBuffer(); buf != nil {
+			bodyLen = len([]rune(buf.GetText()))
+		}
+		if win.isDir {
+			isDir = 1
+		}
+		if win.IsDirty() {
+			isDirty = 1
+		}
+		_, _, width, _ = win.body.GetPos()
+		maxtab = 4
+		if tv, ok := win.body.(*TextView); ok {
+			maxtab = tv.tabWidth
+		}
+	})
+	return []byte(fmt.Sprintf("%d %d %d %d %d %d terminal %d\n",
+		win.ID, tagLen, bodyLen, isDir, isDirty, width, maxtab))
+}
+
 type winCtlFile struct {
 	winStub
-	win *Window
+	win  *Window
+	snap []byte
 }
 
 func (f *winCtlFile) Name() string { return "ctl" }
 
 func (f *winCtlFile) Stat() (os.FileInfo, error) {
-	return &simpleFileInfo{name: "ctl", mode: 0200}, nil
+	return &simpleFileInfo{name: "ctl", mode: 0600, size: int64(len(f.snap))}, nil
+}
+
+func (f *winCtlFile) ReadAt(p []byte, off int64) (int, error) {
+	if off >= int64(len(f.snap)) {
+		return 0, io.EOF
+	}
+	n := copy(p, f.snap[off:])
+	if off+int64(n) >= int64(len(f.snap)) {
+		return n, io.EOF
+	}
+	return n, nil
 }
 
 // WriteAt executes the trimmed string as an editor command.

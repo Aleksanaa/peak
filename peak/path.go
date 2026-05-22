@@ -191,66 +191,9 @@ func writeFile(path string, data []byte) error {
 	return afero.WriteFile(getVFS(), path, data, 0644)
 }
 
-// readWinPath reads content directly from a window's in-memory state without
-// going through the VFS. This avoids editor.Call deadlocks when called from
-// the main goroutine, and avoids the Read-vs-ReadAt mismatch in windowFs.
-func readWinPath(id int, file string) (string, bool, error) {
-	win := findWinByID(id)
-	if win == nil {
-		return "", false, fmt.Errorf("/peak/%d: no such window", id)
-	}
-	switch file {
-	case "":
-		listing := "body\ntag\nctl\nevent\naddr\ndata\ncolor\n"
-		if tv, ok := win.body.(*TermView); ok {
-			if tv.externalPTY() != nil {
-				listing += "io\n"
-			}
-		}
-		return listing, true, nil
-	case "body":
-		if tv, ok := win.body.(*TermView); ok {
-			return tv.GetScrollback(), false, nil
-		}
-		if buf := win.body.GetBuffer(); buf != nil {
-			return buf.GetText(), false, nil
-		}
-		return "", false, nil
-	case "tag":
-		return win.tag.buffer.GetText(), false, nil
-	case "ctl":
-		return "", false, nil
-	case "event":
-		return "", false, nil
-	case "addr":
-		return fmt.Sprintf("#%d,#%d\n", win.addrQ0, win.addrQ1), false, nil
-	case "data":
-		if buf := win.body.GetBuffer(); buf != nil {
-			runes := buf.RunesInRange(win.addrQ0, win.addrQ1)
-			return string(runes), false, nil
-		}
-		return "", false, nil
-	case "color":
-		return "", false, nil
-	case "io":
-		if tv, ok := win.body.(*TermView); ok {
-			if tv.externalPTY() != nil {
-				return "", false, nil
-			}
-		}
-		return "", false, os.ErrNotExist
-	default:
-		return "", false, os.ErrNotExist
-	}
-}
-
 // readFileOrDir returns the content of a file or a listing if it's a directory.
+// It is called from a background goroutine, so editor.Call inside VFS reads is safe.
 func readFileOrDir(path string) (string, bool, error) {
-	// Window namespace paths are handled directly to avoid VFS/editor.Call interaction.
-	if id, file, ok := parseWinPath(path); ok {
-		return readWinPath(id, file)
-	}
-
 	fi, err := getVFS().Stat(path)
 	if err != nil {
 		return "", false, err
@@ -267,53 +210,53 @@ func readFileOrDir(path string) (string, bool, error) {
 	defer f.Close()
 
 	size := fi.Size()
-	if size <= 0 {
-		// Fallback for unknown size: read 512, check, then read all
-		header := make([]byte, 512)
-		n, err := f.Read(header)
+	if size > 0 {
+		data := make([]byte, size)
+		n, err := f.ReadAt(data, 0)
 		if err != nil && err != io.EOF {
 			return "", false, err
 		}
-		for i := 0; i < n; i++ {
-			if header[i] == 0 {
+		checkLen := n
+		if checkLen > 512 {
+			checkLen = 512
+		}
+		for i := 0; i < checkLen; i++ {
+			if data[i] == 0 {
 				return "", false, fmt.Errorf("binary file")
 			}
 		}
-		remainder, err := io.ReadAll(f)
+		return string(data[:n]), false, nil
+	}
+
+	// Unknown size: accumulate with ReadAt, check first 512 bytes for binary.
+	var chunks []byte
+	buf := make([]byte, 4096)
+	var off int64
+	for {
+		n, err := f.ReadAt(buf, off)
+		if n > 0 {
+			if len(chunks) == 0 {
+				checkLen := n
+				if checkLen > 512 {
+					checkLen = 512
+				}
+				for i := 0; i < checkLen; i++ {
+					if buf[i] == 0 {
+						return "", false, fmt.Errorf("binary file")
+					}
+				}
+			}
+			chunks = append(chunks, buf[:n]...)
+			off += int64(n)
+		}
+		if err == io.EOF {
+			break
+		}
 		if err != nil {
 			return "", false, err
 		}
-		data := make([]byte, n+len(remainder))
-		copy(data, header[:n])
-		copy(data[n:], remainder)
-		return string(data), false, nil
 	}
-
-	data := make([]byte, size)
-	checkLen := 512
-	if int64(checkLen) > size {
-		checkLen = int(size)
-	}
-
-	n, err := io.ReadAtLeast(f, data[:checkLen], checkLen)
-	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
-		return "", false, err
-	}
-
-	for i := 0; i < n; i++ {
-		if data[i] == 0 {
-			return "", false, fmt.Errorf("binary file")
-		}
-	}
-
-	if int64(n) < size {
-		_, err = io.ReadFull(f, data[n:])
-		if err != nil && err != io.ErrUnexpectedEOF {
-			return "", false, err
-		}
-	}
-
-	return string(data), false, nil
+	return string(chunks), false, nil
 }
 
 // listDir returns a formatted string listing the contents of a directory.
