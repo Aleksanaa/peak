@@ -139,16 +139,16 @@ func trimSlash(name string) string {
 }
 
 // Unsupported mutations.
-func (fs *windowFs) Create(name string) (afero.File, error)                       { return nil, os.ErrPermission }
-func (fs *windowFs) Mkdir(name string, perm os.FileMode) error                    { return os.ErrPermission }
-func (fs *windowFs) MkdirAll(path string, perm os.FileMode) error                 { return os.ErrPermission }
-func (fs *windowFs) Remove(name string) error                                     { return os.ErrPermission }
-func (fs *windowFs) RemoveAll(path string) error                                  { return os.ErrPermission }
-func (fs *windowFs) Rename(oldname, newname string) error                         { return os.ErrPermission }
-func (fs *windowFs) Chmod(name string, mode os.FileMode) error                    { return os.ErrPermission }
-func (fs *windowFs) Chown(name string, uid, gid int) error                        { return os.ErrPermission }
-func (fs *windowFs) Chtimes(name string, a, m time.Time) error                    { return os.ErrPermission }
-func (fs *windowFs) Name() string                                                  { return "windowFs" }
+func (fs *windowFs) Create(name string) (afero.File, error)       { return nil, os.ErrPermission }
+func (fs *windowFs) Mkdir(name string, perm os.FileMode) error    { return os.ErrPermission }
+func (fs *windowFs) MkdirAll(path string, perm os.FileMode) error { return os.ErrPermission }
+func (fs *windowFs) Remove(name string) error                     { return os.ErrPermission }
+func (fs *windowFs) RemoveAll(path string) error                  { return os.ErrPermission }
+func (fs *windowFs) Rename(oldname, newname string) error         { return os.ErrPermission }
+func (fs *windowFs) Chmod(name string, mode os.FileMode) error    { return os.ErrPermission }
+func (fs *windowFs) Chown(name string, uid, gid int) error        { return os.ErrPermission }
+func (fs *windowFs) Chtimes(name string, a, m time.Time) error    { return os.ErrPermission }
+func (fs *windowFs) Name() string                                 { return "windowFs" }
 
 // ---- stub base ----
 
@@ -156,19 +156,19 @@ func (fs *windowFs) Name() string                                               
 // Concrete types embed it and override only what they need.
 type winStub struct{}
 
-func (winStub) Close() error                               { return nil }
-func (winStub) Read(p []byte) (int, error)                 { return 0, io.EOF }
-func (winStub) ReadAt(p []byte, off int64) (int, error)    { return 0, io.EOF }
-func (winStub) Seek(off int64, whence int) (int64, error)  { return 0, nil }
-func (winStub) Write(p []byte) (int, error)                { return 0, os.ErrPermission }
-func (winStub) WriteAt(p []byte, off int64) (int, error)   { return 0, os.ErrPermission }
-func (winStub) WriteString(s string) (int, error)          { return 0, os.ErrPermission }
-func (winStub) Name() string                               { return "" }
-func (winStub) Readdir(n int) ([]os.FileInfo, error)       { return nil, nil }
-func (winStub) Readdirnames(n int) ([]string, error)       { return nil, nil }
-func (winStub) Stat() (os.FileInfo, error)                 { return nil, os.ErrNotExist }
-func (winStub) Sync() error                                { return nil }
-func (winStub) Truncate(size int64) error                  { return nil }
+func (winStub) Close() error                              { return nil }
+func (winStub) Read(p []byte) (int, error)                { return 0, io.EOF }
+func (winStub) ReadAt(p []byte, off int64) (int, error)   { return 0, io.EOF }
+func (winStub) Seek(off int64, whence int) (int64, error) { return 0, nil }
+func (winStub) Write(p []byte) (int, error)               { return 0, os.ErrPermission }
+func (winStub) WriteAt(p []byte, off int64) (int, error)  { return 0, os.ErrPermission }
+func (winStub) WriteString(s string) (int, error)         { return 0, os.ErrPermission }
+func (winStub) Name() string                              { return "" }
+func (winStub) Readdir(n int) ([]os.FileInfo, error)      { return nil, nil }
+func (winStub) Readdirnames(n int) ([]string, error)      { return nil, nil }
+func (winStub) Stat() (os.FileInfo, error)                { return nil, os.ErrNotExist }
+func (winStub) Sync() error                               { return nil }
+func (winStub) Truncate(size int64) error                 { return nil }
 
 // ---- directory ----
 
@@ -263,8 +263,8 @@ func (f *winBodyFile) WriteAt(p []byte, off int64) (int, error) {
 	return len(p), nil
 }
 
-func (f *winBodyFile) Write(p []byte) (int, error)         { return f.WriteAt(p, 0) }
-func (f *winBodyFile) WriteString(s string) (int, error)   { return f.WriteAt([]byte(s), 0) }
+func (f *winBodyFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
+func (f *winBodyFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(s), 0) }
 
 func (f *winBodyFile) Close() error {
 	if f.writes == nil {
@@ -318,8 +318,8 @@ func (f *winTagFile) WriteAt(p []byte, off int64) (int, error) {
 	return len(p), nil
 }
 
-func (f *winTagFile) Write(p []byte) (int, error)         { return f.WriteAt(p, 0) }
-func (f *winTagFile) WriteString(s string) (int, error)   { return f.WriteAt([]byte(s), 0) }
+func (f *winTagFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
+func (f *winTagFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(s), 0) }
 
 func (f *winTagFile) Close() error {
 	if f.writes == nil {
@@ -357,8 +357,8 @@ func (f *winCtlFile) WriteAt(p []byte, off int64) (int, error) {
 	return len(p), nil
 }
 
-func (f *winCtlFile) Write(p []byte) (int, error)         { return f.WriteAt(p, 0) }
-func (f *winCtlFile) WriteString(s string) (int, error)   { return f.WriteAt([]byte(s), 0) }
+func (f *winCtlFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
+func (f *winCtlFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(s), 0) }
 
 // ---- simpleFileInfo ----
 

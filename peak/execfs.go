@@ -49,16 +49,16 @@ func (fs *peakNamespaceFs) OpenFile(name string, flag int, perm os.FileMode) (af
 	}
 }
 
-func (fs *peakNamespaceFs) Create(n string) (afero.File, error)                  { return fs.inner.Create(n) }
-func (fs *peakNamespaceFs) Mkdir(n string, p os.FileMode) error                  { return fs.inner.Mkdir(n, p) }
-func (fs *peakNamespaceFs) MkdirAll(n string, p os.FileMode) error               { return fs.inner.MkdirAll(n, p) }
-func (fs *peakNamespaceFs) Remove(n string) error                                { return fs.inner.Remove(n) }
-func (fs *peakNamespaceFs) RemoveAll(n string) error                             { return fs.inner.RemoveAll(n) }
-func (fs *peakNamespaceFs) Rename(o, n string) error                             { return fs.inner.Rename(o, n) }
-func (fs *peakNamespaceFs) Chmod(n string, m os.FileMode) error                  { return fs.inner.Chmod(n, m) }
-func (fs *peakNamespaceFs) Chown(n string, u, g int) error                       { return fs.inner.Chown(n, u, g) }
-func (fs *peakNamespaceFs) Chtimes(n string, a, m time.Time) error               { return fs.inner.Chtimes(n, a, m) }
-func (fs *peakNamespaceFs) Name() string                                          { return "peakNamespaceFs" }
+func (fs *peakNamespaceFs) Create(n string) (afero.File, error)    { return fs.inner.Create(n) }
+func (fs *peakNamespaceFs) Mkdir(n string, p os.FileMode) error    { return fs.inner.Mkdir(n, p) }
+func (fs *peakNamespaceFs) MkdirAll(n string, p os.FileMode) error { return fs.inner.MkdirAll(n, p) }
+func (fs *peakNamespaceFs) Remove(n string) error                  { return fs.inner.Remove(n) }
+func (fs *peakNamespaceFs) RemoveAll(n string) error               { return fs.inner.RemoveAll(n) }
+func (fs *peakNamespaceFs) Rename(o, n string) error               { return fs.inner.Rename(o, n) }
+func (fs *peakNamespaceFs) Chmod(n string, m os.FileMode) error    { return fs.inner.Chmod(n, m) }
+func (fs *peakNamespaceFs) Chown(n string, u, g int) error         { return fs.inner.Chown(n, u, g) }
+func (fs *peakNamespaceFs) Chtimes(n string, a, m time.Time) error { return fs.inner.Chtimes(n, a, m) }
+func (fs *peakNamespaceFs) Name() string                           { return "peakNamespaceFs" }
 
 // peakRootDirFile replaces the "exec" directory entry (created by Mount's
 // MkdirAll) with a regular file entry in directory listings.
