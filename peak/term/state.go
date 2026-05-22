@@ -12,13 +12,13 @@ const (
 )
 
 const (
-	attrReverse = 1 << iota
-	attrUnderline
-	attrBold
-	attrGfx
-	attrItalic
-	attrBlink
-	attrWrap
+	AttrReverse = 1 << iota
+	AttrUnderline
+	AttrBold
+	AttrGfx
+	AttrItalic
+	AttrBlink
+	AttrWrap
 )
 
 const (
@@ -144,10 +144,10 @@ func (t *State) runeWidth(r rune) int {
 	return w
 }
 
-// Cell returns the character code, foreground color, and background
-// color at position (x, y) relative to the top left of the terminal.
-func (t *State) Cell(x, y int) (ch rune, fg Color, bg Color) {
-	return t.lines[y][x].c, Color(t.lines[y][x].fg), Color(t.lines[y][x].bg)
+// Cell returns the character code, foreground color, background
+// color and mode at position (x, y) relative to the top left of the terminal.
+func (t *State) Cell(x, y int) (ch rune, fg Color, bg Color, mode int16) {
+	return t.lines[y][x].c, Color(t.lines[y][x].fg), Color(t.lines[y][x].bg), t.lines[y][x].mode
 }
 
 // Cursor returns the current position of the cursor.
@@ -252,7 +252,7 @@ var gfxCharTable = [62]rune{
 }
 
 func (t *State) setChar(c rune, attr *glyph, x, y int) {
-	if attr.mode&attrGfx != 0 {
+	if attr.mode&AttrGfx != 0 {
 		if c >= 0x41 && c <= 0x7e && gfxCharTable[c-0x41] != 0 {
 			c = gfxCharTable[c-0x41]
 		}
@@ -261,11 +261,11 @@ func (t *State) setChar(c rune, attr *glyph, x, y int) {
 	t.dirty[y] = true
 	t.lines[y][x] = *attr
 	t.lines[y][x].c = c
-	//if t.options.BrightBold && attr.mode&attrBold != 0 && attr.fg < 8 {
-	if attr.mode&attrBold != 0 && attr.fg < 8 {
+	//if t.options.BrightBold && attr.mode&AttrBold != 0 && attr.fg < 8 {
+	if attr.mode&AttrBold != 0 && attr.fg < 8 {
 		t.lines[y][x].fg = attr.fg + 8
 	}
-	if attr.mode&attrReverse != 0 {
+	if attr.mode&AttrReverse != 0 {
 		t.lines[y][x].fg = attr.bg
 		t.lines[y][x].bg = attr.fg
 	}
@@ -605,29 +605,29 @@ func (t *State) setAttr(attr []int) {
 		a := attr[i]
 		switch a {
 		case 0:
-			t.cur.attr.mode &^= attrReverse | attrUnderline | attrBold | attrItalic | attrBlink
+			t.cur.attr.mode &^= AttrReverse | AttrUnderline | AttrBold | AttrItalic | AttrBlink
 			t.cur.attr.fg = DefaultFG
 			t.cur.attr.bg = DefaultBG
 		case 1:
-			t.cur.attr.mode |= attrBold
+			t.cur.attr.mode |= AttrBold
 		case 3:
-			t.cur.attr.mode |= attrItalic
+			t.cur.attr.mode |= AttrItalic
 		case 4:
-			t.cur.attr.mode |= attrUnderline
+			t.cur.attr.mode |= AttrUnderline
 		case 5, 6: // slow, rapid blink
-			t.cur.attr.mode |= attrBlink
+			t.cur.attr.mode |= AttrBlink
 		case 7:
-			t.cur.attr.mode |= attrReverse
+			t.cur.attr.mode |= AttrReverse
 		case 21, 22:
-			t.cur.attr.mode &^= attrBold
+			t.cur.attr.mode &^= AttrBold
 		case 23:
-			t.cur.attr.mode &^= attrItalic
+			t.cur.attr.mode &^= AttrItalic
 		case 24:
-			t.cur.attr.mode &^= attrUnderline
+			t.cur.attr.mode &^= AttrUnderline
 		case 25, 26:
-			t.cur.attr.mode &^= attrBlink
+			t.cur.attr.mode &^= AttrBlink
 		case 27:
-			t.cur.attr.mode &^= attrReverse
+			t.cur.attr.mode &^= AttrReverse
 		case 38:
 			if i+2 < len(attr) {
 				if attr[i+1] == 5 {

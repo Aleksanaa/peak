@@ -6,7 +6,7 @@ func isControlCode(c rune) bool {
 
 func (t *State) parse(c rune) {
 	if isControlCode(c) {
-		if t.handleControlCodes(c) || t.cur.attr.mode&attrGfx == 0 {
+		if t.handleControlCodes(c) || t.cur.attr.mode&AttrGfx == 0 {
 			return
 		}
 	}
@@ -14,7 +14,7 @@ func (t *State) parse(c rune) {
 
 	w := t.runeWidth(c)
 	if t.mode&ModeWrap != 0 && (t.cur.state&cursorWrapNext != 0 || t.cur.x+w > t.cols) {
-		t.lines[t.cur.y][t.cur.x].mode |= attrWrap
+		t.lines[t.cur.y][t.cur.x].mode |= AttrWrap
 		t.newline(true)
 	}
 
@@ -132,9 +132,9 @@ func (t *State) parseEscAltCharset(c rune) {
 	}
 	switch c {
 	case '0': // line drawing set
-		t.cur.attr.mode |= attrGfx
+		t.cur.attr.mode |= AttrGfx
 	case 'B': // USASCII
-		t.cur.attr.mode &^= attrGfx
+		t.cur.attr.mode &^= AttrGfx
 	case 'A', // UK (ignored)
 		'<', // multinational (ignored)
 		'5', // Finnish (ignored)

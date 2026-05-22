@@ -121,16 +121,29 @@ func (tv *TermView) Draw(s tcell.Screen) {
 	for y := 0; y < tv.h; y++ {
 		screenY := tv.scroll.Pos + y
 		for x := 0; x < tv.w; x++ {
-			char, fg, bg := ' ', terminal.DefaultFG, terminal.DefaultBG
+			char, fg, bg, mode := ' ', terminal.DefaultFG, terminal.DefaultBG, int16(0)
 			if screenY >= 0 && screenY < limit {
-				if c, f, b := tv.state.Cell(x, screenY); c != 0 {
-					char, fg, bg = c, f, b
+				if c, f, b, m := tv.state.Cell(x, screenY); c != 0 {
+					char, fg, bg, mode = c, f, b, m
 				}
 			}
 
 			style := tcell.StyleDefault.
 				Foreground(tv.toTcellColor(fg, true)).
 				Background(tv.toTcellColor(bg, false))
+
+			if mode&terminal.AttrUnderline != 0 {
+				style = style.Underline(true)
+			}
+			if mode&terminal.AttrBold != 0 {
+				style = style.Bold(true)
+			}
+			if mode&terminal.AttrItalic != 0 {
+				style = style.Italic(true)
+			}
+			if mode&terminal.AttrBlink != 0 {
+				style = style.Blink(true)
+			}
 
 			if tv.selection.Contains(x, screenY, true) {
 				style = style.Background(tv.editor.theme.SelectionBG).
@@ -193,7 +206,7 @@ func (tv *TermView) updateContentHeight() {
 	for y := limit - 1; y >= lastLine; y-- {
 		empty := true
 		for x := 0; x < tv.w; x++ {
-			c, _, _ := tv.state.Cell(x, y)
+			c, _, _, _ := tv.state.Cell(x, y)
 			if c != 0 && c != ' ' {
 				empty = false
 				break
@@ -281,7 +294,7 @@ func (tv *TermView) getLine(y int) string {
 	}
 	var sb strings.Builder
 	for x := 0; x < tv.w; x++ {
-		c, _, _ := tv.state.Cell(x, y)
+		c, _, _, _ := tv.state.Cell(x, y)
 		sb.WriteRune(c)
 	}
 	return sb.String()
@@ -323,13 +336,13 @@ func (tv *TermView) GetClickWord(mx, my int) string {
 	}
 
 	start, end := GetWordBoundaries(rx, tv.w, func(x int) rune {
-		c, _, _ := tv.state.Cell(x, realRY)
+		c, _, _, _ := tv.state.Cell(x, realRY)
 		return c
 	})
 
 	var sb strings.Builder
 	for x := start; x < end; x++ {
-		c, _, _ := tv.state.Cell(x, realRY)
+		c, _, _, _ := tv.state.Cell(x, realRY)
 		if c != 0 {
 			sb.WriteRune(c)
 		}
