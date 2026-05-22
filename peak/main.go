@@ -20,6 +20,17 @@ type Theme struct {
 	HandleDirty, HandleError          tcell.Color
 	SelectionBG, SelectionFG          tcell.Color
 	HandleColumn                      tcell.Color
+
+	SynKeyword  tcell.Color
+	SynType     tcell.Color
+	SynComment  tcell.Color
+	SynString   tcell.Color
+	SynNumber   tcell.Color
+	SynFunction tcell.Color
+	SynOperator tcell.Color
+	SynVariable tcell.Color
+	SynConstant tcell.Color
+	SynError    tcell.Color
 }
 
 var defaultTheme = Theme{
@@ -39,6 +50,18 @@ var defaultTheme = Theme{
 	SelectionBG:  tcell.NewHexColor(0x585b70),
 	SelectionFG:  tcell.NewHexColor(0xbac2de),
 	HandleColumn: tcell.NewHexColor(0xb4befe),
+
+	// Catppuccin Mocha syntax palette
+	SynKeyword:  tcell.NewHexColor(0xcba6f7), // mauve
+	SynType:     tcell.NewHexColor(0x89b4fa), // blue
+	SynComment:  tcell.NewHexColor(0x6c7086), // overlay0
+	SynString:   tcell.NewHexColor(0xa6e3a1), // green
+	SynNumber:   tcell.NewHexColor(0xf9e2af), // yellow
+	SynFunction: tcell.NewHexColor(0x89dceb), // sky
+	SynOperator: tcell.NewHexColor(0x89dceb), // sky
+	SynVariable: tcell.NewHexColor(0xcdd6f4), // text (unstyled)
+	SynConstant: tcell.NewHexColor(0xfab387), // peach
+	SynError:    tcell.NewHexColor(0xf38ba8), // red
 }
 
 // Editor is the main application state.
@@ -513,17 +536,25 @@ func distributeSpace(totalSpace int, count int, getExplicit func(int) int, getMi
 func (t *Theme) colorForAttr(attr string) tcell.Color {
 	switch attr {
 	case "keyword":
-		return tcell.NewHexColor(0xcba6f7)
-	case "string":
-		return tcell.NewHexColor(0xa6e3a1)
-	case "comment":
-		return tcell.NewHexColor(0x6c7086)
+		return t.SynKeyword
 	case "type":
-		return tcell.NewHexColor(0x89b4fa)
+		return t.SynType
+	case "comment":
+		return t.SynComment
+	case "string":
+		return t.SynString
+	case "number":
+		return t.SynNumber
+	case "function":
+		return t.SynFunction
+	case "operator":
+		return t.SynOperator
+	case "variable":
+		return t.SynVariable
+	case "constant":
+		return t.SynConstant
 	case "error":
-		return tcell.NewHexColor(0xf38ba8)
-	case "dim":
-		return tcell.NewHexColor(0x585b70)
+		return t.SynError
 	default:
 		return tcell.ColorDefault
 	}

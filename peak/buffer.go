@@ -61,6 +61,10 @@ func (b *Buffer) Undo() {
 	if len(b.history) == 0 {
 		return
 	}
+	var q1Old int
+	if b.onMutate != nil {
+		q1Old = b.Len()
+	}
 	b.redoStack = append(b.redoStack, bufferState{lines: b.copyLines(), cursor: b.cursor, version: b.version})
 	last := b.history[len(b.history)-1]
 	b.history = b.history[:len(b.history)-1]
@@ -68,11 +72,19 @@ func (b *Buffer) Undo() {
 	b.cursor = last.cursor
 	b.version = last.version
 	b.ClearSelection()
+	if b.onMutate != nil {
+		content := b.GetText()
+		b.onMutate(0, q1Old, b.Len(), content)
+	}
 }
 
 func (b *Buffer) Redo() {
 	if len(b.redoStack) == 0 {
 		return
+	}
+	var q1Old int
+	if b.onMutate != nil {
+		q1Old = b.Len()
 	}
 	b.history = append(b.history, bufferState{lines: b.copyLines(), cursor: b.cursor, version: b.version})
 	next := b.redoStack[len(b.redoStack)-1]
@@ -81,6 +93,10 @@ func (b *Buffer) Redo() {
 	b.cursor = next.cursor
 	b.version = next.version
 	b.ClearSelection()
+	if b.onMutate != nil {
+		content := b.GetText()
+		b.onMutate(0, q1Old, b.Len(), content)
+	}
 }
 
 func (b *Buffer) ClearSelection() {

@@ -9,6 +9,7 @@ require (
 	github.com/gdamore/tcell/v2 v2.13.8
 	github.com/google/go-cmp v0.7.0
 	github.com/knusbaum/go9p v1.18.0
+	github.com/odvcencio/gotreesitter v0.10.1
 	github.com/pkg/sftp v1.13.10
 	github.com/rivo/uniseg v0.4.7
 	golang.org/x/crypto v0.49.0
