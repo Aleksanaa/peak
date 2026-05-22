@@ -55,6 +55,8 @@ func (fs *windowFs) Stat(name string) (os.FileInfo, error) {
 			}
 		})
 		return &simpleFileInfo{name: "data", mode: 0644, size: size}, nil
+	case "errors":
+		return &simpleFileInfo{name: "errors", mode: 0200}, nil
 	case "color":
 		return &simpleFileInfo{name: "color", mode: 0200}, nil
 	case "io":
@@ -124,6 +126,8 @@ func (fs *windowFs) OpenFile(name string, flag int, perm os.FileMode) (afero.Fil
 			})
 		}
 		return f, nil
+	case "errors":
+		return &winErrorsFile{win: fs.win}, nil
 	case "color":
 		return &winColorFile{win: fs.win}, nil
 	case "io":
@@ -194,6 +198,7 @@ func (f *winDirFile) Readdir(count int) ([]os.FileInfo, error) {
 		&simpleFileInfo{name: "event", mode: 0644},
 		&simpleFileInfo{name: "addr", mode: 0644},
 		&simpleFileInfo{name: "data", mode: 0644},
+		&simpleFileInfo{name: "errors", mode: 0200},
 		&simpleFileInfo{name: "color", mode: 0200},
 	}
 	if tv, ok := f.win.body.(*TermView); ok {
@@ -362,6 +367,42 @@ func (f *winCtlFile) WriteAt(p []byte, off int64) (int, error) {
 
 func (f *winCtlFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
 func (f *winCtlFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(s), 0) }
+
+// ---- errors ----
+
+type winErrorsFile struct {
+	winStub
+	win    *Window
+	writes []byte
+}
+
+func (f *winErrorsFile) Name() string { return "errors" }
+func (f *winErrorsFile) Stat() (os.FileInfo, error) {
+	return &simpleFileInfo{name: "errors", mode: 0200}, nil
+}
+
+func (f *winErrorsFile) WriteAt(p []byte, off int64) (int, error) {
+	end := int(off) + len(p)
+	if end > len(f.writes) {
+		f.writes = append(f.writes, make([]byte, end-len(f.writes))...)
+	}
+	copy(f.writes[off:], p)
+	return len(p), nil
+}
+
+func (f *winErrorsFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
+func (f *winErrorsFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(s), 0) }
+
+func (f *winErrorsFile) Close() error {
+	if len(f.writes) == 0 {
+		return nil
+	}
+	msg := string(f.writes)
+	f.win.editor.Call(func() {
+		f.win.editor.appendToErrorWindow(f.win.parent, f.win, msg)
+	})
+	return nil
+}
 
 // ---- simpleFileInfo ----
 

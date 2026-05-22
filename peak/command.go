@@ -727,7 +727,7 @@ func (e *Editor) alignWindow(target *Window, line int) {
 	target.body.ShowLineAt(line, vrow)
 }
 
-func (e *Editor) showError(col *Column, win *Window, dir, msg string) {
+func (e *Editor) findOrCreateErrorWindow(col *Column, win *Window, dir string) *Window {
 	if dir == "" {
 		if win != nil {
 			dir = win.GetDir()
@@ -735,28 +735,49 @@ func (e *Editor) showError(col *Column, win *Window, dir, msg string) {
 			dir = getwd()
 		}
 	}
+	errName := join(dir, "+Errors")
 
-	var reuse *Window
-	if win != nil && strings.HasSuffix(win.GetFilename(), "+Errors") {
-		reuse = win
-	}
-	if reuse == nil && e.active != nil && strings.HasSuffix(e.active.GetFilename(), "+Errors") {
-		reuse = e.active
-	}
-
-	if reuse != nil {
-		if tv := reuse.bodyTextView(); tv != nil {
-			tv.buffer.SetText(msg)
-			e.focusedView = tv
+	for _, c := range e.columns {
+		for _, w := range c.windows {
+			if w.GetFilename() == errName && w.bodyTextView() != nil {
+				return w
+			}
 		}
-		return
 	}
 
 	targetCol := e.getTargetColumn(col, win)
-	if targetCol != nil {
-		newWin := targetCol.AddWindow(" "+join(dir, "+Errors")+" Get Put Del ", msg)
-		e.ActivateWindow(newWin)
-		targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
+	if targetCol == nil {
+		return nil
+	}
+	newWin := targetCol.AddWindow(" "+errName+" Get Put Del ", "")
+	e.ActivateWindow(newWin)
+	targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
+	return newWin
+}
+
+func (e *Editor) appendToErrorWindow(col *Column, win *Window, msg string) {
+	errWin := e.findOrCreateErrorWindow(col, win, "")
+	if errWin == nil {
+		return
+	}
+	if tv := errWin.bodyTextView(); tv != nil {
+		existing := tv.buffer.GetText()
+		if existing != "" && !strings.HasSuffix(existing, "\n") {
+			existing += "\n"
+		}
+		tv.buffer.SetText(existing + msg)
+		e.focusedView = tv
+	}
+}
+
+func (e *Editor) showError(col *Column, win *Window, dir, msg string) {
+	errWin := e.findOrCreateErrorWindow(col, win, dir)
+	if errWin == nil {
+		return
+	}
+	if tv := errWin.bodyTextView(); tv != nil {
+		tv.buffer.SetText(msg)
+		e.focusedView = tv
 	}
 }
 
