@@ -378,10 +378,15 @@ func (s *NinePSrv) Serve(network, address string) error {
 	if err != nil {
 		return err
 	}
+	s.ServeListener(l)
+	return nil
+}
+
+func (s *NinePSrv) ServeListener(l net.Listener) {
 	for {
 		conn, err := l.Accept()
 		if err != nil {
-			return err
+			return
 		}
 		go go9p.ServeReadWriter(conn, conn, s)
 	}

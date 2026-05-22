@@ -32,6 +32,8 @@ func (fs *peakNamespaceFs) Stat(name string) (os.FileInfo, error) {
 		return &simpleFileInfo{name: "event", mode: 0444}, nil
 	case "bind":
 		return &simpleFileInfo{name: "bind", mode: 0200}, nil
+	case "unbind":
+		return &simpleFileInfo{name: "unbind", mode: 0200}, nil
 	}
 	return fs.inner.Stat(name)
 }
@@ -49,6 +51,8 @@ func (fs *peakNamespaceFs) OpenFile(name string, flag int, perm os.FileMode) (af
 		return &globalEventFile{bus: fs.bus, sub: sub}, nil
 	case "bind":
 		return &bindFile{editor: fs.editor}, nil
+	case "unbind":
+		return &unbindFile{editor: fs.editor}, nil
 	case "", ".":
 		f, err := fs.inner.OpenFile(name, flag, perm)
 		if err != nil {
@@ -80,7 +84,7 @@ func (f *peakRootDirFile) Readdir(count int) ([]os.FileInfo, error) {
 	if count > 0 {
 		return entries, err
 	}
-	virtual := map[string]bool{"exec": true, "event": true, "bind": true}
+	virtual := map[string]bool{"exec": true, "event": true, "bind": true, "unbind": true}
 	filtered := entries[:0]
 	for _, e := range entries {
 		if !virtual[e.Name()] {
@@ -91,6 +95,7 @@ func (f *peakRootDirFile) Readdir(count int) ([]os.FileInfo, error) {
 		&simpleFileInfo{name: "exec", mode: 0600},
 		&simpleFileInfo{name: "event", mode: 0444},
 		&simpleFileInfo{name: "bind", mode: 0200},
+		&simpleFileInfo{name: "unbind", mode: 0200},
 	)
 	return filtered, err
 }
@@ -145,6 +150,29 @@ func (f *bindFile) WriteAt(p []byte, _ int64) (int, error) {
 
 func (f *bindFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
 func (f *bindFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(s), 0) }
+
+// ---- unbindFile ----
+
+// unbindFile implements /unbind: write a path to unmount it from the VFS.
+type unbindFile struct {
+	winStub
+	editor *Editor
+}
+
+func (f *unbindFile) Name() string { return "unbind" }
+func (f *unbindFile) Stat() (os.FileInfo, error) {
+	return &simpleFileInfo{name: "unbind", mode: 0200}, nil
+}
+
+func (f *unbindFile) WriteAt(p []byte, _ int64) (int, error) {
+	if path := strings.TrimSpace(string(p)); path != "" {
+		f.editor.ninep.Umount(path)
+	}
+	return len(p), nil
+}
+
+func (f *unbindFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
+func (f *unbindFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(s), 0) }
 
 // execFile implements /exec: write a window title to create an externally-driven
 // terminal window; read back the numeric window ID followed by a newline.
