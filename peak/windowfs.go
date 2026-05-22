@@ -100,7 +100,10 @@ func (fs *windowFs) OpenFile(name string, flag int, perm os.FileMode) (afero.Fil
 	case "ctl":
 		return &winCtlFile{win: fs.win}, nil
 	case "event":
-		sub := fs.win.subscribeEvent()
+		var sub *eventSub
+		if flag&os.O_WRONLY == 0 {
+			sub = fs.win.subscribeEvent()
+		}
 		return &winEventFile{win: fs.win, sub: sub}, nil
 	case "addr":
 		f := &winAddrFile{win: fs.win}

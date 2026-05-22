@@ -27,7 +27,7 @@ func watchWindow(fs afero.Fs, id int) {
 		return
 	}
 
-	eventF, err := fs.Open(base + "/event")
+	eventF, err := fs.OpenFile(base+"/event", os.O_RDWR, 0)
 	if err != nil {
 		return
 	}
@@ -75,8 +75,12 @@ func watchWindow(fs afero.Fs, id int) {
 	scanner := bufio.NewScanner(eventF)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.HasPrefix(line, "I ") || strings.HasPrefix(line, "D ") {
+		switch {
+		case strings.HasPrefix(line, "I "), strings.HasPrefix(line, "D "):
 			signal()
+		case strings.HasPrefix(line, "x "), strings.HasPrefix(line, "l "):
+			// Write back unhandled execute/look events so the editor acts on them.
+			eventF.WriteString(line + "\n")
 		}
 	}
 	close(trigger)

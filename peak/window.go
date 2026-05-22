@@ -563,6 +563,13 @@ func (win *Window) unsubscribeEvent(sub *eventSub) {
 	win.eventMu.Unlock()
 }
 
+func (win *Window) hasEventSubs() bool {
+	win.eventMu.Lock()
+	n := len(win.eventSubs)
+	win.eventMu.Unlock()
+	return n > 0
+}
+
 // broadcastEvent delivers an event line to all open event file subscribers.
 // Safe to call from the main goroutine.
 func (win *Window) broadcastEvent(kind byte, q0, q1 int, text string) {
@@ -838,9 +845,15 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 			q0, q1 := win.clickWordOffsets(target, mx, my, word)
 			if btns&tcell.Button3 != 0 {
 				win.broadcastEvent('x', q0, q1, word)
+				if win.hasEventSubs() {
+					return false
+				}
 				return win.onExec != nil && win.onExec(win.parent, win, word)
 			}
 			win.broadcastEvent('l', q0, q1, word)
+			if win.hasEventSubs() {
+				return false
+			}
 			return win.editor.Plumb(win, word)
 		}
 	}

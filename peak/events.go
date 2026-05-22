@@ -115,12 +115,55 @@ func (f *winEventFile) Stat() (os.FileInfo, error) {
 }
 
 func (f *winEventFile) ReadAt(p []byte, off int64) (int, error) {
+	if f.sub == nil {
+		return 0, io.EOF
+	}
 	return f.sub.readAt(p, off)
 }
 
+// WriteAt handles event bounce-back: a tool writes "x q0 q1 text\n" or
+// "l q0 q1 text\n" to re-dispatch an event it received but wants the
+// editor to handle normally.
+func (f *winEventFile) WriteAt(p []byte, _ int64) (int, error) {
+	for _, line := range strings.Split(strings.TrimSpace(string(p)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 3 {
+			continue
+		}
+		kind := parts[0]
+		text := ""
+		if len(parts) > 3 {
+			text = strings.Join(parts[3:], " ")
+		}
+		win := f.win
+		switch kind {
+		case "x":
+			win.editor.Call(func() {
+				if win.onExec != nil {
+					win.onExec(win.parent, win, text)
+				}
+			})
+		case "l":
+			win.editor.Call(func() {
+				win.editor.Plumb(win, text)
+			})
+		}
+	}
+	return len(p), nil
+}
+
+func (f *winEventFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
+func (f *winEventFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(s), 0) }
+
 func (f *winEventFile) Close() error {
-	f.win.unsubscribeEvent(f.sub)
-	f.sub.close()
+	if f.sub != nil {
+		f.win.unsubscribeEvent(f.sub)
+		f.sub.close()
+	}
 	return nil
 }
 
