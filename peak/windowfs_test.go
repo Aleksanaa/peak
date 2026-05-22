@@ -275,6 +275,94 @@ func TestWindowFsCtlRead(t *testing.T) {
 	}
 }
 
+// ---- rdsel / wrsel ----
+
+func TestWindowFsRdselNoSelection(t *testing.T) {
+	_, _, win, _ := setupWindowTest(t)
+	wfs := &windowFs{win: win}
+	got := readAll(t, wfs, "rdsel")
+	if got != "" {
+		t.Errorf("rdsel with no selection = %q, want empty", got)
+	}
+}
+
+func TestWindowFsRdselWithSelection(t *testing.T) {
+	e, _, win, _ := setupWindowTest(t)
+	e.Call(func() {
+		buf := win.body.GetBuffer()
+		buf.SetText("hello world\n")
+		// Select "hello" (rune offsets 0–5).
+		buf.SetSelection(Cursor{0, 0}, Cursor{5, 0})
+	})
+
+	wfs := &windowFs{win: win}
+	got := readAll(t, wfs, "rdsel")
+	if got != "hello" {
+		t.Errorf("rdsel = %q, want %q", got, "hello")
+	}
+}
+
+func TestWindowFsWrselReplacesSelection(t *testing.T) {
+	e, _, win, _ := setupWindowTest(t)
+	e.Call(func() {
+		buf := win.body.GetBuffer()
+		buf.SetText("hello world\n")
+		buf.SetSelection(Cursor{0, 0}, Cursor{5, 0})
+	})
+
+	wfs := &windowFs{win: win}
+	writeClose(t, wfs, "wrsel", "goodbye")
+
+	var got string
+	e.Call(func() { got = win.body.GetBuffer().GetText() })
+	if got != "goodbye world\n" {
+		t.Errorf("body after wrsel = %q, want %q", got, "goodbye world\n")
+	}
+}
+
+func TestWindowFsWrselEmptyReplacesWithEmpty(t *testing.T) {
+	e, _, win, _ := setupWindowTest(t)
+	e.Call(func() {
+		buf := win.body.GetBuffer()
+		buf.SetText("hello world\n")
+		buf.SetSelection(Cursor{0, 0}, Cursor{5, 0})
+	})
+
+	wfs := &windowFs{win: win}
+	writeClose(t, wfs, "wrsel", "")
+
+	// Empty write: writes == nil, Close is a no-op.
+	var got string
+	e.Call(func() { got = win.body.GetBuffer().GetText() })
+	if got != "hello world\n" {
+		t.Errorf("body after empty wrsel write = %q, want unchanged %q", got, "hello world\n")
+	}
+}
+
+func TestWindowFsRdselWrselPipeRoundTrip(t *testing.T) {
+	e, _, win, _ := setupWindowTest(t)
+	e.Call(func() {
+		buf := win.body.GetBuffer()
+		buf.SetText("hello world\n")
+		buf.SetSelection(Cursor{0, 0}, Cursor{5, 0})
+	})
+
+	wfs := &windowFs{win: win}
+
+	// Simulate |tr a-z A-Z: read selection, transform, write back.
+	sel := readAll(t, wfs, "rdsel")
+	if sel != "hello" {
+		t.Fatalf("rdsel = %q, want %q", sel, "hello")
+	}
+	writeClose(t, wfs, "wrsel", strings.ToUpper(sel))
+
+	var got string
+	e.Call(func() { got = win.body.GetBuffer().GetText() })
+	if got != "HELLO world\n" {
+		t.Errorf("body after pipe round-trip = %q, want %q", got, "HELLO world\n")
+	}
+}
+
 // ---- errors file ----
 
 func TestWindowFsErrorsCreatesWindow(t *testing.T) {

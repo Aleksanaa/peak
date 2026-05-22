@@ -11,7 +11,7 @@ import (
 )
 
 // windowFs implements afero.Fs for a single window's /peak/<id>/ directory.
-// Files: body (rw), tag (rw), ctl (wo).
+// Files: body (rw), tag (rw), ctl (rw), rdsel (ro), wrsel (wo).
 type windowFs struct{ win *Window }
 
 func (fs *windowFs) Stat(name string) (os.FileInfo, error) {
@@ -56,6 +56,19 @@ func (fs *windowFs) Stat(name string) (os.FileInfo, error) {
 			}
 		})
 		return &simpleFileInfo{name: "data", mode: 0644, size: size}, nil
+	case "rdsel":
+		var snap []byte
+		fs.win.editor.Call(func() {
+			if buf := fs.win.body.GetBuffer(); buf != nil && buf.selection.Active {
+				start, end := buf.orderedSelection()
+				q0 := buf.RuneOffsetOfPos(start.y, start.x)
+				q1 := buf.RuneOffsetOfPos(end.y, end.x)
+				snap = []byte(string(buf.RunesInRange(q0, q1)))
+			}
+		})
+		return &simpleFileInfo{name: "rdsel", mode: 0444, size: int64(len(snap))}, nil
+	case "wrsel":
+		return &simpleFileInfo{name: "wrsel", mode: 0200}, nil
 	case "errors":
 		return &simpleFileInfo{name: "errors", mode: 0200}, nil
 	case "color":
@@ -131,6 +144,27 @@ func (fs *windowFs) OpenFile(name string, flag int, perm os.FileMode) (afero.Fil
 			})
 		}
 		return f, nil
+	case "rdsel":
+		f := &winRdselFile{win: fs.win}
+		fs.win.editor.Call(func() {
+			if buf := fs.win.body.GetBuffer(); buf != nil && buf.selection.Active {
+				start, end := buf.orderedSelection()
+				q0 := buf.RuneOffsetOfPos(start.y, start.x)
+				q1 := buf.RuneOffsetOfPos(end.y, end.x)
+				f.snap = []byte(string(buf.RunesInRange(q0, q1)))
+			}
+		})
+		return f, nil
+	case "wrsel":
+		f := &winWrselFile{win: fs.win}
+		fs.win.editor.Call(func() {
+			if buf := fs.win.body.GetBuffer(); buf != nil && buf.selection.Active {
+				start, end := buf.orderedSelection()
+				f.q0 = buf.RuneOffsetOfPos(start.y, start.x)
+				f.q1 = buf.RuneOffsetOfPos(end.y, end.x)
+			}
+		})
+		return f, nil
 	case "errors":
 		return &winErrorsFile{win: fs.win}, nil
 	case "color":
@@ -203,6 +237,8 @@ func (f *winDirFile) Readdir(count int) ([]os.FileInfo, error) {
 		&simpleFileInfo{name: "event", mode: 0644},
 		&simpleFileInfo{name: "addr", mode: 0644},
 		&simpleFileInfo{name: "data", mode: 0644},
+		&simpleFileInfo{name: "rdsel", mode: 0444},
+		&simpleFileInfo{name: "wrsel", mode: 0200},
 		&simpleFileInfo{name: "errors", mode: 0200},
 		&simpleFileInfo{name: "color", mode: 0200},
 	}
@@ -411,6 +447,74 @@ func (f *winCtlFile) WriteAt(p []byte, off int64) (int, error) {
 
 func (f *winCtlFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
 func (f *winCtlFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(s), 0) }
+
+// ---- rdsel ----
+
+// winRdselFile is a read-only snapshot of the window's current selection at open time.
+type winRdselFile struct {
+	winStub
+	win  *Window
+	snap []byte
+}
+
+func (f *winRdselFile) Name() string { return "rdsel" }
+
+func (f *winRdselFile) Stat() (os.FileInfo, error) {
+	return &simpleFileInfo{name: "rdsel", mode: 0444, size: int64(len(f.snap))}, nil
+}
+
+func (f *winRdselFile) ReadAt(p []byte, off int64) (int, error) {
+	if off >= int64(len(f.snap)) {
+		return 0, io.EOF
+	}
+	n := copy(p, f.snap[off:])
+	if off+int64(n) >= int64(len(f.snap)) {
+		return n, io.EOF
+	}
+	return n, nil
+}
+
+// ---- wrsel ----
+
+// winWrselFile is a write-only file; on Close it replaces the selection captured at
+// open time with the written bytes.
+type winWrselFile struct {
+	winStub
+	win    *Window
+	q0, q1 int
+	writes []byte
+}
+
+func (f *winWrselFile) Name() string { return "wrsel" }
+
+func (f *winWrselFile) Stat() (os.FileInfo, error) {
+	return &simpleFileInfo{name: "wrsel", mode: 0200}, nil
+}
+
+func (f *winWrselFile) WriteAt(p []byte, off int64) (int, error) {
+	end := int(off) + len(p)
+	if end > len(f.writes) {
+		f.writes = append(f.writes, make([]byte, end-len(f.writes))...)
+	}
+	copy(f.writes[off:], p)
+	return len(p), nil
+}
+
+func (f *winWrselFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
+func (f *winWrselFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(s), 0) }
+
+func (f *winWrselFile) Close() error {
+	if f.writes == nil {
+		return nil
+	}
+	runes := []rune(string(f.writes))
+	f.win.editor.Call(func() {
+		if buf := f.win.body.GetBuffer(); buf != nil {
+			buf.ReplaceRangeRunes(f.q0, f.q1, runes)
+		}
+	})
+	return nil
+}
 
 // ---- errors ----
 
