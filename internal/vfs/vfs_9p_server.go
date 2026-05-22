@@ -48,7 +48,14 @@ func (c *NinePConn) TagContext(tag uint16) context.Context { return context.Back
 func (c *NinePConn) DropContext(tag uint16)                {}
 
 func (s *NinePSrv) Version(c go9p.Conn, r *proto.TRVersion) (proto.FCall, error) {
-	return &proto.TRVersion{Header: proto.Header{Type: proto.Rversion, Tag: r.Tag}, Msize: r.Msize, Version: "9P2000"}, nil
+	// go9p's ParseCall rejects messages > MaxMsgLen (65535). An Rread carries
+	// 11 bytes of header, so max safe data per read is MaxMsgLen-11 = 65524.
+	// Capping msize here ensures the client never requests more than that.
+	msize := r.Msize
+	if msize > proto.MaxMsgLen {
+		msize = proto.MaxMsgLen
+	}
+	return &proto.TRVersion{Header: proto.Header{Type: proto.Rversion, Tag: r.Tag}, Msize: msize, Version: "9P2000"}, nil
 }
 
 func (s *NinePSrv) Auth(c go9p.Conn, r *proto.TAuth) (proto.FCall, error) {
