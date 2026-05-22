@@ -61,6 +61,45 @@ func (s *eventSub) close() {
 	s.mu.Unlock()
 }
 
+// ---- globalEventBus ----
+
+// globalEventBus fans out editor-wide lifecycle events to all open /event readers.
+// Events are lines like "new 5\n", "close 3\n".
+type globalEventBus struct {
+	mu   sync.Mutex
+	subs []*eventSub
+}
+
+func (b *globalEventBus) subscribe() *eventSub {
+	s := newEventSub()
+	b.mu.Lock()
+	b.subs = append(b.subs, s)
+	b.mu.Unlock()
+	return s
+}
+
+func (b *globalEventBus) unsubscribe(s *eventSub) {
+	b.mu.Lock()
+	for i, sub := range b.subs {
+		if sub == s {
+			b.subs = append(b.subs[:i], b.subs[i+1:]...)
+			break
+		}
+	}
+	b.mu.Unlock()
+}
+
+func (b *globalEventBus) broadcast(line string) {
+	msg := []byte(line)
+	b.mu.Lock()
+	subs := make([]*eventSub, len(b.subs))
+	copy(subs, b.subs)
+	b.mu.Unlock()
+	for _, s := range subs {
+		s.deliver(msg)
+	}
+}
+
 // ---- winEventFile ----
 
 type winEventFile struct {

@@ -12,6 +12,7 @@ import (
 	"github.com/aleksana/peak/internal/vfs/afero"
 )
 
+
 //go:embed doc
 var docFS embed.FS
 
@@ -19,11 +20,12 @@ var docFS embed.FS
 type NineP struct {
 	editor *Editor
 	vfs    *vfs.CompositeFs
+	bus    *globalEventBus
 }
 
 func NewNineP(e *Editor) *NineP {
 	fs := vfs.NewCompositeFs()
-	p := &NineP{editor: e, vfs: fs}
+	p := &NineP{editor: e, vfs: fs, bus: &globalEventBus{}}
 
 	p.vfs.Mount("/", afero.NewOsFs())
 	p.vfs.Mount("/peak", afero.NewMemMapFs())
@@ -45,7 +47,7 @@ func (p *NineP) Listen() {
 	os.Remove(sockPath)
 
 	inner := afero.NewBasePathFs(p.vfs, "/peak")
-	srv := vfs.NewNinePSrv(newPeakNamespaceFs(inner, p.editor))
+	srv := vfs.NewNinePSrv(newPeakNamespaceFs(inner, p.editor, p.bus))
 	go func() {
 		if err := srv.Serve("unix", sockPath); err != nil {
 			log.Printf("9P server error: %v", err)
@@ -56,11 +58,13 @@ func (p *NineP) Listen() {
 // MountWindow exposes a window's namespace at /peak/<id>/.
 func (p *NineP) MountWindow(win *Window) {
 	p.vfs.Mount("/peak/"+strconv.Itoa(win.ID), &windowFs{win: win})
+	p.bus.broadcast(fmt.Sprintf("new %d\n", win.ID))
 }
 
 // UmountWindow removes a window's namespace.
 func (p *NineP) UmountWindow(win *Window) {
 	p.vfs.Umount("/peak/" + strconv.Itoa(win.ID))
+	p.bus.broadcast(fmt.Sprintf("close %d\n", win.ID))
 }
 
 func (p *NineP) Mount(socket, path string) error {

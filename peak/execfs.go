@@ -12,20 +12,26 @@ import (
 )
 
 // peakNamespaceFs wraps the 9P-served peak namespace (BasePathFs over the
-// composite VFS) to add /exec as a regular file. Without this wrapper the
-// composite mount mechanism would create exec as a directory entry.
+// composite VFS) to add /exec, /event, and /bind as virtual files. Without
+// this wrapper the composite mount mechanism would create them as directories.
 type peakNamespaceFs struct {
 	inner  afero.Fs
 	editor *Editor
+	bus    *globalEventBus
 }
 
-func newPeakNamespaceFs(inner afero.Fs, editor *Editor) *peakNamespaceFs {
-	return &peakNamespaceFs{inner: inner, editor: editor}
+func newPeakNamespaceFs(inner afero.Fs, editor *Editor, bus *globalEventBus) *peakNamespaceFs {
+	return &peakNamespaceFs{inner: inner, editor: editor, bus: bus}
 }
 
 func (fs *peakNamespaceFs) Stat(name string) (os.FileInfo, error) {
-	if trimSlash(name) == "exec" {
+	switch trimSlash(name) {
+	case "exec":
 		return &simpleFileInfo{name: "exec", mode: 0600}, nil
+	case "event":
+		return &simpleFileInfo{name: "event", mode: 0444}, nil
+	case "bind":
+		return &simpleFileInfo{name: "bind", mode: 0200}, nil
 	}
 	return fs.inner.Stat(name)
 }
@@ -38,6 +44,11 @@ func (fs *peakNamespaceFs) OpenFile(name string, flag int, perm os.FileMode) (af
 	switch trimSlash(name) {
 	case "exec":
 		return &execFile{editor: fs.editor}, nil
+	case "event":
+		sub := fs.bus.subscribe()
+		return &globalEventFile{bus: fs.bus, sub: sub}, nil
+	case "bind":
+		return &bindFile{editor: fs.editor}, nil
 	case "", ".":
 		f, err := fs.inner.OpenFile(name, flag, perm)
 		if err != nil {
@@ -60,8 +71,8 @@ func (fs *peakNamespaceFs) Chown(n string, u, g int) error         { return fs.i
 func (fs *peakNamespaceFs) Chtimes(n string, a, m time.Time) error { return fs.inner.Chtimes(n, a, m) }
 func (fs *peakNamespaceFs) Name() string                           { return "peakNamespaceFs" }
 
-// peakRootDirFile replaces the "exec" directory entry (created by Mount's
-// MkdirAll) with a regular file entry in directory listings.
+// peakRootDirFile replaces virtual file directory entries (created by Mount's
+// MkdirAll) with regular file entries in directory listings.
 type peakRootDirFile struct{ afero.File }
 
 func (f *peakRootDirFile) Readdir(count int) ([]os.FileInfo, error) {
@@ -69,15 +80,71 @@ func (f *peakRootDirFile) Readdir(count int) ([]os.FileInfo, error) {
 	if count > 0 {
 		return entries, err
 	}
+	virtual := map[string]bool{"exec": true, "event": true, "bind": true}
 	filtered := entries[:0]
 	for _, e := range entries {
-		if e.Name() != "exec" {
+		if !virtual[e.Name()] {
 			filtered = append(filtered, e)
 		}
 	}
-	filtered = append(filtered, &simpleFileInfo{name: "exec", mode: 0600})
+	filtered = append(filtered,
+		&simpleFileInfo{name: "exec", mode: 0600},
+		&simpleFileInfo{name: "event", mode: 0444},
+		&simpleFileInfo{name: "bind", mode: 0200},
+	)
 	return filtered, err
 }
+
+// ---- globalEventFile ----
+
+// globalEventFile is a blocking-read stream of editor lifecycle events.
+// Each open of /event creates an independent subscriber.
+type globalEventFile struct {
+	winStub
+	bus *globalEventBus
+	sub *eventSub
+}
+
+func (f *globalEventFile) Name() string { return "event" }
+func (f *globalEventFile) Stat() (os.FileInfo, error) {
+	return &simpleFileInfo{name: "event", mode: 0444}, nil
+}
+func (f *globalEventFile) ReadAt(p []byte, off int64) (int, error) {
+	return f.sub.readAt(p, off)
+}
+func (f *globalEventFile) Close() error {
+	f.bus.unsubscribe(f.sub)
+	f.sub.close()
+	return nil
+}
+
+// ---- bindFile ----
+
+// bindFile implements /bind: write "<socket-path> <mount-path>\n" to mount an
+// external 9P server into peak's composite VFS at the given path.
+type bindFile struct {
+	winStub
+	editor *Editor
+}
+
+func (f *bindFile) Name() string { return "bind" }
+func (f *bindFile) Stat() (os.FileInfo, error) {
+	return &simpleFileInfo{name: "bind", mode: 0200}, nil
+}
+
+func (f *bindFile) WriteAt(p []byte, _ int64) (int, error) {
+	parts := strings.Fields(strings.TrimSpace(string(p)))
+	if len(parts) < 2 {
+		return len(p), nil
+	}
+	if err := f.editor.ninep.Mount(parts[0], parts[1]); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+func (f *bindFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
+func (f *bindFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(s), 0) }
 
 // execFile implements /exec: write a window title to create an externally-driven
 // terminal window; read back the numeric window ID followed by a newline.
