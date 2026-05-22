@@ -177,6 +177,17 @@ func (e *Editor) Open(win *Window, path string) {
 func (e *Editor) OpenLine(win *Window, path string, line, col int, binaryFallback, fallback func()) {
 	full := e.resolvePathWithContext(win, path)
 
+	// /peak/new creates a fresh text window, same semantics as walking the 9P /new path.
+	if full == "/peak/new" {
+		target := e.getTargetColumn(nil, win)
+		if target != nil {
+			newWin := target.AddWindow(" New ", "")
+			e.ActivateWindow(newWin)
+			target.Resize(target.x, target.y, target.w, target.h)
+		}
+		return
+	}
+
 	// 1. Try to find existing window
 	for _, c := range e.columns {
 		for _, w := range c.windows {

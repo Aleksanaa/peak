@@ -4,12 +4,26 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/aleksana/peak/internal/vfs/afero"
 	"github.com/gdamore/tcell/v2"
 )
+
+// peakSrvFs is the afero.Fs handed to the 9P server. It embeds the
+// BasePathFs-over-composite that handles all real file operations, and
+// additionally implements vfs.WalkRedirector by delegating directly to
+// peakNamespaceFs — whose namespace root matches the 9P namespace root.
+type peakSrvFs struct {
+	afero.Fs
+	nsFs *peakNamespaceFs
+}
+
+func (fs *peakSrvFs) WalkRedirect(dir, name string) (string, os.FileInfo, bool) {
+	return fs.nsFs.WalkRedirect(dir, name)
+}
 
 // peakNamespaceFs wraps the 9P-served peak namespace (BasePathFs over the
 // composite VFS) to add /exec, /event, and /bind as virtual files. Without
@@ -34,8 +48,34 @@ func (fs *peakNamespaceFs) Stat(name string) (os.FileInfo, error) {
 		return &simpleFileInfo{name: "bind", mode: 0200}, nil
 	case "unbind":
 		return &simpleFileInfo{name: "unbind", mode: 0200}, nil
+	case "new":
+		return &simpleFileInfo{name: "new", isDir: true, mode: 0555}, nil
 	}
 	return fs.inner.Stat(name)
+}
+
+// WalkRedirect implements vfs.WalkRedirector. Walking "new" from the root
+// creates a fresh text window and redirects the fid to that window's directory,
+// matching acme's /acme/new semantics.
+func (fs *peakNamespaceFs) WalkRedirect(dir, name string) (string, os.FileInfo, bool) {
+	if (dir == "" || dir == "/") && name == "new" {
+		var win *Window
+		fs.editor.Call(func() {
+			col := fs.editor.getTargetColumn(nil, nil)
+			if col == nil {
+				return
+			}
+			win = col.AddWindow(" New ", "")
+			fs.editor.ActivateWindow(win)
+			col.Resize(col.x, col.y, col.w, col.h)
+		})
+		if win == nil {
+			return "", nil, false
+		}
+		id := strconv.Itoa(win.ID)
+		return "/" + id, &simpleFileInfo{name: id, isDir: true, mode: 0555}, true
+	}
+	return "", nil, false
 }
 
 func (fs *peakNamespaceFs) Open(name string) (afero.File, error) {
@@ -84,7 +124,7 @@ func (f *peakRootDirFile) Readdir(count int) ([]os.FileInfo, error) {
 	if count > 0 {
 		return entries, err
 	}
-	virtual := map[string]bool{"exec": true, "event": true, "bind": true, "unbind": true}
+	virtual := map[string]bool{"exec": true, "event": true, "bind": true, "unbind": true, "new": true}
 	filtered := entries[:0]
 	for _, e := range entries {
 		if !virtual[e.Name()] {
@@ -96,6 +136,7 @@ func (f *peakRootDirFile) Readdir(count int) ([]os.FileInfo, error) {
 		&simpleFileInfo{name: "event", mode: 0444},
 		&simpleFileInfo{name: "bind", mode: 0200},
 		&simpleFileInfo{name: "unbind", mode: 0200},
+		&simpleFileInfo{name: "new", isDir: true, mode: 0555},
 	)
 	return filtered, err
 }

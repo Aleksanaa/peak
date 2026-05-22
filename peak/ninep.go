@@ -12,7 +12,6 @@ import (
 	"github.com/aleksana/peak/internal/vfs/afero"
 )
 
-
 //go:embed doc
 var docFS embed.FS
 
@@ -21,6 +20,7 @@ type NineP struct {
 	editor *Editor
 	vfs    *vfs.CompositeFs
 	bus    *globalEventBus
+	nsFs   *peakNamespaceFs
 }
 
 func NewNineP(e *Editor) *NineP {
@@ -28,7 +28,8 @@ func NewNineP(e *Editor) *NineP {
 	p := &NineP{editor: e, vfs: fs, bus: &globalEventBus{}}
 
 	p.vfs.Mount("/", afero.NewOsFs())
-	p.vfs.Mount("/peak", afero.NewMemMapFs())
+	p.nsFs = newPeakNamespaceFs(afero.NewMemMapFs(), e, p.bus)
+	p.vfs.Mount("/peak", p.nsFs)
 
 	docFs := afero.FromIOFS{FS: docFS}
 	p.vfs.Mount("/peak/doc", afero.NewBasePathFs(docFs, "doc"))
@@ -46,8 +47,10 @@ func (p *NineP) Listen() {
 	os.MkdirAll(filepath.Dir(sockPath), 0700)
 	os.Remove(sockPath)
 
-	inner := afero.NewBasePathFs(p.vfs, "/peak")
-	srv := vfs.NewNinePSrv(newPeakNamespaceFs(inner, p.editor, p.bus))
+	srv := vfs.NewNinePSrv(&peakSrvFs{
+		Fs:   afero.NewBasePathFs(p.vfs, "/peak"),
+		nsFs: p.nsFs,
+	})
 	go func() {
 		if err := srv.Serve("unix", sockPath); err != nil {
 			log.Printf("9P server error: %v", err)

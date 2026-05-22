@@ -81,6 +81,14 @@ func (s *NinePSrv) Attach(c go9p.Conn, r *proto.TAttach) (proto.FCall, error) {
 	}, nil
 }
 
+// WalkRedirector may be implemented by an afero.Fs to redirect certain walk
+// steps to a different path. The server calls WalkRedirect for each name before
+// falling back to the normal Stat lookup. This is the mechanism used for paths
+// like "new" that create a resource on access and redirect the fid to it.
+type WalkRedirector interface {
+	WalkRedirect(dir, name string) (redirectPath string, fi os.FileInfo, ok bool)
+}
+
 func (s *NinePSrv) Walk(c go9p.Conn, r *proto.TWalk) (proto.FCall, error) {
 	conn := c.(*NinePConn)
 	conn.mu.Lock()
@@ -91,18 +99,30 @@ func (s *NinePSrv) Walk(c go9p.Conn, r *proto.TWalk) (proto.FCall, error) {
 		return &proto.RError{Header: proto.Header{Type: proto.Rerror, Tag: r.Tag}, Ename: "unknown fid"}, nil
 	}
 
+	wr, _ := s.fs.(WalkRedirector)
 	qids := make([]proto.Qid, 0)
 	for _, name := range r.Wname {
-		nextPath := path.Join(currentPath, name)
-		fi, err := s.fs.Stat(nextPath)
-		if err != nil {
-			if len(qids) == 0 {
-				return &proto.RError{Header: proto.Header{Type: proto.Rerror, Tag: r.Tag}, Ename: err.Error()}, nil
+		var nextPath string
+		var fi os.FileInfo
+
+		if wr != nil {
+			if rp, rfi, redirected := wr.WalkRedirect(currentPath, name); redirected {
+				nextPath, fi = rp, rfi
 			}
-			return &proto.RWalk{Header: proto.Header{Type: proto.Rwalk, Tag: r.Tag}, Nwqid: uint16(len(qids)), Wqid: qids}, nil
 		}
-		q := toQid(nextPath, fi)
-		qids = append(qids, q)
+		if nextPath == "" {
+			nextPath = path.Join(currentPath, name)
+			var err error
+			fi, err = s.fs.Stat(nextPath)
+			if err != nil {
+				if len(qids) == 0 {
+					return &proto.RError{Header: proto.Header{Type: proto.Rerror, Tag: r.Tag}, Ename: err.Error()}, nil
+				}
+				return &proto.RWalk{Header: proto.Header{Type: proto.Rwalk, Tag: r.Tag}, Nwqid: uint16(len(qids)), Wqid: qids}, nil
+			}
+		}
+
+		qids = append(qids, toQid(nextPath, fi))
 		currentPath = nextPath
 	}
 
