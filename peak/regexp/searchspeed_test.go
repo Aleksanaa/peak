@@ -11,7 +11,7 @@ func readLargeFile(b testing.TB, numcopies int) []rune {
 	b.Helper()
 
 	// TODO(rjk): copy the test data into this directory?
-	fname := "../testdata/hello.go"
+	fname := "testdata/hello.go"
 
 	f, err := os.ReadFile(fname)
 	if err != nil {
