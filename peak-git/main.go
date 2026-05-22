@@ -65,7 +65,7 @@ func watchEvents(peakFs afero.Fs) {
 	scanner := bufio.NewScanner(eventF)
 	for scanner.Scan() {
 		parts := strings.Fields(scanner.Text())
-		if len(parts) != 2 {
+		if len(parts) < 2 {
 			continue
 		}
 		switch parts[0] {

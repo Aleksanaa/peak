@@ -63,7 +63,7 @@ func watchEvents(fs afero.Fs) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		parts := strings.Fields(line)
-		if len(parts) == 2 && parts[0] == "new" {
+		if len(parts) >= 2 && parts[0] == "new" {
 			if id, err := strconv.Atoi(parts[1]); err == nil {
 				start(id)
 			}

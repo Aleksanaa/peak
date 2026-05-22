@@ -58,13 +58,25 @@ func (p *NineP) Listen() {
 // MountWindow exposes a window's namespace at /peak/<id>/.
 func (p *NineP) MountWindow(win *Window) {
 	p.vfs.Mount("/peak/"+strconv.Itoa(win.ID), &windowFs{win: win})
-	p.bus.broadcast(fmt.Sprintf("new %d\n", win.ID))
+	p.bus.broadcast(fmt.Sprintf("new %d %s\n", win.ID, win.GetFilename()))
 }
 
 // UmountWindow removes a window's namespace.
 func (p *NineP) UmountWindow(win *Window) {
 	p.vfs.Umount("/peak/" + strconv.Itoa(win.ID))
-	p.bus.broadcast(fmt.Sprintf("close %d\n", win.ID))
+	p.bus.broadcast(fmt.Sprintf("close %d %s\n", win.ID, win.GetFilename()))
+}
+
+func (p *NineP) BroadcastFocus(win *Window) {
+	p.bus.broadcast(fmt.Sprintf("focus %d %s\n", win.ID, win.GetFilename()))
+}
+
+func (p *NineP) BroadcastGet(win *Window) {
+	p.bus.broadcast(fmt.Sprintf("get %d %s\n", win.ID, win.GetFilename()))
+}
+
+func (p *NineP) BroadcastPut(win *Window) {
+	p.bus.broadcast(fmt.Sprintf("put %d %s\n", win.ID, win.GetFilename()))
 }
 
 func (p *NineP) Mount(socket, path string) error {

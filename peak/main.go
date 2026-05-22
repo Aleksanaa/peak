@@ -320,8 +320,12 @@ func (e *Editor) ActivateWindow(win *Window) {
 	if win == nil {
 		return
 	}
+	prev := e.active
 	e.active = win
 	e.focusedView = win.body
+	if prev != win {
+		e.ninep.BroadcastFocus(win)
+	}
 }
 
 func (e *Editor) moveColumnTo(col *Column, mx int) {

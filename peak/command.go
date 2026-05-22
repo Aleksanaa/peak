@@ -303,6 +303,7 @@ func (e *Editor) cmdGet(win *Window, cmd string) {
 					target.hasVersion = hasVersion(path)
 					target.savedVersion = tv.buffer.version
 					target.warnedVersion = target.savedVersion
+					e.ninep.BroadcastGet(target)
 				}
 			} else {
 				e.showError(target.parent, target, "", path+": "+normalizeError(err))
@@ -338,6 +339,7 @@ func (e *Editor) cmdPut(win *Window, cmd string) {
 					target.hasVersion = hasVersion(path)
 					target.savedVersion = version
 					target.warnedVersion = version
+					e.ninep.BroadcastPut(target)
 				}
 			}))
 		}()
