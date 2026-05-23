@@ -477,6 +477,8 @@ func (tv *TextView) SyncScroll() {
 		return
 	}
 	_, vrow := tv.bufferToVisual(tv.buffer.cursor.x, tv.buffer.cursor.y)
+	// Cursor movement always reveals the cursor; no "reading history" mode for text views.
+	tv.scroll.AutoScroll = true
 	tv.scroll.Sync(vrow, len(tv.layout), tv.h)
 }
 
