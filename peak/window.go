@@ -909,13 +909,9 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 			}
 		}
 	}
-	hasSubs := len(win.eventSubs) > 0
 	win.lk.Unlock()
 
 	if word == "" {
-		return false
-	}
-	if hasSubs {
 		return false
 	}
 	if btns&tcell.Button3 != 0 {

@@ -141,8 +141,7 @@ func watchWindow(fs afero.Fs, id int, retitleCh <-chan string) {
 		case strings.HasPrefix(line, "I "), strings.HasPrefix(line, "D "):
 			signal()
 		case strings.HasPrefix(line, "x "), strings.HasPrefix(line, "l "):
-			// Write back unhandled execute/look events so the editor acts on them.
-			eventF.WriteString(line + "\n")
+			// Peak processes x/l events directly; no write-back needed.
 		}
 	}
 	close(trigger)
