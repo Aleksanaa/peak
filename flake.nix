@@ -27,9 +27,7 @@
 
                 src = lib.cleanSource ./.;
 
-                subPackages = [ "peak" ];
-
-                vendorHash = "sha256-idMk2ZtUb7lMO/1bo59OJk2oQG03PyB5egYoSaphLzw=";
+                vendorHash = "sha256-baSdUgZJMh6XNqqNF1Mqizx/Nqv+VtzEPKluY8GqqNU=";
 
                 env.CGO_ENABLED = 0;
 
@@ -37,8 +35,6 @@
                   "-s"
                   "-w"
                 ];
-
-                doCheck = false; # breaks regexp, test data missing
               };
             default = peak;
           };
