@@ -532,52 +532,53 @@ type Window struct {
 	savedVersion  int
 	warnedVersion int
 
-	// event subscriptions — written/read by multiple goroutines
-	eventMu   sync.Mutex
+	// lk protects eventSubs, spans, addrQ0/Q1, and mutSeq/bodySnapSeq.
+	// Held briefly by the UI thread (Draw, HandleEvent → onMutate) and by
+	// 9P goroutines (file Open/Close). Never nested.
+	lk        sync.Mutex
 	eventSubs []*eventSub
 
 	// current addr (rune offsets) for external tool use
 	addrQ0, addrQ1 int
 
-	// color spans applied during Draw; written by 9P goroutine, read by main
-	spansMu sync.RWMutex
-	spans   []colorSpan
+	// color spans applied during Draw
+	spans []colorSpan
 
-	// mutSeq is incremented on every body mutation (UI thread only).
+	// mutSeq is incremented on every body mutation.
 	// bodySnapSeq is set to mutSeq when the body is snapped for a 9P read.
-	// winColorFile.Close discards spans if mutSeq != bodySnapSeq, meaning the
-	// body changed after the snapshot peak-lsp used to compute the spans.
+	// winColorFile.Close discards spans if mutSeq != bodySnapSeq.
 	mutSeq, bodySnapSeq uint64
 }
 
 func (win *Window) subscribeEvent() *eventSub {
 	sub := newEventSub()
-	win.eventMu.Lock()
+	win.lk.Lock()
 	win.eventSubs = append(win.eventSubs, sub)
-	win.eventMu.Unlock()
+	win.lk.Unlock()
 	return sub
 }
 
 func (win *Window) unsubscribeEvent(sub *eventSub) {
-	win.eventMu.Lock()
+	win.lk.Lock()
 	for i, s := range win.eventSubs {
 		if s == sub {
 			win.eventSubs = append(win.eventSubs[:i], win.eventSubs[i+1:]...)
 			break
 		}
 	}
-	win.eventMu.Unlock()
+	win.lk.Unlock()
 }
 
+// hasEventSubs is safe to call from any goroutine.
 func (win *Window) hasEventSubs() bool {
-	win.eventMu.Lock()
+	win.lk.Lock()
 	n := len(win.eventSubs)
-	win.eventMu.Unlock()
+	win.lk.Unlock()
 	return n > 0
 }
 
 // broadcastEvent delivers an event line to all open event file subscribers.
-// Safe to call from the main goroutine.
+// Caller must hold win.lk. deliver is non-blocking so holding lk is safe.
 func (win *Window) broadcastEvent(kind byte, q0, q1 int, text string) {
 	var line []byte
 	if text != "" {
@@ -585,10 +586,7 @@ func (win *Window) broadcastEvent(kind byte, q0, q1 int, text string) {
 	} else {
 		line = []byte(fmt.Sprintf("%c %d %d\n", kind, q0, q1))
 	}
-	win.eventMu.Lock()
-	subs := append([]*eventSub(nil), win.eventSubs...)
-	win.eventMu.Unlock()
-	for _, s := range subs {
+	for _, s := range win.eventSubs {
 		s.deliver(line)
 	}
 }
@@ -606,12 +604,8 @@ func adjustPoint(q, q0, q1Old, q1New int) int {
 }
 
 // adjustSpans shifts or drops color spans to stay consistent with a body
-// mutation [q0, q1Old) → [q0, q1New). Called from onMutate before the next
-// Draw so spans never point at the wrong rune positions between an edit and
-// the next highlight pass from peak-lsp.
+// mutation [q0, q1Old) → [q0, q1New). Caller must hold win.lk.
 func (win *Window) adjustSpans(q0, q1Old, q1New int) {
-	win.spansMu.Lock()
-	defer win.spansMu.Unlock()
 	if len(win.spans) == 0 {
 		return
 	}
@@ -632,7 +626,7 @@ func (win *Window) adjustSpans(q0, q1Old, q1New int) {
 			// surrounds the changed region: only the end endpoint shifts
 			spans[j] = colorSpan{sp.q0, sp.q1 + delta, sp.attr}
 			j++
-		// else: partially overlaps — drop; peak-lsp will rewrite shortly
+			// else: partially overlaps — drop; peak-lsp will rewrite shortly
 		}
 	}
 	win.spans = spans[:j]
@@ -832,18 +826,22 @@ func (win *Window) Draw(s tcell.Screen) {
 		}
 	}
 
+	win.lk.Lock()
 	win.tag.Draw(s)
+	spans := win.spans
+	win.lk.Unlock()
+
 	if tv, ok := win.body.(*TextView); ok {
-		win.spansMu.RLock()
-		spans := win.spans
-		win.spansMu.RUnlock()
 		if len(spans) > 0 {
 			tv.colorAt = win.colorAtFunc(spans)
 		} else {
 			tv.colorAt = nil
 		}
 	}
+
+	win.lk.Lock()
 	win.body.Draw(s)
+	win.lk.Unlock()
 }
 
 func (win *Window) Resize(x, y, w, h int) {
@@ -893,24 +891,33 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 		target = win.tag
 	}
 
+	win.lk.Lock()
 	target.HandleEvent(ev)
 	btns := me.Buttons()
+	var word string
+	var q0, q1 int
 	if btns&(tcell.Button3|tcell.Button2) != 0 && (!target.IsRaw() || me.Modifiers()&tcell.ModCtrl != 0) {
-		if word := target.GetClickWord(mx, my); word != "" {
-			q0, q1 := win.clickWordOffsets(target, mx, my, word)
+		word = target.GetClickWord(mx, my)
+		if word != "" {
+			q0, q1 = win.clickWordOffsets(target, mx, my, word)
 			if btns&tcell.Button3 != 0 {
 				win.broadcastEvent('x', q0, q1, word)
-				if win.hasEventSubs() {
-					return false
-				}
-				return win.onExec != nil && win.onExec(win.parent, win, word)
+			} else {
+				win.broadcastEvent('l', q0, q1, word)
 			}
-			win.broadcastEvent('l', q0, q1, word)
-			if win.hasEventSubs() {
-				return false
-			}
-			return win.editor.Plumb(win, word)
 		}
 	}
-	return false
+	hasSubs := len(win.eventSubs) > 0
+	win.lk.Unlock()
+
+	if word == "" {
+		return false
+	}
+	if hasSubs {
+		return false
+	}
+	if btns&tcell.Button3 != 0 {
+		return win.onExec != nil && win.onExec(win.parent, win, word)
+	}
+	return win.editor.Plumb(win, word)
 }

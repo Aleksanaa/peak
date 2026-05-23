@@ -18,34 +18,41 @@ type colorSpan struct {
 // ---- event subscription ----
 
 // eventSub is one reader's subscription to a window's event stream.
-// ReadAt blocks until data arrives; deliveries never fail silently.
+// deliver sends chunks to a buffered channel; readAt drains the channel
+// into a local accumulator and serves from it by offset. The accumulator
+// is only ever accessed by the single 9P goroutine calling readAt.
 type eventSub struct {
-	mu   sync.Mutex
-	cond *sync.Cond
-	buf  []byte
-	done bool
+	ch   chan []byte
+	buf  []byte // accumulated bytes; goroutine-local to the readAt caller
+	once sync.Once
 }
 
 func newEventSub() *eventSub {
-	s := &eventSub{}
-	s.cond = sync.NewCond(&s.mu)
-	return s
+	return &eventSub{ch: make(chan []byte, 64)}
 }
 
+// deliver sends line to the subscriber. Non-blocking: if the channel is
+// full the line is dropped (peak-lsp will re-sync from the next event).
 func (s *eventSub) deliver(line []byte) {
-	s.mu.Lock()
-	if !s.done {
-		s.buf = append(s.buf, line...)
-		s.cond.Signal()
+	select {
+	case s.ch <- line:
+	default:
 	}
-	s.mu.Unlock()
 }
 
+// readAt blocks until enough bytes have arrived to serve offset off,
+// then copies into p. Returns io.EOF when the subscription is closed
+// and no more data is available at off.
 func (s *eventSub) readAt(p []byte, off int64) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for int64(len(s.buf)) <= off && !s.done {
-		s.cond.Wait()
+	for int64(len(s.buf)) <= off {
+		chunk, ok := <-s.ch
+		if !ok {
+			if int64(len(s.buf)) <= off {
+				return 0, io.EOF
+			}
+			break
+		}
+		s.buf = append(s.buf, chunk...)
 	}
 	if int64(len(s.buf)) <= off {
 		return 0, io.EOF
@@ -55,10 +62,7 @@ func (s *eventSub) readAt(p []byte, off int64) (int, error) {
 }
 
 func (s *eventSub) close() {
-	s.mu.Lock()
-	s.done = true
-	s.cond.Broadcast()
-	s.mu.Unlock()
+	s.once.Do(func() { close(s.ch) })
 }
 
 // ---- globalEventBus ----
@@ -142,15 +146,9 @@ func (f *winEventFile) WriteAt(p []byte, _ int64) (int, error) {
 		win := f.win
 		switch kind {
 		case "x":
-			win.editor.Call(func() {
-				if win.onExec != nil {
-					win.onExec(win.parent, win, text)
-				}
-			})
+			win.editor.execCh <- execReq{col: win.parent, win: win, text: text, kind: 'x'}
 		case "l":
-			win.editor.Call(func() {
-				win.editor.Plumb(win, text)
-			})
+			win.editor.execCh <- execReq{win: win, text: text, kind: 'l'}
 		}
 	}
 	return len(p), nil
@@ -163,9 +161,9 @@ func (f *winEventFile) Close() error {
 	if f.sub != nil {
 		f.win.unsubscribeEvent(f.sub)
 		f.sub.close()
-		f.win.spansMu.Lock()
+		f.win.lk.Lock()
 		f.win.spans = nil
-		f.win.spansMu.Unlock()
+		f.win.lk.Unlock()
 	}
 	return nil
 }
@@ -213,14 +211,14 @@ func (f *winAddrFile) Close() error {
 		return nil
 	}
 	s := strings.TrimSpace(string(f.writes))
-	f.win.editor.Call(func() {
-		buf := f.win.body.GetBuffer()
-		q0, q1, err := parseAddr(s, buf)
-		if err == nil {
-			f.win.addrQ0 = clampAddr(q0, buf)
-			f.win.addrQ1 = clampAddr(q1, buf)
-		}
-	})
+	f.win.lk.Lock()
+	buf := f.win.body.GetBuffer()
+	q0, q1, err := parseAddr(s, buf)
+	if err == nil {
+		f.win.addrQ0 = clampAddr(q0, buf)
+		f.win.addrQ1 = clampAddr(q1, buf)
+	}
+	f.win.lk.Unlock()
 	return nil
 }
 
@@ -318,16 +316,18 @@ func (f *winDataFile) Close() error {
 	if f.writes == nil {
 		return nil
 	}
-	text := string(f.writes)
-	f.win.editor.Call(func() {
-		buf := f.win.body.GetBuffer()
-		if buf == nil {
-			return
-		}
-		runes := []rune(text)
+	runes := []rune(string(f.writes))
+	var modified bool
+	f.win.lk.Lock()
+	if buf := f.win.body.GetBuffer(); buf != nil {
 		buf.ReplaceRangeRunes(f.win.addrQ0, f.win.addrQ1, runes)
 		f.win.addrQ1 = f.win.addrQ0 + len(runes)
-	})
+		modified = true
+	}
+	f.win.lk.Unlock()
+	if modified {
+		f.win.editor.Redraw()
+	}
 	return nil
 }
 
@@ -374,14 +374,12 @@ func (f *winColorFile) Close() error {
 		}
 		newSpans = append(newSpans, colorSpan{q0, q1, parts[2]})
 	}
-	f.win.editor.Call(func() {
-		if f.win.mutSeq != f.win.bodySnapSeq {
-			return // body changed since peak-lsp snapped it; spans are stale
-		}
-		f.win.spansMu.Lock()
+	f.win.lk.Lock()
+	if f.win.mutSeq == f.win.bodySnapSeq {
 		f.win.spans = newSpans
-		f.win.spansMu.Unlock()
-	})
+	}
+	f.win.lk.Unlock()
+	f.win.editor.Redraw()
 	return nil
 }
 

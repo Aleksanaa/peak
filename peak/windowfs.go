@@ -23,18 +23,17 @@ func (fs *windowFs) Stat(name string) (os.FileInfo, error) {
 		if tv, ok := fs.win.body.(*TermView); ok {
 			size = int64(len(tv.GetScrollback()))
 		} else {
-			fs.win.editor.Call(func() {
-				if buf := fs.win.body.GetBuffer(); buf != nil {
-					size = int64(len(buf.GetText()))
-				}
-			})
+			fs.win.lk.Lock()
+			if buf := fs.win.body.GetBuffer(); buf != nil {
+				size = int64(len(buf.GetText()))
+			}
+			fs.win.lk.Unlock()
 		}
 		return &simpleFileInfo{name: "body", mode: 0644, size: size}, nil
 	case "tag":
-		var size int64
-		fs.win.editor.Call(func() {
-			size = int64(len(fs.win.tag.buffer.GetText()))
-		})
+		fs.win.lk.Lock()
+		size := int64(len(fs.win.tag.buffer.GetText()))
+		fs.win.lk.Unlock()
 		return &simpleFileInfo{name: "tag", mode: 0644, size: size}, nil
 	case "ctl":
 		snap := ctlSnap(fs.win)
@@ -42,30 +41,29 @@ func (fs *windowFs) Stat(name string) (os.FileInfo, error) {
 	case "event":
 		return &simpleFileInfo{name: "event", mode: 0644}, nil
 	case "addr":
-		var snap []byte
-		fs.win.editor.Call(func() {
-			snap = []byte(fmt.Sprintf("#%d,#%d\n", fs.win.addrQ0, fs.win.addrQ1))
-		})
+		fs.win.lk.Lock()
+		snap := []byte(fmt.Sprintf("#%d,#%d\n", fs.win.addrQ0, fs.win.addrQ1))
+		fs.win.lk.Unlock()
 		return &simpleFileInfo{name: "addr", mode: 0644, size: int64(len(snap))}, nil
 	case "data":
 		var size int64
-		fs.win.editor.Call(func() {
-			if buf := fs.win.body.GetBuffer(); buf != nil {
-				runes := buf.RunesInRange(fs.win.addrQ0, fs.win.addrQ1)
-				size = int64(len([]byte(string(runes))))
-			}
-		})
+		fs.win.lk.Lock()
+		if buf := fs.win.body.GetBuffer(); buf != nil {
+			runes := buf.RunesInRange(fs.win.addrQ0, fs.win.addrQ1)
+			size = int64(len([]byte(string(runes))))
+		}
+		fs.win.lk.Unlock()
 		return &simpleFileInfo{name: "data", mode: 0644, size: size}, nil
 	case "rdsel":
 		var snap []byte
-		fs.win.editor.Call(func() {
-			if buf := fs.win.body.GetBuffer(); buf != nil && buf.selection.Active {
-				start, end := buf.orderedSelection()
-				q0 := buf.RuneOffsetOfPos(start.y, start.x)
-				q1 := buf.RuneOffsetOfPos(end.y, end.x)
-				snap = []byte(string(buf.RunesInRange(q0, q1)))
-			}
-		})
+		fs.win.lk.Lock()
+		if buf := fs.win.body.GetBuffer(); buf != nil && buf.selection.Active {
+			start, end := buf.orderedSelection()
+			q0 := buf.RuneOffsetOfPos(start.y, start.x)
+			q1 := buf.RuneOffsetOfPos(end.y, end.x)
+			snap = []byte(string(buf.RunesInRange(q0, q1)))
+		}
+		fs.win.lk.Unlock()
 		return &simpleFileInfo{name: "rdsel", mode: 0444, size: int64(len(snap))}, nil
 	case "wrsel":
 		return &simpleFileInfo{name: "wrsel", mode: 0200}, nil
@@ -97,21 +95,21 @@ func (fs *windowFs) OpenFile(name string, flag int, perm os.FileMode) (afero.Fil
 			if tv, ok := fs.win.body.(*TermView); ok {
 				f.snap = []byte(tv.GetScrollback())
 			} else {
-				fs.win.editor.Call(func() {
-					if buf := fs.win.body.GetBuffer(); buf != nil {
-						f.snap = []byte(buf.GetText())
-						fs.win.bodySnapSeq = fs.win.mutSeq
-					}
-				})
+				fs.win.lk.Lock()
+				if buf := fs.win.body.GetBuffer(); buf != nil {
+					f.snap = []byte(buf.GetText())
+					fs.win.bodySnapSeq = fs.win.mutSeq
+				}
+				fs.win.lk.Unlock()
 			}
 		}
 		return f, nil
 	case "tag":
 		f := &winTagFile{win: fs.win}
 		if flag&os.O_WRONLY == 0 {
-			fs.win.editor.Call(func() {
-				f.snap = []byte(fs.win.tag.buffer.GetText())
-			})
+			fs.win.lk.Lock()
+			f.snap = []byte(fs.win.tag.buffer.GetText())
+			fs.win.lk.Unlock()
 		}
 		return f, nil
 	case "ctl":
@@ -129,42 +127,42 @@ func (fs *windowFs) OpenFile(name string, flag int, perm os.FileMode) (afero.Fil
 	case "addr":
 		f := &winAddrFile{win: fs.win}
 		if flag&os.O_WRONLY == 0 {
-			fs.win.editor.Call(func() {
-				f.snap = []byte(fmt.Sprintf("#%d,#%d\n", fs.win.addrQ0, fs.win.addrQ1))
-			})
+			fs.win.lk.Lock()
+			f.snap = []byte(fmt.Sprintf("#%d,#%d\n", fs.win.addrQ0, fs.win.addrQ1))
+			fs.win.lk.Unlock()
 		}
 		return f, nil
 	case "data":
 		f := &winDataFile{win: fs.win}
 		if flag&os.O_WRONLY == 0 {
-			fs.win.editor.Call(func() {
-				if buf := fs.win.body.GetBuffer(); buf != nil {
-					runes := buf.RunesInRange(fs.win.addrQ0, fs.win.addrQ1)
-					f.snap = []byte(string(runes))
-				}
-			})
+			fs.win.lk.Lock()
+			if buf := fs.win.body.GetBuffer(); buf != nil {
+				runes := buf.RunesInRange(fs.win.addrQ0, fs.win.addrQ1)
+				f.snap = []byte(string(runes))
+			}
+			fs.win.lk.Unlock()
 		}
 		return f, nil
 	case "rdsel":
 		f := &winRdselFile{win: fs.win}
-		fs.win.editor.Call(func() {
-			if buf := fs.win.body.GetBuffer(); buf != nil && buf.selection.Active {
-				start, end := buf.orderedSelection()
-				q0 := buf.RuneOffsetOfPos(start.y, start.x)
-				q1 := buf.RuneOffsetOfPos(end.y, end.x)
-				f.snap = []byte(string(buf.RunesInRange(q0, q1)))
-			}
-		})
+		fs.win.lk.Lock()
+		if buf := fs.win.body.GetBuffer(); buf != nil && buf.selection.Active {
+			start, end := buf.orderedSelection()
+			q0 := buf.RuneOffsetOfPos(start.y, start.x)
+			q1 := buf.RuneOffsetOfPos(end.y, end.x)
+			f.snap = []byte(string(buf.RunesInRange(q0, q1)))
+		}
+		fs.win.lk.Unlock()
 		return f, nil
 	case "wrsel":
 		f := &winWrselFile{win: fs.win}
-		fs.win.editor.Call(func() {
-			if buf := fs.win.body.GetBuffer(); buf != nil && buf.selection.Active {
-				start, end := buf.orderedSelection()
-				f.q0 = buf.RuneOffsetOfPos(start.y, start.x)
-				f.q1 = buf.RuneOffsetOfPos(end.y, end.x)
-			}
-		})
+		fs.win.lk.Lock()
+		if buf := fs.win.body.GetBuffer(); buf != nil && buf.selection.Active {
+			start, end := buf.orderedSelection()
+			f.q0 = buf.RuneOffsetOfPos(start.y, start.x)
+			f.q1 = buf.RuneOffsetOfPos(end.y, end.x)
+		}
+		fs.win.lk.Unlock()
 		return f, nil
 	case "errors":
 		return &winErrorsFile{win: fs.win}, nil
@@ -325,11 +323,16 @@ func (f *winBodyFile) Close() error {
 		return nil
 	}
 	text := string(f.writes)
-	f.win.editor.Call(func() {
-		if buf := f.win.body.GetBuffer(); buf != nil {
-			buf.SetText(text)
-		}
-	})
+	var modified bool
+	f.win.lk.Lock()
+	if buf := f.win.body.GetBuffer(); buf != nil {
+		buf.SetText(text)
+		modified = true
+	}
+	f.win.lk.Unlock()
+	if modified {
+		f.win.editor.Redraw()
+	}
 	return nil
 }
 
@@ -376,9 +379,10 @@ func (f *winTagFile) Close() error {
 		return nil
 	}
 	text := string(f.writes)
-	f.win.editor.Call(func() {
-		f.win.tag.buffer.SetText(text)
-	})
+	f.win.lk.Lock()
+	f.win.tag.buffer.SetText(text)
+	f.win.lk.Unlock()
+	f.win.editor.Redraw()
 	return nil
 }
 
@@ -390,23 +394,23 @@ func (f *winTagFile) Close() error {
 func ctlSnap(win *Window) []byte {
 	var tagLen, bodyLen, width, maxtab int
 	isDir, isDirty := 0, 0
-	win.editor.Call(func() {
-		tagLen = len([]rune(win.tag.buffer.GetText()))
-		if buf := win.body.GetBuffer(); buf != nil {
-			bodyLen = len([]rune(buf.GetText()))
-		}
-		if win.isDir {
-			isDir = 1
-		}
-		if win.IsDirty() {
-			isDirty = 1
-		}
-		_, _, width, _ = win.body.GetPos()
-		maxtab = 4
-		if tv, ok := win.body.(*TextView); ok {
-			maxtab = tv.tabWidth
-		}
-	})
+	win.lk.Lock()
+	tagLen = len([]rune(win.tag.buffer.GetText()))
+	if buf := win.body.GetBuffer(); buf != nil {
+		bodyLen = len([]rune(buf.GetText()))
+	}
+	if win.isDir {
+		isDir = 1
+	}
+	if win.IsDirty() {
+		isDirty = 1
+	}
+	_, _, width, _ = win.body.GetPos()
+	maxtab = 4
+	if tv, ok := win.body.(*TextView); ok {
+		maxtab = tv.tabWidth
+	}
+	win.lk.Unlock()
 	return []byte(fmt.Sprintf("%d %d %d %d %d %d terminal %d\n",
 		win.ID, tagLen, bodyLen, isDir, isDirty, width, maxtab))
 }
@@ -440,9 +444,7 @@ func (f *winCtlFile) WriteAt(p []byte, off int64) (int, error) {
 	if cmd == "" {
 		return len(p), nil
 	}
-	f.win.editor.Call(func() {
-		f.win.editor.Execute(f.win.parent, f.win, cmd)
-	})
+	f.win.editor.execCh <- execReq{col: f.win.parent, win: f.win, text: cmd, kind: 'x'}
 	return len(p), nil
 }
 
@@ -509,11 +511,16 @@ func (f *winWrselFile) Close() error {
 		return nil
 	}
 	runes := []rune(string(f.writes))
-	f.win.editor.Call(func() {
-		if buf := f.win.body.GetBuffer(); buf != nil {
-			buf.ReplaceRangeRunes(f.q0, f.q1, runes)
-		}
-	})
+	var modified bool
+	f.win.lk.Lock()
+	if buf := f.win.body.GetBuffer(); buf != nil {
+		buf.ReplaceRangeRunes(f.q0, f.q1, runes)
+		modified = true
+	}
+	f.win.lk.Unlock()
+	if modified {
+		f.win.editor.Redraw()
+	}
 	return nil
 }
 
@@ -547,9 +554,7 @@ func (f *winErrorsFile) Close() error {
 		return nil
 	}
 	msg := string(f.writes)
-	f.win.editor.Call(func() {
-		f.win.editor.appendToErrorWindow(f.win.parent, f.win, msg)
-	})
+	f.win.editor.execCh <- execReq{col: f.win.parent, win: f.win, text: msg, kind: 'e'}
 	return nil
 }
 

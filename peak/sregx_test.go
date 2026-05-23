@@ -114,7 +114,7 @@ func TestEditDelete(t *testing.T) {
 		cmd  string
 		want string
 	}{
-		{Range{0, 0}, "d", editContents},         // empty dot: no-op
+		{Range{0, 0}, "d", editContents}, // empty dot: no-op
 		{Range{2, 6}, "d", "Ths a\nshort text\nto try addressing\n"},
 		{Range{0, 0}, "/text/d", "This is a\nshort \nto try addressing\n"},
 	}
@@ -297,8 +297,8 @@ func TestEditEqualsLine(t *testing.T) {
 		dot  Range
 		want string
 	}{
-		{Range{0, 3}, "1"},    // within line 1
-		{Range{10, 19}, "2"},  // within line 2
+		{Range{0, 3}, "1"},   // within line 1
+		{Range{10, 19}, "2"}, // within line 2
 		// Range{0,10} ends at the \n of line 1; trailing \n causes l2 to be decremented
 		{Range{0, 10}, "1"},
 		// Range{0,11} ends one char into line 2 → spans two lines
@@ -323,7 +323,7 @@ func TestEditEqualsChar(t *testing.T) {
 		want string
 	}{
 		{Range{1, 3}, "#1,#3"},
-		{Range{5, 5}, "#5"},    // q0==q1: no comma
+		{Range{5, 5}, "#5"}, // q0==q1: no comma
 		{Range{0, 4}, "#0,#4"},
 	}
 	for _, tc := range tests {
@@ -650,7 +650,7 @@ func TestEditReadFile(t *testing.T) {
 
 func TestParsecmd(t *testing.T) {
 	tests := []struct {
-		input string
+		input   string
 		wantErr bool
 	}{
 		// valid commands
@@ -661,15 +661,15 @@ func TestParsecmd(t *testing.T) {
 		{"s/abc/def/g\n", false},
 		{"s2/abc/def/\n", false},
 		{"x/abc/\n", false},
-		{"x/abc/j\n", true},   // 'j' is unknown sub-command
-		{"x a/@/\n", false},   // x without pattern (linelooper)
-		{"y a/>/\n", false},   // y without pattern (linelooper)
-		{"Y a/>/\n", true},    // Y requires a pattern (sam spec)
+		{"x/abc/j\n", true}, // 'j' is unknown sub-command
+		{"x a/@/\n", false}, // x without pattern (linelooper)
+		{"y a/>/\n", false}, // y without pattern (linelooper)
+		{"Y a/>/\n", true},  // Y requires a pattern (sam spec)
 		{"g/abc/d\n", false},
 		{"v/abc/d\n", false},
 		{"{\nd\n}\n", false},
 		{"{}\n", false},
-		{"}\n", true},          // right brace with no left brace
+		{"}\n", true}, // right brace with no left brace
 		{"u\n", false},
 		{"u5\n", false},
 		{"u-3\n", false},
@@ -686,8 +686,8 @@ func TestParsecmd(t *testing.T) {
 		{"{\n}\n", false},
 		// multiline text forms
 		{"a\nabc\n.\n", false},
-		{"a\nabc", false},        // no dot terminator at EOF is also ok
-		{"a/a\\\nc/\n", false},  // line continuation in delimited text
+		{"a\nabc", false},      // no dot terminator at EOF is also ok
+		{"a/a\\\nc/\n", false}, // line continuation in delimited text
 		// t requires a target address
 		{"t\n", true},
 		// bad address syntax for m/t

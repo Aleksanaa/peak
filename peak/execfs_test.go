@@ -189,11 +189,9 @@ func TestGlobalEventFileCloseUnsubscribes(t *testing.T) {
 	if after >= before {
 		t.Errorf("bus sub count did not decrease: before=%d after=%d", before, after)
 	}
-	sub.mu.Lock()
-	done := sub.done
-	sub.mu.Unlock()
-	if !done {
-		t.Error("sub not marked done after Close")
+	_, open := <-sub.ch
+	if open {
+		t.Error("sub channel not closed after Close")
 	}
 }
 

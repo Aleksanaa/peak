@@ -57,9 +57,11 @@ func setupTest(t *testing.T, w, h int) (*Editor, tcell.SimulationScreen) {
 	}
 	s.SetSize(w, h)
 	e := &Editor{
-		screen:  s,
-		theme:   defaultTheme,
-		CmdChan: make(chan func()),
+		screen:   s,
+		theme:    defaultTheme,
+		CmdChan:  make(chan func()),
+		redrawCh: make(chan struct{}, 1),
+		execCh:   make(chan execReq, 8),
 	}
 	appEditor = e
 	e.ninep = NewNineP(e)
@@ -68,6 +70,23 @@ func setupTest(t *testing.T, w, h int) (*Editor, tcell.SimulationScreen) {
 	go func() {
 		for fn := range e.CmdChan {
 			fn()
+		}
+	}()
+
+	go func() {
+		for req := range e.execCh {
+			switch req.kind {
+			case 'x':
+				if req.win != nil && req.win.onExec != nil {
+					req.win.onExec(req.col, req.win, req.text)
+				}
+			case 'l':
+				e.Plumb(req.win, req.text)
+			case 'e':
+				e.appendToErrorWindow(req.col, req.win, req.text)
+			}
+			// Wake up any waitFor loops so they can recheck their condition.
+			e.screen.PostEvent(tcell.NewEventInterrupt(nil))
 		}
 	}()
 

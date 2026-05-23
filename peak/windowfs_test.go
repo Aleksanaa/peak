@@ -226,10 +226,19 @@ func TestWindowFsCtlExec(t *testing.T) {
 
 	before := len(col.windows)
 	writeClose(t, wfs, "ctl", "Del")
-	after := len(col.windows)
 
-	if after != before-1 {
-		t.Errorf("after Del: %d windows, want %d", after, before-1)
+	// execCh is processed asynchronously; poll until the window is gone.
+	deadline := time.After(time.Second)
+	for {
+		if len(col.windows) == before-1 {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Errorf("after Del: %d windows, want %d", len(col.windows), before-1)
+			return
+		case <-time.After(5 * time.Millisecond):
+		}
 	}
 }
 
@@ -566,24 +575,28 @@ func TestWindowFsEventBounceback(t *testing.T) {
 	}
 	defer evF.Close()
 
-	executed := false
+	done := make(chan struct{}, 1)
 	win.onExec = func(_ *Column, _ *Window, cmd string) bool {
 		if cmd == "Get" {
-			executed = true
+			select {
+			case done <- struct{}{}:
+			default:
+			}
 		}
 		return true
 	}
 
-	// Write an x event back — this re-dispatches it as if the tool decided to let the editor handle it
+	// Write an x event back — this re-dispatches it as if the tool decided to let the editor handle it.
 	evF.WriteString("x 0 3 Get\n")
 
-	// editor.Call is synchronous — by the time it returns the dispatch has happened
-	e.Call(func() {})
-
-	if !executed {
+	// execCh is async; wait for onExec to be called.
+	select {
+	case <-done:
+	case <-time.After(time.Second):
 		t.Error("onExec was not called after bounce-back write")
 	}
 	_ = col
+	_ = e
 }
 
 // ---- global lifecycle events ----

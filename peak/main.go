@@ -64,9 +64,20 @@ var defaultTheme = Theme{
 	SynError:    tcell.NewHexColor(0xf38ba8), // red
 }
 
+// execReq is a non-blocking request for the UI thread to run an executive
+// operation: execute a command, plumb a string, or append to the error window.
+type execReq struct {
+	col  *Column
+	win  *Window
+	text string
+	kind byte // 'x'=Execute, 'l'=Plumb, 'e'=appendToErrorWindow
+}
+
 // Editor is the main application state.
 type Editor struct {
 	CmdChan     chan func()
+	redrawCh    chan struct{} // capacity-1; 9P goroutines signal after state changes
+	execCh      chan execReq  // buffered; 9P goroutines send executive ops here
 	screen      tcell.Screen
 	tag         *TextView
 	columns     []*Column
@@ -89,6 +100,15 @@ type Editor struct {
 	ninep           *NineP
 }
 
+// Redraw signals the main loop to redraw on the next iteration.
+// Non-blocking: if a redraw is already pending the signal is coalesced.
+func (e *Editor) Redraw() {
+	select {
+	case e.redrawCh <- struct{}{}:
+	default:
+	}
+}
+
 func (e *Editor) Call(f func()) {
 	done := make(chan struct{})
 	e.CmdChan <- func() {
@@ -109,6 +129,8 @@ func (e *Editor) Init(numCols int, args []string) {
 	}
 
 	e.CmdChan = make(chan func())
+	e.redrawCh = make(chan struct{}, 1)
+	e.execCh = make(chan execReq, 8)
 	e.theme = defaultTheme
 	e.nextWinID = 1
 	e.ninep = NewNineP(e)
@@ -209,6 +231,26 @@ func (e *Editor) Run() {
 			}
 			fn()
 			e.Draw()
+		case <-e.redrawCh:
+			if timer != nil {
+				timer.Stop()
+			}
+			e.Draw()
+		case req := <-e.execCh:
+			if timer != nil {
+				timer.Stop()
+			}
+			switch req.kind {
+			case 'x':
+				if req.win != nil && req.win.onExec != nil {
+					req.win.onExec(req.col, req.win, req.text)
+				}
+			case 'l':
+				e.Plumb(req.win, req.text)
+			case 'e':
+				e.appendToErrorWindow(req.col, req.win, req.text)
+			}
+			e.Draw()
 		case <-tick:
 			if e.scrollWin != nil && time.Since(e.scrollStartTime) > 200*time.Millisecond {
 				e.scrollWin.body.Scroll(e.scrollDir * e.scrollAmount)
@@ -251,7 +293,15 @@ func (e *Editor) HandleEvent(ev tcell.Event) (bool, bool) {
 			}
 		}
 		if e.focusedView != nil {
-			return e.focusedView.HandleEvent(ev), true
+			win := e.windowOf(e.focusedView)
+			if win != nil {
+				win.lk.Lock()
+			}
+			quit := e.focusedView.HandleEvent(ev)
+			if win != nil {
+				win.lk.Unlock()
+			}
+			return quit, true
 		}
 	case *tcell.EventMouse:
 		mx, my := ev.Position()
@@ -314,6 +364,18 @@ func (e *Editor) HandleEvent(ev tcell.Event) (bool, bool) {
 		return false, true
 	}
 	return false, true
+}
+
+// windowOf returns the Window that owns view v, or nil for the global tag.
+func (e *Editor) windowOf(v View) *Window {
+	for _, col := range e.columns {
+		for _, win := range col.windows {
+			if win.body == v || win.tag == v {
+				return win
+			}
+		}
+	}
+	return nil
 }
 
 func (e *Editor) ActivateWindow(win *Window) {
