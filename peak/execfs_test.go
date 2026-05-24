@@ -40,7 +40,6 @@ func TestNamespaceFsStatVirtualFiles(t *testing.T) {
 		{"mount", false, 0600},
 		{"unmount", false, 0200},
 		{"bind", false, 0600},
-		{"unbind", false, 0200},
 		{"new", true, 0555},
 	}
 	for _, c := range cases {
@@ -101,7 +100,7 @@ func TestNamespaceFsRootDirListing(t *testing.T) {
 		isDir[fi.Name()] = fi.IsDir()
 	}
 
-	for _, want := range []string{"exec", "event", "mount", "unmount", "bind", "unbind", "new"} {
+	for _, want := range []string{"exec", "event", "mount", "unmount", "bind", "new"} {
 		if counts[want] == 0 {
 			t.Errorf("missing %q in root dir listing", want)
 		}
@@ -337,25 +336,42 @@ func TestMountFileSnapshotOnOpen(t *testing.T) {
 // ---- unmountFile ----
 
 func TestUnmountFileUnmountsByPath(t *testing.T) {
-	e, _, nsFs, _ := setupExecFsTest(t)
-	mountPath := "/peak/execfs-test-unmount-sentinel"
-	e.ninep.vfs.Mount(mountPath, afero.NewMemMapFs())
+	_, _, nsFs, _ := setupExecFsTest(t)
+	src := t.TempDir()
+	dst := "/peak/execfs-test-unmount-sentinel"
+	writeControl(t, nsFs, "bind", src+" "+dst+"\n")
 
-	mp, _ := e.ninep.FindMount(mountPath)
-	if mp != mountPath {
-		t.Fatalf("pre-condition: mount not found at %s", mountPath)
-	}
+	writeControl(t, nsFs, "unmount", dst+"\n")
 
-	f, err := nsFs.OpenFile("unmount", os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatalf("Open(unmount): %v", err)
+	// VFS entry gone.
+	mp, _ := nsFs.editor.ninep.FindMount(dst)
+	if mp == dst {
+		t.Errorf("VFS mount still registered at %s after unmount", dst)
 	}
-	f.WriteString(mountPath + "\n")
+}
+
+func TestUnmountRemovesBindEntry(t *testing.T) {
+	_, _, nsFs, _ := setupExecFsTest(t)
+	src := t.TempDir()
+	dst := "/peak/execfs-test-unmount-bind"
+	writeControl(t, nsFs, "bind", src+" "+dst+"\n")
+
+	// Confirm the bind entry is recorded.
+	f, _ := nsFs.OpenFile("bind", os.O_RDONLY, 0)
+	data, _ := io.ReadAll(f)
 	f.Close()
+	if !strings.Contains(string(data), dst) {
+		t.Fatalf("pre-condition: bind entry missing before unmount")
+	}
 
-	mp2, _ := e.ninep.FindMount(mountPath)
-	if mp2 == mountPath {
-		t.Errorf("mount still registered at %s after unmount", mountPath)
+	writeControl(t, nsFs, "unmount", dst+"\n")
+
+	// Bind entry must be gone from the listing.
+	f2, _ := nsFs.OpenFile("bind", os.O_RDONLY, 0)
+	data2, _ := io.ReadAll(f2)
+	f2.Close()
+	if strings.Contains(string(data2), dst) {
+		t.Errorf("bind entry still listed at %s after unmount", dst)
 	}
 }
 
@@ -471,47 +487,6 @@ func TestMountAndBindListsSeparate(t *testing.T) {
 	}
 	if !strings.Contains(string(bindData), bindSrc+" "+bindDst) {
 		t.Errorf("/bind listing missing %q %q, got:\n%s", bindSrc, bindDst, bindData)
-	}
-}
-
-// ---- unbindFile ----
-
-func TestUnbindFileUnmountsByPath(t *testing.T) {
-	e, _, nsFs, _ := setupExecFsTest(t)
-	mountPath := "/peak/execfs-test-unbind-sentinel"
-	e.ninep.vfs.Mount(mountPath, afero.NewMemMapFs())
-
-	mp, _ := e.ninep.FindMount(mountPath)
-	if mp != mountPath {
-		t.Fatalf("pre-condition: mount not found at %s", mountPath)
-	}
-
-	f, err := nsFs.OpenFile("unbind", os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatalf("Open(unbind): %v", err)
-	}
-	f.WriteString(mountPath + "\n")
-	f.Close()
-
-	mp2, _ := e.ninep.FindMount(mountPath)
-	if mp2 == mountPath {
-		t.Errorf("mount still registered at %s after unbind", mountPath)
-	}
-}
-
-func TestUnbindFileBlankWriteNoop(t *testing.T) {
-	_, _, nsFs, _ := setupExecFsTest(t)
-	f, err := nsFs.OpenFile("unbind", os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatalf("Open(unbind): %v", err)
-	}
-	defer f.Close()
-	n, err := f.WriteString("   \n")
-	if err != nil {
-		t.Errorf("unbind blank write: %v", err)
-	}
-	if n != len("   \n") {
-		t.Errorf("unbind blank write n=%d", n)
 	}
 }
 

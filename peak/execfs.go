@@ -53,8 +53,6 @@ func (fs *peakNamespaceFs) Stat(name string) (os.FileInfo, error) {
 		return &simpleFileInfo{name: "unmount", mode: 0200}, nil
 	case "bind":
 		return &simpleFileInfo{name: "bind", mode: 0600}, nil
-	case "unbind":
-		return &simpleFileInfo{name: "unbind", mode: 0200}, nil
 	case "new":
 		return &simpleFileInfo{name: "new", isDir: true, mode: 0555}, nil
 	case "srv":
@@ -111,8 +109,6 @@ func (fs *peakNamespaceFs) OpenFile(name string, flag int, perm os.FileMode) (af
 		return &unmountFile{editor: fs.editor}, nil
 	case "bind":
 		return &bindFile{editor: fs.editor, data: []byte(fs.editor.ninep.ListBinds())}, nil
-	case "unbind":
-		return &unbindFile{editor: fs.editor}, nil
 	case "srv", "srv/":
 		return &srvDirFile{reg: fs.srvReg}, nil
 	case "", ".":
@@ -160,7 +156,7 @@ func (f *peakRootDirFile) Readdir(count int) ([]os.FileInfo, error) {
 	if count > 0 {
 		return entries, err
 	}
-	virtual := map[string]bool{"exec": true, "event": true, "mount": true, "unmount": true, "bind": true, "unbind": true, "new": true, "srv": true}
+	virtual := map[string]bool{"exec": true, "event": true, "mount": true, "unmount": true, "bind": true, "new": true, "srv": true}
 	filtered := entries[:0]
 	for _, e := range entries {
 		if !virtual[e.Name()] {
@@ -173,7 +169,6 @@ func (f *peakRootDirFile) Readdir(count int) ([]os.FileInfo, error) {
 		&simpleFileInfo{name: "mount", mode: 0600},
 		&simpleFileInfo{name: "unmount", mode: 0200},
 		&simpleFileInfo{name: "bind", mode: 0600},
-		&simpleFileInfo{name: "unbind", mode: 0200},
 		&simpleFileInfo{name: "new", isDir: true, mode: 0555},
 		&simpleFileInfo{name: "srv", isDir: true, mode: 0555},
 	)
@@ -325,28 +320,6 @@ func (f *bindFile) Read(p []byte) (int, error) {
 func (f *bindFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
 func (f *bindFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(s), 0) }
 
-// ---- unbindFile ----
-
-// unbindFile implements /unbind: alias for /unmount; write a path to detach it.
-type unbindFile struct {
-	winStub
-	editor *Editor
-}
-
-func (f *unbindFile) Name() string { return "unbind" }
-func (f *unbindFile) Stat() (os.FileInfo, error) {
-	return &simpleFileInfo{name: "unbind", mode: 0200}, nil
-}
-
-func (f *unbindFile) WriteAt(p []byte, _ int64) (int, error) {
-	if path := strings.TrimSpace(string(p)); path != "" {
-		f.editor.ninep.Umount(path)
-	}
-	return len(p), nil
-}
-
-func (f *unbindFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
-func (f *unbindFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(s), 0) }
 
 // execFile implements /exec: write a window title to create an externally-driven
 // terminal window; read back the numeric window ID followed by a newline.
