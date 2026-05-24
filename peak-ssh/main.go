@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
 
@@ -47,20 +48,28 @@ func main() {
 	srv := vfs.NewNinePSrv(newHostFs(NewSftpFs(), peakFs))
 
 	if *socketPath != "" {
-		// Real Unix socket mode.
+		// Real Unix socket mode: listen first so the socket exists before
+		// telling peak to mount it.
 		os.Remove(*socketPath)
+		l, err := net.Listen("unix", *socketPath)
+		if err != nil {
+			log.Fatalf("listen: %v", err)
+		}
 		log.Printf("serving on %s", *socketPath)
 		if !*noMount && peakFs != nil {
-			bindF, err := peakFs.OpenFile("/bind", os.O_WRONLY, 0)
-			if err == nil {
-				fmt.Fprintf(bindF, "%s %s\n", *socketPath, *mountPath)
-				bindF.Close()
-				log.Printf("mounted at %s", *mountPath)
+			mountF, err := peakFs.OpenFile("/mount", os.O_WRONLY, 0)
+			if err != nil {
+				log.Printf("warning: open /mount: %v (auto-mount disabled)", err)
+			} else {
+				if _, err := fmt.Fprintf(mountF, "%s %s\n", *socketPath, *mountPath); err != nil {
+					log.Printf("warning: mount failed: %v", err)
+				} else {
+					log.Printf("mounted at %s", *mountPath)
+				}
+				mountF.Close()
 			}
 		}
-		if err := srv.Serve("unix", *socketPath); err != nil {
-			log.Fatalf("serve: %v", err)
-		}
+		srv.ServeListener(l)
 		return
 	}
 
@@ -80,15 +89,15 @@ func main() {
 	}()
 
 	if !*noMount {
-		bindF, err := peakFs.OpenFile("/bind", os.O_WRONLY, 0)
+		mountF, err := peakFs.OpenFile("/mount", os.O_WRONLY, 0)
 		if err != nil {
-			log.Fatalf("open /bind: %v", err)
+			log.Fatalf("open /mount: %v", err)
 		}
-		fmt.Fprintf(bindF, "/srv/ssh %s\n", *mountPath)
-		bindF.Close()
+		fmt.Fprintf(mountF, "/srv/ssh %s\n", *mountPath)
+		mountF.Close()
 		log.Printf("mounted at %s", *mountPath)
 	} else {
-		log.Printf("serving on /srv/ssh (to mount: write '/srv/ssh <path>' to peak's /bind)")
+		log.Printf("serving on /srv/ssh (to mount: write '/srv/ssh <path>' to peak's /mount)")
 	}
 
 	<-done

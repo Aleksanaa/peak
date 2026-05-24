@@ -27,8 +27,8 @@ func (fs *peakSrvFs) WalkRedirect(dir, name string) (string, os.FileInfo, bool) 
 }
 
 // peakNamespaceFs wraps the 9P-served peak namespace (BasePathFs over the
-// composite VFS) to add /exec, /event, and /bind as virtual files. Without
-// this wrapper the composite mount mechanism would create them as directories.
+// composite VFS) to add virtual control files. Without this wrapper the
+// composite mount mechanism would create them as directories.
 type peakNamespaceFs struct {
 	inner  afero.Fs
 	editor *Editor
@@ -47,8 +47,12 @@ func (fs *peakNamespaceFs) Stat(name string) (os.FileInfo, error) {
 		return &simpleFileInfo{name: "exec", mode: 0600}, nil
 	case "event":
 		return &simpleFileInfo{name: "event", mode: 0444}, nil
+	case "mount":
+		return &simpleFileInfo{name: "mount", mode: 0600}, nil
+	case "unmount":
+		return &simpleFileInfo{name: "unmount", mode: 0200}, nil
 	case "bind":
-		return &simpleFileInfo{name: "bind", mode: 0200}, nil
+		return &simpleFileInfo{name: "bind", mode: 0600}, nil
 	case "unbind":
 		return &simpleFileInfo{name: "unbind", mode: 0200}, nil
 	case "new":
@@ -101,8 +105,12 @@ func (fs *peakNamespaceFs) OpenFile(name string, flag int, perm os.FileMode) (af
 	case "event":
 		sub := fs.bus.subscribe()
 		return &globalEventFile{bus: fs.bus, sub: sub}, nil
+	case "mount":
+		return &mountFile{editor: fs.editor, data: []byte(fs.editor.ninep.ListMounts())}, nil
+	case "unmount":
+		return &unmountFile{editor: fs.editor}, nil
 	case "bind":
-		return &bindFile{editor: fs.editor}, nil
+		return &bindFile{editor: fs.editor, data: []byte(fs.editor.ninep.ListBinds())}, nil
 	case "unbind":
 		return &unbindFile{editor: fs.editor}, nil
 	case "srv", "srv/":
@@ -152,7 +160,7 @@ func (f *peakRootDirFile) Readdir(count int) ([]os.FileInfo, error) {
 	if count > 0 {
 		return entries, err
 	}
-	virtual := map[string]bool{"exec": true, "event": true, "bind": true, "unbind": true, "new": true, "srv": true}
+	virtual := map[string]bool{"exec": true, "event": true, "mount": true, "unmount": true, "bind": true, "unbind": true, "new": true, "srv": true}
 	filtered := entries[:0]
 	for _, e := range entries {
 		if !virtual[e.Name()] {
@@ -162,7 +170,9 @@ func (f *peakRootDirFile) Readdir(count int) ([]os.FileInfo, error) {
 	filtered = append(filtered,
 		&simpleFileInfo{name: "exec", mode: 0600},
 		&simpleFileInfo{name: "event", mode: 0444},
-		&simpleFileInfo{name: "bind", mode: 0200},
+		&simpleFileInfo{name: "mount", mode: 0600},
+		&simpleFileInfo{name: "unmount", mode: 0200},
+		&simpleFileInfo{name: "bind", mode: 0600},
 		&simpleFileInfo{name: "unbind", mode: 0200},
 		&simpleFileInfo{name: "new", isDir: true, mode: 0555},
 		&simpleFileInfo{name: "srv", isDir: true, mode: 0555},
@@ -193,18 +203,94 @@ func (f *globalEventFile) Close() error {
 	return nil
 }
 
-// ---- bindFile ----
+// ---- mountFile ----
 
-// bindFile implements /bind: write "<socket-path> <mount-path>\n" to mount an
-// external 9P server into peak's composite VFS at the given path.
-type bindFile struct {
+// mountFile implements /mount: write "<socket-path> <mount-path>\n" to mount a
+// 9P server (real Unix socket or virtual /srv entry) into peak's composite VFS.
+// Reading returns the current mount table as "src dst\n" lines.
+type mountFile struct {
+	winStub
+	editor *Editor
+	data   []byte
+	off    int64
+}
+
+func (f *mountFile) Name() string { return "mount" }
+func (f *mountFile) Stat() (os.FileInfo, error) {
+	return &simpleFileInfo{name: "mount", mode: 0600}, nil
+}
+
+func (f *mountFile) WriteAt(p []byte, _ int64) (int, error) {
+	parts := strings.Fields(strings.TrimSpace(string(p)))
+	if len(parts) < 2 {
+		return len(p), nil
+	}
+	resolvedSrc, err := f.editor.ninep.Mount(parts[0], parts[1])
+	if err != nil {
+		return 0, err
+	}
+	f.editor.ninep.record(&f.editor.ninep.mounts, resolvedSrc, resolvePath(parts[1]))
+	return len(p), nil
+}
+
+func (f *mountFile) ReadAt(p []byte, off int64) (int, error) {
+	if off >= int64(len(f.data)) {
+		return 0, io.EOF
+	}
+	n := copy(p, f.data[off:])
+	if off+int64(n) >= int64(len(f.data)) {
+		return n, io.EOF
+	}
+	return n, nil
+}
+
+func (f *mountFile) Read(p []byte) (int, error) {
+	n, err := f.ReadAt(p, f.off)
+	f.off += int64(n)
+	return n, err
+}
+
+func (f *mountFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
+func (f *mountFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(s), 0) }
+
+// ---- unmountFile ----
+
+// unmountFile implements /unmount: write a path to detach it from the VFS.
+type unmountFile struct {
 	winStub
 	editor *Editor
 }
 
+func (f *unmountFile) Name() string { return "unmount" }
+func (f *unmountFile) Stat() (os.FileInfo, error) {
+	return &simpleFileInfo{name: "unmount", mode: 0200}, nil
+}
+
+func (f *unmountFile) WriteAt(p []byte, _ int64) (int, error) {
+	if path := strings.TrimSpace(string(p)); path != "" {
+		f.editor.ninep.Umount(path)
+	}
+	return len(p), nil
+}
+
+func (f *unmountFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
+func (f *unmountFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(s), 0) }
+
+// ---- bindFile ----
+
+// bindFile implements /bind: write "<src> <dst>\n" to overlay a local path onto
+// another path in peak's VFS (Plan 9-style namespace bind).
+// Reading returns the current mount table as "src dst\n" lines.
+type bindFile struct {
+	winStub
+	editor *Editor
+	data   []byte
+	off    int64
+}
+
 func (f *bindFile) Name() string { return "bind" }
 func (f *bindFile) Stat() (os.FileInfo, error) {
-	return &simpleFileInfo{name: "bind", mode: 0200}, nil
+	return &simpleFileInfo{name: "bind", mode: 0600}, nil
 }
 
 func (f *bindFile) WriteAt(p []byte, _ int64) (int, error) {
@@ -212,10 +298,28 @@ func (f *bindFile) WriteAt(p []byte, _ int64) (int, error) {
 	if len(parts) < 2 {
 		return len(p), nil
 	}
-	if err := f.editor.ninep.Mount(parts[0], parts[1]); err != nil {
+	if err := f.editor.ninep.Bind(parts[0], parts[1]); err != nil {
 		return 0, err
 	}
+	f.editor.ninep.record(&f.editor.ninep.binds, resolvePath(parts[0]), resolvePath(parts[1]))
 	return len(p), nil
+}
+
+func (f *bindFile) ReadAt(p []byte, off int64) (int, error) {
+	if off >= int64(len(f.data)) {
+		return 0, io.EOF
+	}
+	n := copy(p, f.data[off:])
+	if off+int64(n) >= int64(len(f.data)) {
+		return n, io.EOF
+	}
+	return n, nil
+}
+
+func (f *bindFile) Read(p []byte) (int, error) {
+	n, err := f.ReadAt(p, f.off)
+	f.off += int64(n)
+	return n, err
 }
 
 func (f *bindFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
@@ -223,7 +327,7 @@ func (f *bindFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(
 
 // ---- unbindFile ----
 
-// unbindFile implements /unbind: write a path to unmount it from the VFS.
+// unbindFile implements /unbind: alias for /unmount; write a path to detach it.
 type unbindFile struct {
 	winStub
 	editor *Editor

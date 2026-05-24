@@ -149,21 +149,21 @@ func startAndBindRepo(peakFs afero.Fs, repoPath string) (afero.File, error) {
 	srv := vfs.NewNinePSrv(newRepoFs(repoPath, repo))
 	go srv.ServeConn(srvF)
 
-	bindF, err := peakFs.OpenFile("/bind", os.O_WRONLY, 0)
+	mountF, err := peakFs.OpenFile("/mount", os.O_WRONLY, 0)
 	if err != nil {
 		srvF.Close()
-		return nil, fmt.Errorf("/bind: %w", err)
+		return nil, fmt.Errorf("/mount: %w", err)
 	}
-	fmt.Fprintf(bindF, "/srv/%s %s\n", name, filepath.Join(repoPath, ".git", "fs"))
-	bindF.Close()
+	fmt.Fprintf(mountF, "/srv/%s %s\n", name, filepath.Join(repoPath, ".git", "fs"))
+	mountF.Close()
 
 	return srvF, nil
 }
 
 func unbindRepo(peakFs afero.Fs, repoPath string) {
-	f, err := peakFs.OpenFile("/unbind", os.O_WRONLY, 0)
+	f, err := peakFs.OpenFile("/unmount", os.O_WRONLY, 0)
 	if err != nil {
-		log.Printf("peak-git: open /unbind: %v", err)
+		log.Printf("peak-git: open /unmount: %v", err)
 		return
 	}
 	defer f.Close()

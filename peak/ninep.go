@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"sync"
 
 	"github.com/aleksana/peak/internal/vfs"
 	"github.com/aleksana/peak/internal/vfs/afero"
@@ -15,21 +17,30 @@ import (
 //go:embed doc
 var docFS embed.FS
 
+type mountEntry struct {
+	src, dst string
+}
+
 // NineP manages the virtual filesystem and 9P server for Peak.
 type NineP struct {
-	editor *Editor
-	vfs    *vfs.CompositeFs
-	bus    *globalEventBus
-	nsFs   *peakNamespaceFs
+	editor  *Editor
+	vfs     *vfs.CompositeFs
+	bus     *globalEventBus
+	nsFs    *peakNamespaceFs
+	nsBase  string       // VFS path where nsFs is mounted
+	mountMu sync.RWMutex
+	mounts  []mountEntry // 9P mounts via Mount()
+	binds   []mountEntry // local overlays via Bind()
 }
 
 func NewNineP(e *Editor) *NineP {
+	const nsBase = "/peak"
 	fs := vfs.NewCompositeFs()
-	p := &NineP{editor: e, vfs: fs, bus: &globalEventBus{}}
+	p := &NineP{editor: e, vfs: fs, bus: &globalEventBus{}, nsBase: nsBase}
 
 	p.vfs.Mount("/", afero.NewOsFs())
 	p.nsFs = newPeakNamespaceFs(afero.NewMemMapFs(), e, p.bus)
-	p.vfs.Mount("/peak", p.nsFs)
+	p.vfs.Mount(nsBase, p.nsFs)
 
 	docFs := afero.FromIOFS{FS: docFS}
 	p.vfs.Mount("/peak/doc", afero.NewBasePathFs(docFs, "doc"))
@@ -82,42 +93,89 @@ func (p *NineP) BroadcastPut(win *Window) {
 	p.bus.broadcast(fmt.Sprintf("put %d %s\n", win.ID, win.GetFilename()))
 }
 
-func (p *NineP) Mount(socket, path string) error {
-	// Real Unix socket: os.Stat sets ModeSocket.
-	if fi, err := os.Stat(socket); err == nil && fi.Mode()&os.ModeSocket != 0 {
-		socket = resolvePath(socket)
-		path = resolvePath(path)
-		clientFs, err := vfs.NewNinePClientFs("unix", socket)
+// Mount attaches a 9P server to path in the VFS. The first return value is the
+// resolved source path suitable for display; callers that want the mount to
+// appear in /mount should record it themselves via record().
+func (p *NineP) Mount(socket, path string) (string, error) {
+	// Try virtual socket first: explicit positive check against the namespace.
+	if conn, err := p.nsFs.openSocket(socket); err == nil {
+		mountPath := resolvePath(path)
+		clientFs, err := vfs.NewNinePClientFsFromConn(conn)
 		if err != nil {
-			return err
+			conn.Close()
+			return "", err
 		}
-		p.vfs.Mount(path, clientFs)
-		return nil
+		p.vfs.Mount(mountPath, clientFs)
+		return p.nsBase + "/" + strings.TrimPrefix(socket, "/"), nil
 	}
-	// Virtual socket: path names a file inside peak's namespace.
-	conn, err := p.nsFs.openSocket(socket)
+	// Not in the namespace — must be a real Unix socket.
+	socket = resolvePath(socket)
+	path = resolvePath(path)
+	clientFs, err := vfs.NewNinePClientFs("unix", socket)
 	if err != nil {
-		return err
+		return "", err
 	}
-	mountPath := resolvePath(path)
-	clientFs, err := vfs.NewNinePClientFsFromConn(conn)
-	if err != nil {
-		conn.Close()
-		return err
-	}
-	p.vfs.Mount(mountPath, clientFs)
-	return nil
+	p.vfs.Mount(path, clientFs)
+	return socket, nil
 }
 
 func (p *NineP) Umount(path string) {
-	p.vfs.Umount(resolvePath(path))
+	path = resolvePath(path)
+	p.vfs.Umount(path)
+	p.mountMu.Lock()
+	p.mounts = removeByDst(p.mounts, path)
+	p.binds = removeByDst(p.binds, path)
+	p.mountMu.Unlock()
 }
 
+// Bind overlays a local path onto dest in the VFS. Callers that want the bind
+// to appear in /bind should record it themselves via record().
 func (p *NineP) Bind(src, dest string) error {
 	src = resolvePath(src)
 	dest = resolvePath(dest)
 	p.vfs.Mount(dest, afero.NewBasePathFs(afero.NewOsFs(), src))
 	return nil
+}
+
+func (p *NineP) record(table *[]mountEntry, src, dst string) {
+	p.mountMu.Lock()
+	*table = append(*table, mountEntry{src, dst})
+	p.mountMu.Unlock()
+}
+
+func removeByDst(entries []mountEntry, dst string) []mountEntry {
+	out := entries[:0]
+	for _, e := range entries {
+		if e.dst != dst {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// ListMounts returns current 9P mounts as "src dst\n" lines.
+func (p *NineP) ListMounts() string {
+	p.mountMu.RLock()
+	defer p.mountMu.RUnlock()
+	return formatEntries(p.mounts)
+}
+
+// ListBinds returns current local binds as "src dst\n" lines.
+func (p *NineP) ListBinds() string {
+	p.mountMu.RLock()
+	defer p.mountMu.RUnlock()
+	return formatEntries(p.binds)
+}
+
+func formatEntries(entries []mountEntry) string {
+	var sb strings.Builder
+	for _, e := range entries {
+		sb.WriteString(e.src)
+		sb.WriteByte(' ')
+		sb.WriteString(e.dst)
+		sb.WriteByte('\n')
+	}
+	return sb.String()
 }
 
 func (p *NineP) RunInternal(path, cmd, input string, winid int) (string, error) {

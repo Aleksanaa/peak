@@ -23,9 +23,7 @@ func setupExecFsTest(t *testing.T) (*Editor, *Column, *peakNamespaceFs, tcell.Si
 	col := NewColumn(0, 1, e.width, e.height-1, e, e.Execute)
 	e.columns = append(e.columns, col)
 	e.Resize()
-	inner := afero.NewBasePathFs(e.ninep.vfs, "/peak")
-	nsFs := newPeakNamespaceFs(inner, e, e.ninep.bus)
-	return e, col, nsFs, s
+	return e, col, e.ninep.nsFs, s
 }
 
 // ---- Stat ----
@@ -39,7 +37,9 @@ func TestNamespaceFsStatVirtualFiles(t *testing.T) {
 	}{
 		{"exec", false, 0600},
 		{"event", false, 0444},
-		{"bind", false, 0200},
+		{"mount", false, 0600},
+		{"unmount", false, 0200},
+		{"bind", false, 0600},
 		{"unbind", false, 0200},
 		{"new", true, 0555},
 	}
@@ -101,7 +101,7 @@ func TestNamespaceFsRootDirListing(t *testing.T) {
 		isDir[fi.Name()] = fi.IsDir()
 	}
 
-	for _, want := range []string{"exec", "event", "bind", "unbind", "new"} {
+	for _, want := range []string{"exec", "event", "mount", "unmount", "bind", "unbind", "new"} {
 		if counts[want] == 0 {
 			t.Errorf("missing %q in root dir listing", want)
 		}
@@ -263,7 +263,137 @@ func TestGlobalEventFileReadAtBlocks(t *testing.T) {
 	}
 }
 
+// ---- mountFile ----
+
+func TestMountFileShortWriteNoop(t *testing.T) {
+	_, _, nsFs, _ := setupExecFsTest(t)
+	f, err := nsFs.OpenFile("mount", os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("Open(mount): %v", err)
+	}
+	defer f.Close()
+	// Only one field — not enough to mount, should silently succeed.
+	msg := "only-one-word\n"
+	n, err := f.WriteString(msg)
+	if err != nil {
+		t.Errorf("mount short write: %v", err)
+	}
+	if n != len(msg) {
+		t.Errorf("mount short write n=%d, want %d", n, len(msg))
+	}
+}
+
+func TestMountFileReadsCurrentMounts(t *testing.T) {
+	_, _, nsFs, _ := setupExecFsTest(t)
+
+	serverF, err := nsFs.OpenFile("srv/mount-read-srv", os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("OpenFile(srv): %v", err)
+	}
+	go vfs.NewNinePSrv(afero.NewMemMapFs()).ServeConn(serverF)
+
+	dst := "/peak/mount-read-test"
+	writeControl(t, nsFs, "mount", "/srv/mount-read-srv "+dst+"\n")
+
+	f, err := nsFs.OpenFile("mount", os.O_RDONLY, 0)
+	if err != nil {
+		t.Fatalf("Open(mount): %v", err)
+	}
+	defer f.Close()
+	data, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	want := "/peak/srv/mount-read-srv " + dst
+	if !strings.Contains(string(data), want) {
+		t.Errorf("mount listing missing %q, got:\n%s", want, data)
+	}
+}
+
+func TestMountFileSnapshotOnOpen(t *testing.T) {
+	_, _, nsFs, _ := setupExecFsTest(t)
+
+	f, err := nsFs.OpenFile("mount", os.O_RDONLY, 0)
+	if err != nil {
+		t.Fatalf("Open(mount): %v", err)
+	}
+	defer f.Close()
+
+	// Mount after opening — should not appear in already-opened file's snapshot.
+	serverF, err := nsFs.OpenFile("srv/mount-snapshot-srv", os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("OpenFile(srv): %v", err)
+	}
+	go vfs.NewNinePSrv(afero.NewMemMapFs()).ServeConn(serverF)
+	dst := "/peak/mount-snapshot-test"
+	writeControl(t, nsFs, "mount", "/srv/mount-snapshot-srv "+dst+"\n")
+
+	data, _ := io.ReadAll(f)
+	if strings.Contains(string(data), dst) {
+		t.Errorf("mount file exposed mount added after open; want snapshot semantics")
+	}
+}
+
+// ---- unmountFile ----
+
+func TestUnmountFileUnmountsByPath(t *testing.T) {
+	e, _, nsFs, _ := setupExecFsTest(t)
+	mountPath := "/peak/execfs-test-unmount-sentinel"
+	e.ninep.vfs.Mount(mountPath, afero.NewMemMapFs())
+
+	mp, _ := e.ninep.FindMount(mountPath)
+	if mp != mountPath {
+		t.Fatalf("pre-condition: mount not found at %s", mountPath)
+	}
+
+	f, err := nsFs.OpenFile("unmount", os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("Open(unmount): %v", err)
+	}
+	f.WriteString(mountPath + "\n")
+	f.Close()
+
+	mp2, _ := e.ninep.FindMount(mountPath)
+	if mp2 == mountPath {
+		t.Errorf("mount still registered at %s after unmount", mountPath)
+	}
+}
+
+func TestUnmountFileBlankWriteNoop(t *testing.T) {
+	_, _, nsFs, _ := setupExecFsTest(t)
+	f, err := nsFs.OpenFile("unmount", os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("Open(unmount): %v", err)
+	}
+	defer f.Close()
+	n, err := f.WriteString("   \n")
+	if err != nil {
+		t.Errorf("unmount blank write: %v", err)
+	}
+	if n != len("   \n") {
+		t.Errorf("unmount blank write n=%d", n)
+	}
+}
+
 // ---- bindFile ----
+
+func TestBindFileOverlaysLocalPath(t *testing.T) {
+	e, _, nsFs, _ := setupExecFsTest(t)
+	src := t.TempDir()
+	dst := "/peak/execfs-test-bind-overlay"
+
+	f, err := nsFs.OpenFile("bind", os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("Open(bind): %v", err)
+	}
+	f.WriteString(src + " " + dst + "\n")
+	f.Close()
+
+	mp, _ := e.ninep.FindMount(dst)
+	if mp != dst {
+		t.Errorf("bind: mount not registered at %s (got %q)", dst, mp)
+	}
+}
 
 func TestBindFileShortWriteNoop(t *testing.T) {
 	_, _, nsFs, _ := setupExecFsTest(t)
@@ -272,7 +402,6 @@ func TestBindFileShortWriteNoop(t *testing.T) {
 		t.Fatalf("Open(bind): %v", err)
 	}
 	defer f.Close()
-	// Only one field — not enough to mount, should silently succeed.
 	msg := "only-one-word\n"
 	n, err := f.WriteString(msg)
 	if err != nil {
@@ -283,6 +412,68 @@ func TestBindFileShortWriteNoop(t *testing.T) {
 	}
 }
 
+func writeControl(t *testing.T, nsFs afero.Fs, name, msg string) {
+	t.Helper()
+	f, err := nsFs.OpenFile(name, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("Open(%s): %v", name, err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(msg); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+}
+
+func TestBindFileReadsCurrentBinds(t *testing.T) {
+	_, _, nsFs, _ := setupExecFsTest(t)
+	src := t.TempDir()
+	dst := "/peak/bind-read-test"
+	writeControl(t, nsFs, "bind", src+" "+dst+"\n")
+
+	f, err := nsFs.OpenFile("bind", os.O_RDONLY, 0)
+	if err != nil {
+		t.Fatalf("Open(bind): %v", err)
+	}
+	defer f.Close()
+	data, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	want := src + " " + dst
+	if !strings.Contains(string(data), want) {
+		t.Errorf("bind listing missing %q, got:\n%s", want, data)
+	}
+}
+
+func TestMountAndBindListsSeparate(t *testing.T) {
+	_, _, nsFs, _ := setupExecFsTest(t)
+	bindSrc := t.TempDir()
+	bindDst := "/peak/separate-bind"
+	writeControl(t, nsFs, "bind", bindSrc+" "+bindDst+"\n")
+
+	mountF, err := nsFs.OpenFile("mount", os.O_RDONLY, 0)
+	if err != nil {
+		t.Fatalf("Open(mount): %v", err)
+	}
+	defer mountF.Close()
+	bindF, err := nsFs.OpenFile("bind", os.O_RDONLY, 0)
+	if err != nil {
+		t.Fatalf("Open(bind): %v", err)
+	}
+	defer bindF.Close()
+
+	mountData, _ := io.ReadAll(mountF)
+	bindData, _ := io.ReadAll(bindF)
+
+	// bind entry must appear in /bind, not in /mount
+	if strings.Contains(string(mountData), bindDst) {
+		t.Errorf("/mount listing contains bind entry %q", bindDst)
+	}
+	if !strings.Contains(string(bindData), bindSrc+" "+bindDst) {
+		t.Errorf("/bind listing missing %q %q, got:\n%s", bindSrc, bindDst, bindData)
+	}
+}
+
 // ---- unbindFile ----
 
 func TestUnbindFileUnmountsByPath(t *testing.T) {
@@ -290,7 +481,6 @@ func TestUnbindFileUnmountsByPath(t *testing.T) {
 	mountPath := "/peak/execfs-test-unbind-sentinel"
 	e.ninep.vfs.Mount(mountPath, afero.NewMemMapFs())
 
-	// Confirm it's mounted.
 	mp, _ := e.ninep.FindMount(mountPath)
 	if mp != mountPath {
 		t.Fatalf("pre-condition: mount not found at %s", mountPath)
@@ -303,7 +493,6 @@ func TestUnbindFileUnmountsByPath(t *testing.T) {
 	f.WriteString(mountPath + "\n")
 	f.Close()
 
-	// After unbind, FindMount should return a shallower path, not the exact one.
 	mp2, _ := e.ninep.FindMount(mountPath)
 	if mp2 == mountPath {
 		t.Errorf("mount still registered at %s after unbind", mountPath)
@@ -717,9 +906,9 @@ func TestSrvDirListsActiveNames(t *testing.T) {
 // ---- NineP.Mount dispatch ----
 
 func TestMountDispatchVirtualSocket(t *testing.T) {
-	e, _, _, _ := setupExecFsTest(t)
+	e, _, nsFs, _ := setupExecFsTest(t)
 
-	serverF, err := e.ninep.nsFs.OpenFile("srv/mounttest", os.O_RDWR, 0)
+	serverF, err := nsFs.OpenFile("srv/mounttest", os.O_RDWR, 0)
 	if err != nil {
 		t.Fatalf("OpenFile(srv/mounttest): %v", err)
 	}
@@ -728,7 +917,7 @@ func TestMountDispatchVirtualSocket(t *testing.T) {
 	go vfs.NewNinePSrv(afero.NewMemMapFs()).ServeConn(serverF)
 
 	mountTarget := "/peak/test-virtual-mount"
-	if err := e.ninep.Mount("/srv/mounttest", mountTarget); err != nil {
+	if _, err := e.ninep.Mount("/srv/mounttest", mountTarget); err != nil {
 		t.Fatalf("Mount: %v", err)
 	}
 	mp, _ := e.ninep.FindMount(mountTarget)
@@ -749,7 +938,7 @@ func TestMountDispatchUnixSocket(t *testing.T) {
 	go vfs.NewNinePSrv(afero.NewMemMapFs()).ServeListener(l)
 
 	mountTarget := "/peak/test-unix-mount"
-	if err := e.ninep.Mount(sockPath, mountTarget); err != nil {
+	if _, err := e.ninep.Mount(sockPath, mountTarget); err != nil {
 		t.Fatalf("Mount: %v", err)
 	}
 	mp, _ := e.ninep.FindMount(mountTarget)

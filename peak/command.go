@@ -100,10 +100,12 @@ func (e *Editor) cmdMount(win *Window, cmd string) {
 		return
 	}
 	socket, path := args[0], args[1]
-	err := e.ninep.Mount(socket, path)
+	resolvedSrc, err := e.ninep.Mount(socket, path)
 	if err != nil {
 		e.showError(nil, win, "", "Mount failed: "+err.Error())
+		return
 	}
+	e.ninep.record(&e.ninep.mounts, resolvedSrc, resolvePath(path))
 }
 
 func (e *Editor) cmdBind(win *Window, cmd string) {
