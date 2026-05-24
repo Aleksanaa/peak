@@ -83,13 +83,29 @@ func (p *NineP) BroadcastPut(win *Window) {
 }
 
 func (p *NineP) Mount(socket, path string) error {
-	socket = resolvePath(socket)
-	path = resolvePath(path)
-	clientFs, err := vfs.NewNinePClientFs("unix", socket)
+	// Real Unix socket: os.Stat sets ModeSocket.
+	if fi, err := os.Stat(socket); err == nil && fi.Mode()&os.ModeSocket != 0 {
+		socket = resolvePath(socket)
+		path = resolvePath(path)
+		clientFs, err := vfs.NewNinePClientFs("unix", socket)
+		if err != nil {
+			return err
+		}
+		p.vfs.Mount(path, clientFs)
+		return nil
+	}
+	// Virtual socket: path names a file inside peak's namespace.
+	conn, err := p.nsFs.openSocket(socket)
 	if err != nil {
 		return err
 	}
-	p.vfs.Mount(path, clientFs)
+	mountPath := resolvePath(path)
+	clientFs, err := vfs.NewNinePClientFsFromConn(conn)
+	if err != nil {
+		conn.Close()
+		return err
+	}
+	p.vfs.Mount(mountPath, clientFs)
 	return nil
 }
 

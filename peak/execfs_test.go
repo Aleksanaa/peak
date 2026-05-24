@@ -2,12 +2,15 @@ package main
 
 import (
 	"io"
+	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/aleksana/peak/internal/vfs"
 	"github.com/aleksana/peak/internal/vfs/afero"
 	"github.com/gdamore/tcell/v2"
 )
@@ -523,5 +526,234 @@ func TestWalkRedirectEachCallCreatesDistinctWindow(t *testing.T) {
 	})
 	if total < 2 {
 		t.Errorf("expected at least 2 windows after two WalkRedirect calls, got %d", total)
+	}
+}
+
+// ---- /srv virtual sockets ----
+
+func TestSrvStatIsDirectory(t *testing.T) {
+	_, _, nsFs, _ := setupExecFsTest(t)
+	fi, err := nsFs.Stat("srv")
+	if err != nil {
+		t.Fatalf("Stat(srv): %v", err)
+	}
+	if !fi.IsDir() {
+		t.Error("srv: IsDir=false, want true")
+	}
+	if fi.Mode().Perm() != 0555 {
+		t.Errorf("srv: mode=%v, want 0555", fi.Mode().Perm())
+	}
+}
+
+func TestSrvEntryStatAlwaysSucceeds(t *testing.T) {
+	_, _, nsFs, _ := setupExecFsTest(t)
+	fi, err := nsFs.Stat("srv/anyname")
+	if err != nil {
+		t.Fatalf("Stat(srv/anyname): %v", err)
+	}
+	if fi.Name() != "anyname" {
+		t.Errorf("Name()=%q, want anyname", fi.Name())
+	}
+	if fi.IsDir() {
+		t.Error("srv/anyname: IsDir=true, want false")
+	}
+	if fi.Mode().Perm() != 0600 {
+		t.Errorf("mode=%v, want 0600", fi.Mode().Perm())
+	}
+}
+
+func TestSrvInRootDirListing(t *testing.T) {
+	_, _, nsFs, _ := setupExecFsTest(t)
+	f, err := nsFs.Open(".")
+	if err != nil {
+		t.Fatalf("Open(.): %v", err)
+	}
+	defer f.Close()
+	infos, _ := f.Readdir(-1)
+	for _, fi := range infos {
+		if fi.Name() == "srv" {
+			if !fi.IsDir() {
+				t.Error("srv in listing: IsDir=false, want true")
+			}
+			return
+		}
+	}
+	t.Error("srv missing from root dir listing")
+}
+
+func TestSrvOpenRDWRCreatesServerFile(t *testing.T) {
+	_, _, nsFs, _ := setupExecFsTest(t)
+	f, err := nsFs.OpenFile("srv/myconn", os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("OpenFile(srv/myconn, O_RDWR): %v", err)
+	}
+	defer f.Close()
+	if _, ok := f.(*srvServerFile); !ok {
+		t.Errorf("got %T, want *srvServerFile", f)
+	}
+}
+
+func TestSrvOpenReadOnlyDenied(t *testing.T) {
+	_, _, nsFs, _ := setupExecFsTest(t)
+	_, err := nsFs.OpenFile("srv/myconn", os.O_RDONLY, 0)
+	if err != os.ErrPermission {
+		t.Errorf("OpenFile(srv/myconn, O_RDONLY) = %v, want ErrPermission", err)
+	}
+}
+
+func TestSrvDuplicateNameReturnsExist(t *testing.T) {
+	_, _, nsFs, _ := setupExecFsTest(t)
+	f, err := nsFs.OpenFile("srv/dup", os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	defer f.Close()
+	_, err = nsFs.OpenFile("srv/dup", os.O_RDWR, 0)
+	if !os.IsExist(err) {
+		t.Errorf("second open = %v, want ErrExist", err)
+	}
+}
+
+func TestSrvCloseRemovesFromRegistry(t *testing.T) {
+	_, _, nsFs, _ := setupExecFsTest(t)
+	f, err := nsFs.OpenFile("srv/temp", os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("OpenFile: %v", err)
+	}
+	f.Close()
+	_, err = nsFs.openSocket("srv/temp")
+	if err == nil {
+		t.Error("openSocket succeeded after Close, want error")
+	}
+}
+
+func TestSrvOpenSocketReturnsClientConn(t *testing.T) {
+	_, _, nsFs, _ := setupExecFsTest(t)
+	f, err := nsFs.OpenFile("srv/xfer", os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("OpenFile: %v", err)
+	}
+	defer f.Close()
+	conn, err := nsFs.openSocket("srv/xfer")
+	if err != nil {
+		t.Fatalf("openSocket: %v", err)
+	}
+	conn.Close()
+}
+
+func TestSrvOpenSocketTwiceFails(t *testing.T) {
+	_, _, nsFs, _ := setupExecFsTest(t)
+	f, err := nsFs.OpenFile("srv/once", os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("OpenFile: %v", err)
+	}
+	defer f.Close()
+	if _, err := nsFs.openSocket("srv/once"); err != nil {
+		t.Fatalf("first openSocket: %v", err)
+	}
+	if _, err := nsFs.openSocket("srv/once"); err == nil {
+		t.Error("second openSocket succeeded, want error")
+	}
+}
+
+func TestSrvDataFlowBidirectional(t *testing.T) {
+	_, _, nsFs, _ := setupExecFsTest(t)
+
+	serverF, err := nsFs.OpenFile("srv/pipe", os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("OpenFile: %v", err)
+	}
+	defer serverF.Close()
+
+	clientConn, err := nsFs.openSocket("srv/pipe")
+	if err != nil {
+		t.Fatalf("openSocket: %v", err)
+	}
+	defer clientConn.Close()
+
+	toServer := []byte("hello from client")
+	go clientConn.Write(toServer)
+	buf := make([]byte, len(toServer))
+	if _, err := io.ReadFull(serverF, buf); err != nil || string(buf) != string(toServer) {
+		t.Errorf("client→server: err=%v data=%q, want %q", err, buf, toServer)
+	}
+
+	toClient := []byte("hello from server")
+	go serverF.Write(toClient)
+	buf2 := make([]byte, len(toClient))
+	if _, err := io.ReadFull(clientConn, buf2); err != nil || string(buf2) != string(toClient) {
+		t.Errorf("server→client: err=%v data=%q, want %q", err, buf2, toClient)
+	}
+}
+
+func TestSrvDirListsActiveNames(t *testing.T) {
+	_, _, nsFs, _ := setupExecFsTest(t)
+
+	f1, _ := nsFs.OpenFile("srv/alpha", os.O_RDWR, 0)
+	defer f1.Close()
+	f2, _ := nsFs.OpenFile("srv/beta", os.O_RDWR, 0)
+	defer f2.Close()
+
+	dir, err := nsFs.OpenFile("srv", os.O_RDONLY, 0)
+	if err != nil {
+		t.Fatalf("Open(srv): %v", err)
+	}
+	defer dir.Close()
+	infos, err := dir.Readdir(-1)
+	if err != nil {
+		t.Fatalf("Readdir: %v", err)
+	}
+	names := make(map[string]bool)
+	for _, fi := range infos {
+		names[fi.Name()] = true
+	}
+	for _, want := range []string{"alpha", "beta"} {
+		if !names[want] {
+			t.Errorf("srv dir missing %q", want)
+		}
+	}
+}
+
+// ---- NineP.Mount dispatch ----
+
+func TestMountDispatchVirtualSocket(t *testing.T) {
+	e, _, _, _ := setupExecFsTest(t)
+
+	serverF, err := e.ninep.nsFs.OpenFile("srv/mounttest", os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("OpenFile(srv/mounttest): %v", err)
+	}
+	defer serverF.Close()
+
+	go vfs.NewNinePSrv(afero.NewMemMapFs()).ServeConn(serverF)
+
+	mountTarget := "/peak/test-virtual-mount"
+	if err := e.ninep.Mount("/srv/mounttest", mountTarget); err != nil {
+		t.Fatalf("Mount: %v", err)
+	}
+	mp, _ := e.ninep.FindMount(mountTarget)
+	if mp != mountTarget {
+		t.Errorf("mount not registered at %s after virtual mount", mountTarget)
+	}
+}
+
+func TestMountDispatchUnixSocket(t *testing.T) {
+	e, _, _, _ := setupExecFsTest(t)
+
+	sockPath := filepath.Join(t.TempDir(), "test.sock")
+	l, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	defer l.Close()
+	go vfs.NewNinePSrv(afero.NewMemMapFs()).ServeListener(l)
+
+	mountTarget := "/peak/test-unix-mount"
+	if err := e.ninep.Mount(sockPath, mountTarget); err != nil {
+		t.Fatalf("Mount: %v", err)
+	}
+	mp, _ := e.ninep.FindMount(mountTarget)
+	if mp != mountTarget {
+		t.Errorf("mount not registered at %s after unix mount", mountTarget)
 	}
 }

@@ -394,6 +394,25 @@ func (s *NinePSrv) Wstat(c go9p.Conn, r *proto.TWstat) (proto.FCall, error) {
 	return &proto.RWstat{Header: proto.Header{Type: proto.Rwstat, Tag: r.Tag}}, nil
 }
 
+// ServeConn serves a single pre-established 9P connection over rwc.
+func (s *NinePSrv) ServeConn(rwc io.ReadWriteCloser) {
+	defer rwc.Close()
+	conn := &NinePConn{
+		srv:       s,
+		fids:      make(map[uint32]string),
+		openFiles: make(map[uint32]afero.File),
+	}
+	cs := &connSrv{NinePSrv: s, conn: conn}
+	pr, pw := io.Pipe()
+	go func() {
+		io.Copy(pw, rwc)
+		conn.cleanup()
+		pw.Close()
+	}()
+	go9p.ServeReadWriter(bufio.NewReader(pr), rwc, cs)
+	pr.Close()
+}
+
 func (s *NinePSrv) Serve(network, address string) error {
 	l, err := net.Listen(network, address)
 	if err != nil {

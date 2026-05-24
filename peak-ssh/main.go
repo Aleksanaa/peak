@@ -5,44 +5,91 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/aleksana/peak/internal/vfs"
 	"github.com/aleksana/peak/internal/vfs/afero"
 )
 
 func main() {
-	var (
-		socketPath = flag.String("s", "", "Unix socket path to listen on")
-		peakSocket = flag.String("p", "", "Peak editor 9P socket to create windows in (optional)")
-	)
+	socketPath := flag.String("s", "", "serve on this Unix socket (omit to post to peak's /srv/ssh)")
+	peakSocket := flag.String("p", "", "peak 9P socket (default ~/.peak/9p); required when -s is omitted")
+	mountPath  := flag.String("m", "/peak/ssh", "auto-mount path in peak's namespace")
+	noMount    := flag.Bool("M", false, "skip auto-mount; mount manually")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s -s socket_path [-p peak_socket] [initial_host]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s [-s socket] [-p peak_socket] [-m mount_path]\n", os.Args[0])
 		flag.PrintDefaults()
 	}
 	flag.Parse()
 
-	if *socketPath == "" {
-		flag.Usage()
-		os.Exit(1)
-	}
-
+	// Connect to peak when: virtual socket mode (-s omitted), auto-mount
+	// requested (default unless -M), or user explicitly supplied -p (enables bridging).
 	var peakFs afero.Fs
-	if *peakSocket != "" {
+	if *socketPath == "" || (!*noMount && *mountPath != "") || *peakSocket != "" {
+		sock := *peakSocket
+		if sock == "" {
+			home, _ := os.UserHomeDir()
+			sock = filepath.Join(home, ".peak", "9p")
+		}
 		var err error
-		peakFs, err = vfs.NewNinePClientFs("unix", *peakSocket)
+		peakFs, err = vfs.NewNinePClientFs("unix", sock)
 		if err != nil {
-			log.Printf("Warning: failed to connect to peak at %s: %v", *peakSocket, err)
+			if *socketPath == "" {
+				log.Fatalf("connect to peak at %s: %v", sock, err)
+			}
+			log.Printf("warning: connect to peak: %v (bridging and auto-mount disabled)", err)
 			peakFs = nil
 		} else {
-			log.Printf("Connected to peak editor at %s", *peakSocket)
+			log.Printf("connected to peak at %s", sock)
 		}
 	}
 
 	srv := vfs.NewNinePSrv(newHostFs(NewSftpFs(), peakFs))
-	os.Remove(*socketPath)
 
-	log.Printf("Starting SSH/SFTP 9P server on %s", *socketPath)
-	if err := srv.Serve("unix", *socketPath); err != nil {
-		log.Fatalf("9P server error: %v", err)
+	if *socketPath != "" {
+		// Real Unix socket mode.
+		os.Remove(*socketPath)
+		log.Printf("serving on %s", *socketPath)
+		if !*noMount && peakFs != nil {
+			bindF, err := peakFs.OpenFile("/bind", os.O_WRONLY, 0)
+			if err == nil {
+				fmt.Fprintf(bindF, "%s %s\n", *socketPath, *mountPath)
+				bindF.Close()
+				log.Printf("mounted at %s", *mountPath)
+			}
+		}
+		if err := srv.Serve("unix", *socketPath); err != nil {
+			log.Fatalf("serve: %v", err)
+		}
+		return
 	}
+
+	// Virtual socket mode: post to peak's /srv/ssh.
+	srvF, err := peakFs.OpenFile("/srv/ssh", os.O_RDWR, 0)
+	if err != nil {
+		log.Fatalf("open /srv/ssh: %v", err)
+	}
+
+	// ServeConn must start before the bind write: peak's Mount initiates a 9P
+	// handshake that writes into the pipe, and io.Copy inside ServeConn must
+	// already be running to drain it, otherwise we deadlock.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		srv.ServeConn(srvF)
+	}()
+
+	if !*noMount {
+		bindF, err := peakFs.OpenFile("/bind", os.O_WRONLY, 0)
+		if err != nil {
+			log.Fatalf("open /bind: %v", err)
+		}
+		fmt.Fprintf(bindF, "/srv/ssh %s\n", *mountPath)
+		bindF.Close()
+		log.Printf("mounted at %s", *mountPath)
+	} else {
+		log.Printf("serving on /srv/ssh (to mount: write '/srv/ssh <path>' to peak's /bind)")
+	}
+
+	<-done
 }

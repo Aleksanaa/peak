@@ -36,6 +36,33 @@ func NewNinePClientFs(network, address string) (*NinePClientFs, error) {
 	return &NinePClientFs{client: c}, nil
 }
 
+// NewNinePClientFsFromConn creates a 9P client over an existing ReadWriteCloser.
+func NewNinePClientFsFromConn(rwc io.ReadWriteCloser) (*NinePClientFs, error) {
+	userStr := os.Getenv("USER")
+	if userStr == "" {
+		userStr = "guest"
+	}
+	c, err := client.NewClient(&rwcConn{rwc}, userStr, "")
+	if err != nil {
+		return nil, err
+	}
+	return &NinePClientFs{client: c}, nil
+}
+
+// rwcConn wraps an io.ReadWriteCloser as a net.Conn for go9p's client.
+type rwcConn struct{ io.ReadWriteCloser }
+
+func (c *rwcConn) LocalAddr() net.Addr                { return rwcAddr{} }
+func (c *rwcConn) RemoteAddr() net.Addr               { return rwcAddr{} }
+func (c *rwcConn) SetDeadline(t time.Time) error      { return nil }
+func (c *rwcConn) SetReadDeadline(t time.Time) error  { return nil }
+func (c *rwcConn) SetWriteDeadline(t time.Time) error { return nil }
+
+type rwcAddr struct{}
+
+func (rwcAddr) Network() string { return "pipe" }
+func (rwcAddr) String() string  { return "pipe" }
+
 func (fs *NinePClientFs) Create(name string) (afero.File, error) {
 	log.Printf("[9P Client] Create: %s", name)
 	f, err := fs.client.Create(name, 0644)
