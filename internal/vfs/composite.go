@@ -110,12 +110,7 @@ func (fs *CompositeFs) MkdirAll(path string, perm os.FileMode) error {
 }
 
 func (fs *CompositeFs) Open(name string) (afero.File, error) {
-	targetFs, relPath := fs.getFs(name)
-	f, err := targetFs.Open(relPath)
-	if err != nil {
-		return nil, err
-	}
-	return &CompositeFile{File: f, fs: fs, name: name}, nil
+	return fs.OpenFile(name, os.O_RDONLY, 0)
 }
 
 func (fs *CompositeFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
@@ -124,7 +119,11 @@ func (fs *CompositeFs) OpenFile(name string, flag int, perm os.FileMode) (afero.
 	if err != nil {
 		return nil, err
 	}
-	return &CompositeFile{File: f, fs: fs, name: name}, nil
+	fi, err := f.Stat()
+	if err == nil && fi.IsDir() {
+		return &CompositeFile{File: f, fs: fs, name: name}, nil
+	}
+	return f, nil
 }
 
 func (fs *CompositeFs) Remove(name string) error {
@@ -198,8 +197,6 @@ type CompositeFile struct {
 	fs   *CompositeFs
 	name string
 }
-
-func (f *CompositeFile) Unwrap() afero.File { return f.File }
 
 func (f *CompositeFile) Readdir(count int) ([]os.FileInfo, error) {
 	entries, err := f.File.Readdir(count)

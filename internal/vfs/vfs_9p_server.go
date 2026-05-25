@@ -189,17 +189,8 @@ func (s *NinePSrv) Open(c go9p.Conn, r *proto.TOpen) (proto.FCall, error) {
 		return &proto.RError{Header: proto.Header{Type: proto.Rerror, Tag: r.Tag}, Ename: err.Error()}, nil
 	}
 
-	for inner := afero.File(f); ; {
-		if caf, ok := inner.(connAwareFile); ok {
-			caf.SetConn(conn)
-			break
-		}
-		type unwrapper interface{ Unwrap() afero.File }
-		uw, ok := inner.(unwrapper)
-		if !ok {
-			break
-		}
-		inner = uw.Unwrap()
+	if caf, ok := f.(connAwareFile); ok {
+		caf.SetConn(conn)
 	}
 
 	fi, _ := f.Stat()
