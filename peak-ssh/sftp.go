@@ -24,11 +24,39 @@ type SSHClient struct {
 }
 
 type SftpFs struct {
-	conns sync.Map // string -> *SSHClient
+	conns     sync.Map // string -> *SSHClient
+	statMu    sync.RWMutex
+	statCache map[string]os.FileInfo // "conn:path" -> FileInfo, populated by Readdir
+	dirKeys   map[string][]string    // "conn:dirPath" -> child keys in statCache
 }
 
 func NewSftpFs() *SftpFs {
-	return &SftpFs{}
+	return &SftpFs{
+		statCache: make(map[string]os.FileInfo),
+		dirKeys:   make(map[string][]string),
+	}
+}
+
+func (s *SftpFs) invalidate(conn, p string) {
+	s.statMu.Lock()
+	defer s.statMu.Unlock()
+	delete(s.statCache, conn+":"+p)
+}
+
+func (s *SftpFs) cacheEntries(conn, dir string, entries []os.FileInfo) {
+	s.statMu.Lock()
+	defer s.statMu.Unlock()
+	dk := conn + ":" + dir
+	for _, k := range s.dirKeys[dk] {
+		delete(s.statCache, k)
+	}
+	keys := make([]string, len(entries))
+	for i, fi := range entries {
+		k := conn + ":" + path.Join(dir, fi.Name())
+		s.statCache[k] = fi
+		keys[i] = k
+	}
+	s.dirKeys[dk] = keys
 }
 
 func (s *SftpFs) getClient(connStr string) (*SSHClient, error) {
@@ -106,18 +134,24 @@ func (s *SftpFs) Stat(name string) (os.FileInfo, error) {
 	if conn == "" {
 		return nil, os.ErrInvalid
 	}
+	s.statMu.RLock()
+	fi, cached := s.statCache[conn+":"+rel]
+	s.statMu.RUnlock()
+	if cached {
+		return fi, nil
+	}
 	client, err := s.getClient(conn)
 	if err != nil {
 		return nil, err
 	}
-	fi, err := client.sftp.Stat(rel)
+	sfi, err := client.sftp.Stat(rel)
 	if err != nil {
 		if rel == "" || rel == "/" {
 			return &SimpleFileInfo{name: conn, isDir: true}, nil
 		}
 		return nil, err
 	}
-	return &SimpleFileInfo{name: path.Base(name), isDir: fi.IsDir(), size: fi.Size(), modTime: fi.ModTime(), mode: fi.Mode()}, nil
+	return &SimpleFileInfo{name: path.Base(name), isDir: sfi.IsDir(), size: sfi.Size(), modTime: sfi.ModTime(), mode: sfi.Mode()}, nil
 }
 
 func (s *SftpFs) Open(name string) (afero.File, error) {
@@ -134,17 +168,17 @@ func (s *SftpFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, 
 		return nil, err
 	}
 	if rel == "" || rel == "/" {
-		return &SftpFile{client: client.sftp, name: "/", isDir: true}, nil
+		return &SftpFile{client: client.sftp, fs: s, conn: conn, name: "/", isDir: true}, nil
 	}
 	fi, err := client.sftp.Stat(rel)
 	if err == nil && fi.IsDir() {
-		return &SftpFile{client: client.sftp, name: rel, isDir: true}, nil
+		return &SftpFile{client: client.sftp, fs: s, conn: conn, name: rel, isDir: true}, nil
 	}
 	f, err := client.sftp.OpenFile(rel, flag)
 	if err != nil {
 		return nil, err
 	}
-	return &SftpFile{File: f, client: client.sftp, name: rel}, nil
+	return &SftpFile{File: f, client: client.sftp, fs: s, conn: conn, name: rel}, nil
 }
 
 // OpenWithStat implements vfs.StatOpener. The FileInfo from a prior Walk is
@@ -160,13 +194,13 @@ func (s *SftpFs) OpenWithStat(name string, fi os.FileInfo, flag int, perm os.Fil
 		return nil, err
 	}
 	if fi.IsDir() {
-		return &SftpFile{client: client.sftp, name: rel, isDir: true}, nil
+		return &SftpFile{client: client.sftp, fs: s, conn: conn, name: rel, isDir: true}, nil
 	}
 	f, err := client.sftp.OpenFile(rel, flag)
 	if err != nil {
 		return nil, err
 	}
-	return &SftpFile{File: f, client: client.sftp, name: rel}, nil
+	return &SftpFile{File: f, client: client.sftp, fs: s, conn: conn, name: rel}, nil
 }
 
 func (s *SftpFs) Remove(n string) error {
@@ -226,6 +260,8 @@ func (s *SftpFs) Name() string { return "SftpFs" }
 type SftpFile struct {
 	*sftp.File
 	client  *sftp.Client
+	fs      *SftpFs
+	conn    string
 	name    string
 	isDir   bool
 	offset  int
@@ -237,6 +273,9 @@ func (f *SftpFile) Readdir(count int) ([]os.FileInfo, error) {
 	if f.entries == nil {
 		raw, err := f.client.ReadDir(f.name)
 		if err != nil {
+			if f.fs != nil {
+				f.fs.invalidate(f.conn, f.name)
+			}
 			return nil, err
 		}
 		f.entries = make([]os.FileInfo, len(raw))
@@ -248,6 +287,9 @@ func (f *SftpFile) Readdir(count int) ([]os.FileInfo, error) {
 				modTime: fi.ModTime(),
 				mode:    fi.Mode(),
 			}
+		}
+		if f.fs != nil {
+			f.fs.cacheEntries(f.conn, f.name, f.entries)
 		}
 	}
 	if count <= 0 {
@@ -295,7 +337,9 @@ func (f *SftpFile) WriteAt(p []byte, off int64) (n int, err error) {
 	return f.File.WriteAt(p, off)
 }
 func (f *SftpFile) Close() error {
-	if f.File != nil { return f.File.Close() }
+	if f.File != nil {
+		return f.File.Close()
+	}
 	return nil
 }
 
