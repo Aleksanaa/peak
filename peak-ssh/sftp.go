@@ -147,6 +147,28 @@ func (s *SftpFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, 
 	return &SftpFile{File: f, client: client.sftp, name: rel}, nil
 }
 
+// OpenWithStat implements vfs.StatOpener. The FileInfo from a prior Walk is
+// passed in so we can skip the sftp.Stat call that OpenFile would otherwise
+// need to determine whether this path is a file or directory.
+func (s *SftpFs) OpenWithStat(name string, fi os.FileInfo, flag int, perm os.FileMode) (afero.File, error) {
+	conn, rel := s.parse(name)
+	if conn == "" {
+		return nil, os.ErrInvalid
+	}
+	client, err := s.getClient(conn)
+	if err != nil {
+		return nil, err
+	}
+	if fi.IsDir() {
+		return &SftpFile{client: client.sftp, name: rel, isDir: true}, nil
+	}
+	f, err := client.sftp.OpenFile(rel, flag)
+	if err != nil {
+		return nil, err
+	}
+	return &SftpFile{File: f, client: client.sftp, name: rel}, nil
+}
+
 func (s *SftpFs) Remove(n string) error {
 	conn, rel := s.parse(n)
 	if conn == "" { return os.ErrInvalid }

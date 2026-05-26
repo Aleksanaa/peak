@@ -29,6 +29,19 @@ const twriteOverhead = 4 + 1 + 2 + 4 + 8 + 4
 // a fully-packed Twrite never exceeds proto.MaxMsgLen.
 const iounit uint32 = proto.MaxMsgLen - twriteOverhead
 
+// fidState holds per-fid state across 9P operations.
+type fidState struct {
+	path     string
+	fi       os.FileInfo // from Walk; lets Open skip a redundant Stat round-trip
+	dirBytes []byte      // serialized 9P stat entries; stable across TRead calls
+}
+
+// StatOpener may be implemented by an afero.Fs to accept a pre-known FileInfo
+// and skip the redundant Stat call that OpenFile would otherwise issue.
+type StatOpener interface {
+	OpenWithStat(name string, fi os.FileInfo, flag int, perm os.FileMode) (afero.File, error)
+}
+
 // NinePSrv implements the go9p.Srv interface to expose an afero.Fs.
 type NinePSrv struct {
 	fs afero.Fs
@@ -52,7 +65,7 @@ type connAwareFile interface {
 
 type NinePConn struct {
 	srv       *NinePSrv
-	fids      map[uint32]string
+	fids      map[uint32]*fidState
 	openFiles map[uint32]afero.File
 	mu        sync.Mutex
 	cleanups  []func()
@@ -67,7 +80,7 @@ func (c *NinePConn) RegisterCleanup(f func()) {
 func (s *NinePSrv) NewConn() go9p.Conn {
 	return &NinePConn{
 		srv:       s,
-		fids:      make(map[uint32]string),
+		fids:      make(map[uint32]*fidState),
 		openFiles: make(map[uint32]afero.File),
 	}
 }
@@ -99,7 +112,7 @@ func (s *NinePSrv) Attach(c go9p.Conn, r *proto.TAttach) (proto.FCall, error) {
 	}
 
 	conn.mu.Lock()
-	conn.fids[r.Fid] = "/"
+	conn.fids[r.Fid] = &fidState{path: "/", fi: fi}
 	conn.mu.Unlock()
 
 	return &proto.RAttach{
@@ -119,7 +132,7 @@ type WalkRedirector interface {
 func (s *NinePSrv) Walk(c go9p.Conn, r *proto.TWalk) (proto.FCall, error) {
 	conn := c.(*NinePConn)
 	conn.mu.Lock()
-	currentPath, ok := conn.fids[r.Fid]
+	state, ok := conn.fids[r.Fid]
 	conn.mu.Unlock()
 
 	if !ok {
@@ -128,6 +141,8 @@ func (s *NinePSrv) Walk(c go9p.Conn, r *proto.TWalk) (proto.FCall, error) {
 
 	wr, _ := s.fs.(WalkRedirector)
 	qids := make([]proto.Qid, 0)
+	currentPath := state.path
+	currentFi := state.fi
 	for _, name := range r.Wname {
 		var nextPath string
 		var fi os.FileInfo
@@ -151,10 +166,11 @@ func (s *NinePSrv) Walk(c go9p.Conn, r *proto.TWalk) (proto.FCall, error) {
 
 		qids = append(qids, toQid(nextPath, fi))
 		currentPath = nextPath
+		currentFi = fi
 	}
 
 	conn.mu.Lock()
-	conn.fids[r.Newfid] = currentPath
+	conn.fids[r.Newfid] = &fidState{path: currentPath, fi: currentFi}
 	conn.mu.Unlock()
 	return &proto.RWalk{Header: proto.Header{Type: proto.Rwalk, Tag: r.Tag}, Nwqid: uint16(len(qids)), Wqid: qids}, nil
 }
@@ -162,7 +178,7 @@ func (s *NinePSrv) Walk(c go9p.Conn, r *proto.TWalk) (proto.FCall, error) {
 func (s *NinePSrv) Open(c go9p.Conn, r *proto.TOpen) (proto.FCall, error) {
 	conn := c.(*NinePConn)
 	conn.mu.Lock()
-	p, ok := conn.fids[r.Fid]
+	state, ok := conn.fids[r.Fid]
 	conn.mu.Unlock()
 
 	if !ok {
@@ -184,7 +200,14 @@ func (s *NinePSrv) Open(c go9p.Conn, r *proto.TOpen) (proto.FCall, error) {
 		flag |= os.O_TRUNC
 	}
 
-	f, err := s.fs.OpenFile(p, flag, 0)
+	var f afero.File
+	var err error
+	// Use the FileInfo already obtained by Walk to skip a redundant Stat RTT.
+	if so, ok := s.fs.(StatOpener); ok && state.fi != nil {
+		f, err = so.OpenWithStat(state.path, state.fi, flag, 0)
+	} else {
+		f, err = s.fs.OpenFile(state.path, flag, 0)
+	}
 	if err != nil {
 		return &proto.RError{Header: proto.Header{Type: proto.Rerror, Tag: r.Tag}, Ename: err.Error()}, nil
 	}
@@ -201,7 +224,7 @@ func (s *NinePSrv) Open(c go9p.Conn, r *proto.TOpen) (proto.FCall, error) {
 
 	return &proto.ROpen{
 		Header: proto.Header{Type: proto.Ropen, Tag: r.Tag},
-		Qid:    toQid(p, fi),
+		Qid:    toQid(state.path, fi),
 		Iounit: iounit,
 	}, nil
 }
@@ -209,14 +232,14 @@ func (s *NinePSrv) Open(c go9p.Conn, r *proto.TOpen) (proto.FCall, error) {
 func (s *NinePSrv) Create(c go9p.Conn, r *proto.TCreate) (proto.FCall, error) {
 	conn := c.(*NinePConn)
 	conn.mu.Lock()
-	basePath, ok := conn.fids[r.Fid]
+	state, ok := conn.fids[r.Fid]
 	conn.mu.Unlock()
 
 	if !ok {
 		return &proto.RError{Header: proto.Header{Type: proto.Rerror, Tag: r.Tag}, Ename: "unknown fid"}, nil
 	}
 
-	newPath := path.Join(basePath, r.Name)
+	newPath := path.Join(state.path, r.Name)
 	var f afero.File
 	var err error
 
@@ -236,7 +259,7 @@ func (s *NinePSrv) Create(c go9p.Conn, r *proto.TCreate) (proto.FCall, error) {
 	fi, _ := f.Stat()
 
 	conn.mu.Lock()
-	conn.fids[r.Fid] = newPath
+	conn.fids[r.Fid] = &fidState{path: newPath, fi: fi}
 	conn.openFiles[r.Fid] = f
 	conn.mu.Unlock()
 
@@ -251,7 +274,7 @@ func (s *NinePSrv) Read(c go9p.Conn, r *proto.TRead) (proto.FCall, error) {
 	conn := c.(*NinePConn)
 	conn.mu.Lock()
 	f, ok := conn.openFiles[r.Fid]
-	p := conn.fids[r.Fid]
+	state := conn.fids[r.Fid]
 	conn.mu.Unlock()
 
 	if !ok {
@@ -264,21 +287,28 @@ func (s *NinePSrv) Read(c go9p.Conn, r *proto.TRead) (proto.FCall, error) {
 	}
 
 	if fi.IsDir() {
-		infos, err := afero.ReadDir(s.fs, p)
-		if err != nil {
-			return &proto.RError{Header: proto.Header{Type: proto.Rerror, Tag: r.Tag}, Ename: err.Error()}, nil
+		// Build the serialized directory bytes once and cache them in the fid
+		// state so that subsequent TRead calls (with different offsets) are
+		// served from memory without any further network round-trips.
+		if state.dirBytes == nil {
+			infos, err := f.Readdir(-1)
+			if err != nil {
+				return &proto.RError{Header: proto.Header{Type: proto.Rerror, Tag: r.Tag}, Ename: err.Error()}, nil
+			}
+			var b []byte
+			for _, info := range infos {
+				st := toStat(path.Join(state.path, info.Name()), info)
+				b = append(b, st.Compose()...)
+			}
+			conn.mu.Lock()
+			state.dirBytes = b
+			conn.mu.Unlock()
 		}
 
-		var b []byte
-		for _, info := range infos {
-			st := toStat(path.Join(p, info.Name()), info)
-			b = append(b, st.Compose()...)
-		}
-
+		b := state.dirBytes
 		if r.Offset >= uint64(len(b)) {
 			return &proto.RRead{Header: proto.Header{Type: proto.Rread, Tag: r.Tag}, Count: 0, Data: nil}, nil
 		}
-
 		end := r.Offset + uint64(r.Count)
 		if end > uint64(len(b)) {
 			end = uint64(len(b))
@@ -342,7 +372,7 @@ func (s *NinePSrv) Clunk(c go9p.Conn, r *proto.TClunk) (proto.FCall, error) {
 func (s *NinePSrv) Remove(c go9p.Conn, r *proto.TRemove) (proto.FCall, error) {
 	conn := c.(*NinePConn)
 	conn.mu.Lock()
-	p, ok := conn.fids[r.Fid]
+	state, ok := conn.fids[r.Fid]
 	f, hasFile := conn.openFiles[r.Fid]
 	if hasFile {
 		delete(conn.openFiles, r.Fid)
@@ -358,7 +388,7 @@ func (s *NinePSrv) Remove(c go9p.Conn, r *proto.TRemove) (proto.FCall, error) {
 		return &proto.RError{Header: proto.Header{Type: proto.Rerror, Tag: r.Tag}, Ename: "unknown fid"}, nil
 	}
 
-	err := s.fs.Remove(p)
+	err := s.fs.Remove(state.path)
 	if err != nil {
 		return &proto.RError{Header: proto.Header{Type: proto.Rerror, Tag: r.Tag}, Ename: err.Error()}, nil
 	}
@@ -369,33 +399,35 @@ func (s *NinePSrv) Remove(c go9p.Conn, r *proto.TRemove) (proto.FCall, error) {
 func (s *NinePSrv) Stat(c go9p.Conn, r *proto.TStat) (proto.FCall, error) {
 	conn := c.(*NinePConn)
 	conn.mu.Lock()
-	p, ok := conn.fids[r.Fid]
+	state, ok := conn.fids[r.Fid]
 	conn.mu.Unlock()
 
 	if !ok {
 		return &proto.RError{Header: proto.Header{Type: proto.Rerror, Tag: r.Tag}, Ename: "unknown fid"}, nil
 	}
 
-	fi, err := s.fs.Stat(p)
+	fi, err := s.fs.Stat(state.path)
 	if err != nil {
 		return &proto.RError{Header: proto.Header{Type: proto.Rerror, Tag: r.Tag}, Ename: err.Error()}, nil
 	}
 
 	return &proto.RStat{
 		Header: proto.Header{Type: proto.Rstat, Tag: r.Tag},
-		Stat:   toStat(p, fi),
+		Stat:   toStat(state.path, fi),
 	}, nil
 }
 
 func (s *NinePSrv) Wstat(c go9p.Conn, r *proto.TWstat) (proto.FCall, error) {
 	conn := c.(*NinePConn)
 	conn.mu.Lock()
-	p, ok := conn.fids[r.Fid]
+	state, ok := conn.fids[r.Fid]
 	conn.mu.Unlock()
 
 	if !ok {
 		return &proto.RError{Header: proto.Header{Type: proto.Rerror, Tag: r.Tag}, Ename: "unknown fid"}, nil
 	}
+
+	p := state.path
 
 	// Rename check
 	if r.Stat.Name != "" && r.Stat.Name != path.Base(p) {
@@ -405,7 +437,7 @@ func (s *NinePSrv) Wstat(c go9p.Conn, r *proto.TWstat) (proto.FCall, error) {
 			return &proto.RError{Header: proto.Header{Type: proto.Rerror, Tag: r.Tag}, Ename: err.Error()}, nil
 		}
 		conn.mu.Lock()
-		conn.fids[r.Fid] = newPath
+		conn.fids[r.Fid] = &fidState{path: newPath}
 		conn.mu.Unlock()
 		p = newPath
 	}
@@ -449,7 +481,7 @@ func (s *NinePSrv) ServeConn(rwc io.ReadWriteCloser) {
 	defer rwc.Close()
 	conn := &NinePConn{
 		srv:       s,
-		fids:      make(map[uint32]string),
+		fids:      make(map[uint32]*fidState),
 		openFiles: make(map[uint32]afero.File),
 	}
 	cs := &connSrv{NinePSrv: s, conn: conn}
@@ -492,7 +524,7 @@ func (s *NinePSrv) ServeListener(l net.Listener) {
 
 			conn := &NinePConn{
 				srv:       s,
-				fids:      make(map[uint32]string),
+				fids:      make(map[uint32]*fidState),
 				openFiles: make(map[uint32]afero.File),
 			}
 			cs := &connSrv{NinePSrv: s, conn: conn}
@@ -547,7 +579,7 @@ func (c *NinePConn) cleanup() {
 
 func toQid(p string, fi os.FileInfo) proto.Qid {
 	var q proto.Qid
-	if fi.IsDir() {
+	if fi != nil && fi.IsDir() {
 		q.Qtype = QTDIR
 	}
 	h := fnv.New64a()

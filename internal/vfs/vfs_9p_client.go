@@ -3,7 +3,6 @@ package vfs
 import (
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"os"
 	"path"
@@ -64,16 +63,21 @@ func (rwcAddr) Network() string { return "pipe" }
 func (rwcAddr) String() string  { return "pipe" }
 
 func (fs *NinePClientFs) Create(name string) (afero.File, error) {
-	log.Printf("[9P Client] Create: %s", name)
+	// go9p's client.Create leaves iounit=0, which breaks twrite. Close and
+	// reopen so the client picks up iounit from the ROpen response.
 	f, err := fs.client.Create(name, 0644)
 	if err != nil {
 		return nil, err
 	}
-	return &NinePFile{f: f, name: name, fs: fs}, nil
+	f.Close()
+	f2, err := fs.client.Open(name, proto.Ordwr)
+	if err != nil {
+		return nil, err
+	}
+	return &NinePFile{f: f2, name: name, fs: fs}, nil
 }
 
 func (fs *NinePClientFs) Mkdir(name string, perm os.FileMode) error {
-	log.Printf("[9P Client] Mkdir: %s", name)
 	f, err := fs.client.Create(name, perm|0x80000000)
 	if err != nil {
 		return err
@@ -106,7 +110,6 @@ func (fs *NinePClientFs) MkdirAll(p string, perm os.FileMode) error {
 }
 
 func (fs *NinePClientFs) Open(name string) (afero.File, error) {
-	log.Printf("[9P Client] Open: %s", name)
 	f, err := fs.client.Open(name, proto.Oread)
 	if err != nil {
 		return nil, err
@@ -115,7 +118,9 @@ func (fs *NinePClientFs) Open(name string) (afero.File, error) {
 }
 
 func (fs *NinePClientFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
-	log.Printf("[9P Client] OpenFile: %s flag=%d", name, flag)
+	if flag&os.O_CREATE != 0 {
+		return fs.Create(name)
+	}
 	var mode proto.Mode
 	if flag&os.O_RDWR != 0 {
 		mode = proto.Ordwr
@@ -124,23 +129,17 @@ func (fs *NinePClientFs) OpenFile(name string, flag int, perm os.FileMode) (afer
 	} else {
 		mode = proto.Oread
 	}
-
 	if flag&os.O_TRUNC != 0 {
 		mode |= proto.Otrunc
 	}
-
 	f, err := fs.client.Open(name, mode)
 	if err != nil {
-		if flag&os.O_CREATE != 0 {
-			return fs.Create(name)
-		}
 		return nil, err
 	}
 	return &NinePFile{f: f, name: name, fs: fs}, nil
 }
 
 func (fs *NinePClientFs) Remove(name string) error {
-	log.Printf("[9P Client] Remove: %s", name)
 	return fs.client.Remove(name)
 }
 
@@ -176,7 +175,6 @@ func (fs *NinePClientFs) RemoveAll(p string) error {
 }
 
 func (fs *NinePClientFs) Rename(oldname, newname string) error {
-	log.Printf("[9P Client] Rename: %s -> %s", oldname, newname)
 	if path.Dir(oldname) != path.Dir(newname) {
 		return fmt.Errorf("cross-directory rename not supported by 9P Wstat")
 	}
@@ -189,7 +187,6 @@ func (fs *NinePClientFs) Rename(oldname, newname string) error {
 }
 
 func (fs *NinePClientFs) Stat(name string) (os.FileInfo, error) {
-	log.Printf("[9P Client] Stat: %s", name)
 	s, err := fs.client.Stat(name)
 	if err != nil {
 		return nil, err
