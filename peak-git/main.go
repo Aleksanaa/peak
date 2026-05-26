@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	gogit "github.com/go-git/go-git/v5"
@@ -55,7 +56,9 @@ func watchEvents(peakFs afero.Fs) {
 	if entries, err := afero.ReadDir(peakFs, "/"); err == nil {
 		for _, e := range entries {
 			if e.IsDir() {
-				handleNew(peakFs, e.Name(), repos, winRepos)
+				if _, err := strconv.Atoi(e.Name()); err == nil {
+					handleNew(peakFs, e.Name(), repos, winRepos)
+				}
 			}
 		}
 	}
