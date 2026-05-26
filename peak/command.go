@@ -457,6 +457,7 @@ func (e *Editor) cmdNew(col *Column, win *Window, cmd string) {
 
 func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {
 	arg := e.getArg(win, cmd)
+	win = e.getTargetWindow(win)
 	targetCol := e.getTargetColumn(col, win)
 	if targetCol == nil {
 		return
