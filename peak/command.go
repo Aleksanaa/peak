@@ -468,7 +468,8 @@ func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {
 	if e.ninep != nil && win != nil {
 		winPath := win.GetFilename()
 		if mountPath, mountFs := e.ninep.FindMount(winPath); mountPath != "" {
-			relPath, _ := filepath.Rel(mountPath, winPath)
+			relPath, _ := filepath.Rel(mountPath, getPathDir(winPath))
+			relPath += "/"
 			newF, err := mountFs.OpenFile("new", os.O_RDWR, 0)
 			if err == nil {
 				go func() {

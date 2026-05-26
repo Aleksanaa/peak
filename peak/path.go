@@ -287,7 +287,8 @@ func runCommand(cmd, path, input string, winid int) (string, error) {
 	// (e.g. /peak/ssh/...) can delegate to their filesystem's "run" file.
 	if appEditor != nil && appEditor.ninep != nil {
 		if mountPath, mountFs := appEditor.ninep.FindMount(path); mountPath != "" {
-			relPath, _ := filepath.Rel(mountPath, path)
+			relPath, _ := filepath.Rel(mountPath, getPathDir(path))
+			relPath += "/"
 			runF, err := mountFs.OpenFile("run", os.O_RDWR, 0)
 			if err == nil {
 				out, rerr := remoteRun(runF, relPath, cmd)
