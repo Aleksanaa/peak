@@ -40,6 +40,14 @@
           overlayAttrs = {
             inherit (config.packages) peak;
           };
+
+          devShells.default = pkgs.mkShellNoCC {
+            env.CGO_ENABLED = 0;
+            packages = with pkgs; [
+              go
+              gopls
+            ];
+          };
         };
     };
 }
