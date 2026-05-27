@@ -463,32 +463,35 @@ func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {
 		return
 	}
 
-	// If the window's path is under an external mount that exposes a "new"
-	// file, delegate session creation to that mount generically.
+	// If the window's path is under an external mount, delegate session
+	// creation to that mount.  Do not fall through to a local terminal
+	// because the working directory belongs to the remote filesystem.
 	if e.ninep != nil && win != nil {
 		winPath := win.GetFilename()
 		if mountPath, mountFs := e.ninep.FindMount(winPath); mountPath != "" {
 			relPath, _ := filepath.Rel(mountPath, getPathDir(winPath))
 			relPath += "/"
 			newF, err := mountFs.OpenFile("new", os.O_RDWR, 0)
-			if err == nil {
-				go func() {
-					defer newF.Close()
-					if _, werr := newF.WriteAt([]byte(relPath), 0); werr != nil {
-						e.screen.PostEvent(tcell.NewEventInterrupt(func() {
-							e.showError(targetCol, win, "", "remote session: "+werr.Error())
-						}))
-						return
-					}
-					buf := make([]byte, 256)
-					n, _ := newF.ReadAt(buf, 0)
-					sessRel := strings.TrimSpace(string(buf[:n]))
-					if sessRel != "" {
-						e.openRemoteTermWindow(targetCol, win, mountPath, sessRel)
-					}
-				}()
+			if err != nil {
+				e.showError(targetCol, win, "", winPath+": virtual path cannot open pty window")
 				return
 			}
+			go func() {
+				defer newF.Close()
+				if _, werr := newF.WriteAt([]byte(relPath), 0); werr != nil {
+					e.screen.PostEvent(tcell.NewEventInterrupt(func() {
+						e.showError(targetCol, win, "", "remote session: "+werr.Error())
+					}))
+					return
+				}
+				buf := make([]byte, 256)
+				n, _ := newF.ReadAt(buf, 0)
+				sessRel := strings.TrimSpace(string(buf[:n]))
+				if sessRel != "" {
+					e.openRemoteTermWindow(targetCol, win, mountPath, sessRel)
+				}
+			}()
+			return
 		}
 	}
 
@@ -539,16 +542,21 @@ func (e *Editor) openRemoteTermWindow(targetCol *Column, win *Window, mountPath,
 
 	sess := session.NewRemote(ioRead, ioWrite, ctlF)
 	title := filepath.Base(mountPath) + ":" + sessRel
+
+	reply := make(chan error, 1)
 	e.screen.PostEvent(tcell.NewEventInterrupt(func() {
 		newWin, err := targetCol.AddSessionTermWindow(title, sess)
 		if err != nil {
 			sess.Close()
 			e.showError(targetCol, win, "", err.Error())
+			reply <- err
 			return
 		}
 		e.ActivateWindow(newWin)
 		targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
+		reply <- nil
 	}))
+	<-reply
 }
 
 func (e *Editor) cmdZerox(col *Column, win *Window) {
