@@ -29,8 +29,6 @@ type TermView struct {
 	selection Selection
 	selecting bool
 
-	lastMode terminal.ModeFlag
-
 	contentHeight int
 }
 
@@ -38,6 +36,13 @@ func (tv *TermView) IsRaw() bool {
 	tv.state.Lock()
 	defer tv.state.Unlock()
 	return tv.state.Mode(terminal.ModeAltScreen)
+}
+
+func (tv *TermView) Layout() {
+	tv.state.Lock()
+	tv.updateContentHeight()
+	tv.state.Unlock()
+	tv.SyncScroll()
 }
 
 func NewTermView(editor *Editor, sess session.Session, x, y, w, h int, onClose func()) (*TermView, error) {
@@ -85,27 +90,8 @@ func NewTermView(editor *Editor, sess session.Session, x, y, w, h int, onClose f
 				}
 				return
 			}
-
-			tv.state.Lock()
-			tv.updateContentHeight()
-			isAlt := tv.state.Mode(terminal.ModeAltScreen)
-			changed := isAlt != (tv.lastMode&terminal.ModeAltScreen != 0)
-			if changed {
-				if isAlt {
-					tv.lastMode |= terminal.ModeAltScreen
-				} else {
-					tv.lastMode &= ^terminal.ModeAltScreen
-				}
-			}
-			tv.state.Unlock()
-
-			if changed {
-				tv.editor.Call(func() {
-					tv.Resize(tv.x, tv.y, tv.w, tv.h)
-				})
-			} else {
-				tv.SyncScroll()
-			}
+			// Layout() (called from Window.Draw on the next frame) handles
+			// contentHeight and scroll sync. Just signal a redraw.
 			tv.editor.screen.PostEvent(tcell.NewEventInterrupt(func() {}))
 		}
 	}()
@@ -236,10 +222,7 @@ func (tv *TermView) Resize(x, y, w, h int) {
 			tv.session.Resize(h, w)
 		}
 	}
-	tv.state.Lock()
-	tv.updateContentHeight()
-	tv.state.Unlock()
-	tv.SyncScroll()
+	// contentHeight and scroll are recomputed by Layout() on the next draw frame.
 }
 
 func (tv *TermView) SyncScroll() {
@@ -252,10 +235,21 @@ func (tv *TermView) SyncScroll() {
 		return
 	}
 
+	if !tv.scroll.AutoScroll {
+		tv.state.Unlock()
+		return
+	}
+
 	eh := tv.getContentHeight()
 	_, cy := tv.state.Cursor()
 	tv.state.Unlock()
-	tv.scroll.Sync(cy, eh, tv.h)
+
+	if cy < tv.scroll.Pos {
+		tv.scroll.Pos = cy
+	} else if cy >= tv.scroll.Pos+tv.h {
+		tv.scroll.Pos = cy - tv.h + 1
+	}
+	tv.scroll.Clamp(eh, tv.h)
 }
 
 func (tv *TermView) Scroll(n int) {

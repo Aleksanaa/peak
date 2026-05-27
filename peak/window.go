@@ -17,6 +17,10 @@ type VisualLine struct {
 }
 
 type View interface {
+	// Layout computes visual-line wrapping and synchronises scroll position.
+	// Must be called once per frame before Draw, and after every Resize.
+	// Must not paint anything.
+	Layout()
 	Draw(tcell.Screen)
 	ShowCursor(tcell.Screen)
 	Resize(x, y, w, h int)
@@ -123,8 +127,15 @@ func (tv *TextView) UpdateLayout() {
 	tv.scroll.Pos = max(0, min(limit, int(ratio*float64(len(tv.layout)))))
 }
 
-func (tv *TextView) GetScroll() (scroll, total, visible int) {
+func (tv *TextView) Layout() {
+	if !tv.scrollable {
+		tv.scroll.Pos = 0
+	}
 	tv.UpdateLayout()
+	tv.SyncScroll()
+}
+
+func (tv *TextView) GetScroll() (scroll, total, visible int) {
 	return tv.scroll.Pos, len(tv.layout), tv.h
 }
 
@@ -147,6 +158,7 @@ func (tv *TextView) GotoLineCol(lineNum, colNum int) {
 			break
 		}
 	}
+	tv.scroll.AutoScroll = true
 	tv.SyncScroll()
 }
 
@@ -192,11 +204,6 @@ func (tv *TextView) visualToBuffer(vx, vidx int) (int, int) {
 }
 
 func (tv *TextView) Draw(s tcell.Screen) {
-	tv.UpdateLayout()
-	if !tv.scrollable {
-		tv.scroll.Pos = 0
-	}
-
 	selStyle := tcell.StyleDefault.Background(tcell.ColorSilver).Foreground(tcell.ColorBlack)
 	if tv.theme != nil {
 		selStyle = tcell.StyleDefault.Background(tv.theme.SelectionBG).Foreground(tv.theme.SelectionFG)
@@ -427,8 +434,15 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 			}
 			tv.buffer.Insert(ev.Rune())
 		}
+		tv.scroll.AutoScroll = true
 		tv.UpdateLayout()
-		tv.SyncScroll()
+		_, vrow := tv.bufferToVisual(tv.buffer.cursor.x, tv.buffer.cursor.y)
+		if vrow < tv.scroll.Pos {
+			tv.scroll.Pos = vrow
+		} else if vrow >= tv.scroll.Pos+tv.h {
+			tv.scroll.Pos = vrow - tv.h + 1
+		}
+		tv.scroll.Clamp(len(tv.layout), tv.h)
 		return false
 	case *tcell.EventMouse:
 		buttons := ev.Buttons()
@@ -437,11 +451,11 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 		}
 		if tv.scrollable {
 			if buttons&tcell.WheelUp != 0 {
-				tv.scroll.Pos = max(0, tv.scroll.Pos-1)
+				tv.Scroll(-1)
 				return false
 			}
 			if buttons&tcell.WheelDown != 0 {
-				tv.scroll.Pos = min(max(0, len(tv.layout)-1), tv.scroll.Pos+1)
+				tv.Scroll(1)
 				return false
 			}
 		}
@@ -473,13 +487,14 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 }
 
 func (tv *TextView) SyncScroll() {
-	if !tv.scrollable {
+	if !tv.scrollable || !tv.scroll.AutoScroll {
 		return
 	}
 	_, vrow := tv.bufferToVisual(tv.buffer.cursor.x, tv.buffer.cursor.y)
-	// Cursor movement always reveals the cursor; no "reading history" mode for text views.
-	tv.scroll.AutoScroll = true
-	tv.scroll.Sync(vrow, len(tv.layout), tv.h)
+	if vrow >= tv.scroll.Pos+tv.h {
+		tv.scroll.Pos = vrow - tv.h + 1
+	}
+	tv.scroll.Clamp(len(tv.layout), tv.h)
 }
 
 func (tv *TextView) LineCount() int {
@@ -516,6 +531,7 @@ func (tv *TextView) ShowLineAt(lineNum int, vrow int) {
 		tv.scroll.Pos = vidx - vrow
 		tv.scroll.Clamp(len(tv.layout), tv.h)
 	}
+	tv.scroll.AutoScroll = true
 	tv.SyncScroll()
 }
 
@@ -649,6 +665,15 @@ func newWindow(tag string, parent *Column, editor *Editor, x, y, w, h int, onExe
 		parent: parent, editor: editor, x: x, y: y, w: w, h: h, onExec: onExec,
 	}
 	win.tag.theme = &editor.theme
+	// Reflow body geometry when tag text wraps to a different number of rows.
+	// Runs on the UI thread (tag edits come via HandleEvent under win.lk).
+	win.tag.buffer.onMutate = func(_, _, _ int, _ string) {
+		prev := len(win.tag.layout)
+		win.tag.UpdateLayout()
+		if len(win.tag.layout) != prev {
+			win.reflow()
+		}
+	}
 	return win
 }
 
@@ -785,7 +810,10 @@ func (win *Window) tagHeight() int {
 	return h
 }
 
-func (win *Window) layout() {
+// reflow sizes the tag and body views to match the window's current geometry.
+// Must be called after the tag's visual-line layout is up to date so that
+// tagHeight() returns the correct row count.
+func (win *Window) reflow() {
 	th := win.tagHeight()
 	win.tag.Resize(win.x+1, win.y, win.w-1, th)
 	bh := max(0, win.h-th)
@@ -793,8 +821,6 @@ func (win *Window) layout() {
 }
 
 func (win *Window) Draw(s tcell.Screen) {
-	win.layout()
-
 	win.tag.underlineLast = win.editor.active == win
 
 	handleColor := win.editor.theme.Handle
@@ -804,30 +830,21 @@ func (win *Window) Draw(s tcell.Screen) {
 		handleColor = win.editor.theme.HandleDirty
 	}
 
+	// Tag section: layout then paint under lock (9P can modify tag buffer).
+	win.lk.Lock()
+	win.tag.Layout()
+	win.tag.Draw(s)
+	spans := append([]colorSpan(nil), win.spans...)
+	win.lk.Unlock()
+
 	handleStyle := tcell.StyleDefault.Background(handleColor).Foreground(tcell.ColorBlack)
-	for i := 0; i < win.tag.h; i++ {
+	for i := 0; i < win.tagHeight(); i++ {
 		s.SetContent(win.x, win.y+i, ' ', nil, handleStyle)
 	}
 
-	// Draw scrollbar/handle for the body
-	if win.body != nil {
-		scroll, total, visible := win.body.GetScroll()
-		if visible > 0 && total > visible {
-			thumbStyle := tcell.StyleDefault.Background(win.editor.theme.ScrollThumb)
-			thumbHeight := max(1, (visible*visible)/total)
-			thumbStart := min(visible-thumbHeight, (scroll*visible)/total)
-
-			for i := 0; i < thumbHeight; i++ {
-				s.SetContent(win.x, win.y+win.tagHeight()+thumbStart+i, ' ', nil, thumbStyle)
-			}
-		}
-	}
-
-	win.lk.Lock()
-	win.tag.Draw(s)
-	spans := win.spans
-	win.lk.Unlock()
-
+	// Body section: layout under lock (9P can mutate the body buffer).
+	// Scrollbar and Draw share one lock section so scrollbar reflects the
+	// layout just computed by Layout() rather than a stale snapshot.
 	if tv, ok := win.body.(*TextView); ok {
 		if len(spans) > 0 {
 			tv.colorAt = win.colorAtFunc(spans)
@@ -835,15 +852,24 @@ func (win *Window) Draw(s tcell.Screen) {
 			tv.colorAt = nil
 		}
 	}
-
 	win.lk.Lock()
+	win.body.Layout()
+	scroll, total, visible := win.body.GetScroll()
+	if visible > 0 && total > visible {
+		thumbStyle := tcell.StyleDefault.Background(win.editor.theme.ScrollThumb)
+		thumbHeight := max(1, (visible*visible)/total)
+		thumbStart := min(visible-thumbHeight, (scroll*visible)/total)
+		for i := 0; i < thumbHeight; i++ {
+			s.SetContent(win.x, win.y+win.tagHeight()+thumbStart+i, ' ', nil, thumbStyle)
+		}
+	}
 	win.body.Draw(s)
 	win.lk.Unlock()
 }
 
 func (win *Window) Resize(x, y, w, h int) {
 	win.x, win.y, win.w, win.h = x, y, w, h
-	win.layout()
+	win.reflow()
 }
 
 func (win *Window) HandleEvent(ev tcell.Event) bool {

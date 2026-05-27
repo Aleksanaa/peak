@@ -66,33 +66,17 @@ func (v *BaseView) GetPos() (x, y, w, h int) { return v.x, v.y, v.w, v.h }
 func (v *BaseView) SetPos(x, y, w, h int)    { v.x, v.y, v.w, v.h = x, y, w, h }
 
 func (s *ScrollState) Clamp(total, visible int) {
-	limit := total
-	if total <= visible {
-		limit = 0
-	}
-	s.Pos = max(0, min(limit, s.Pos))
+	s.Pos = max(0, min(total, s.Pos))
 }
 
 func (s *ScrollState) Scroll(n int, total, visible int) {
 	s.Pos += n
 	s.Clamp(total, visible)
-
 	if s.Pos >= max(0, total-visible) {
 		s.AutoScroll = true
 	} else if n < 0 {
 		s.AutoScroll = false
 	}
-}
-
-func (s *ScrollState) Sync(cursorY int, total, visible int) {
-	if cursorY < s.Pos {
-		s.Pos = cursorY
-	} else if cursorY >= s.Pos+visible {
-		if s.AutoScroll || s.Pos >= total-visible-1 {
-			s.Pos = cursorY - visible + 1
-		}
-	}
-	s.Clamp(total, visible)
 }
 
 func IsWordChar(r rune) bool {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -916,4 +917,165 @@ func TestPassiveCommands(t *testing.T) {
 			t.Errorf("Expected Plumb(nonexistent) to NOT create anything when no windows exist, but got %d columns", len(e.columns))
 		}
 	})
+}
+
+func TestScrollStateClampDoesNotFreezeShortContent(t *testing.T) {
+	// Clamp must not force limit=0 when total <= visible.
+	var s ScrollState
+	s.Pos = 7
+	s.Clamp(10, 30)
+	if s.Pos != 7 {
+		t.Fatalf("Clamp(10,30) with Pos=7: got %d, want 7", s.Pos)
+	}
+	s.Pos = 15
+	s.Clamp(10, 30)
+	if s.Pos != 10 {
+		t.Fatalf("Clamp(10,30) with Pos=15: got %d, want 10 (clamp upper bound to total)", s.Pos)
+	}
+}
+
+func TestScrollStateScrollUpDisablesAutoScroll(t *testing.T) {
+	var s ScrollState
+	s.AutoScroll = true
+	s.Scroll(-1, 100, 30)
+	if s.AutoScroll {
+		t.Fatal("wheel-up must disable AutoScroll")
+	}
+}
+
+func TestScrollStateScrollDownAtBottomEnablesAutoScroll(t *testing.T) {
+	var s ScrollState
+	s.Pos = 69 // total=100, visible=30, bottom starts at 70
+	s.AutoScroll = false
+	s.Scroll(1, 100, 30)
+	if !s.AutoScroll {
+		t.Fatal("wheel-down at bottom must enable AutoScroll")
+	}
+}
+
+func TestTextViewTypingRevealsCursorBelowVisible(t *testing.T) {
+	// Cursor is on the last visible row. Pressing Down must scroll
+	// the viewport so the cursor stays visible.
+	lines := make([]string, 40)
+	for i := range lines {
+		lines[i] = "line"
+	}
+	body := strings.Join(lines, "\n")
+	tv := NewTextView(body, 0, 0, 40, 10, tcell.StyleDefault, false, true)
+	tv.UpdateLayout()
+
+	bx, by := tv.visualToBuffer(0, 9)
+	tv.buffer.cursor = Cursor{bx, by}
+	tv.HandleEvent(tcell.NewEventKey(tcell.KeyDown, 0, 0))
+
+	if tv.scroll.Pos != 1 {
+		t.Fatalf("after KeyDown past visible, scroll.Pos=%d, want 1", tv.scroll.Pos)
+	}
+	if !tv.scroll.AutoScroll {
+		t.Fatal("after key event, AutoScroll must be true")
+	}
+}
+
+func TestTextViewScrollAwayThenTypeSnapsToCursor(t *testing.T) {
+	// Scroll far from the cursor, then type: HandleEvent must snap
+	// scroll back so the cursor is visible.
+	lines := make([]string, 100)
+	for i := range lines {
+		lines[i] = "text"
+	}
+	body := strings.Join(lines, "\n")
+	tv := NewTextView(body, 0, 0, 40, 10, tcell.StyleDefault, false, true)
+	tv.UpdateLayout()
+
+	tv.scroll.Pos = 50
+	tv.scroll.AutoScroll = false
+	tv.HandleEvent(tcell.NewEventKey(tcell.KeyRune, 'x', 0))
+
+	if tv.scroll.Pos != 0 {
+		t.Fatalf("after typing while scrolled away, scroll.Pos=%d, want 0", tv.scroll.Pos)
+	}
+	if !tv.scroll.AutoScroll {
+		t.Fatal("after key event, AutoScroll must be true")
+	}
+}
+
+func TestSyncScrollOnlyFollowsDownward(t *testing.T) {
+	// SyncScroll must never snap upward when the cursor is above
+	// the viewport. That is HandleEvent's domain.
+	lines := make([]string, 100)
+	for i := range lines {
+		lines[i] = "text"
+	}
+	body := strings.Join(lines, "\n")
+	tv := NewTextView(body, 0, 0, 40, 10, tcell.StyleDefault, false, true)
+	tv.UpdateLayout()
+
+	tv.scroll.Pos = 50
+	tv.scroll.AutoScroll = true
+	tv.SyncScroll()
+
+	if tv.scroll.Pos != 50 {
+		t.Fatalf("SyncScroll snapped upward: scroll.Pos=%d, want 50", tv.scroll.Pos)
+	}
+}
+
+func TestSyncScrollFollowsCursorDownward(t *testing.T) {
+	// With AutoScroll=true and cursor below the viewport, SyncScroll
+	// must follow downward.
+	lines := make([]string, 100)
+	for i := range lines {
+		lines[i] = "text"
+	}
+	body := strings.Join(lines, "\n")
+	tv := NewTextView(body, 0, 0, 40, 10, tcell.StyleDefault, false, true)
+	tv.UpdateLayout()
+
+	tv.buffer.cursor = Cursor{0, 95}
+	tv.UpdateLayout()
+	tv.scroll.Pos = 80
+	tv.scroll.AutoScroll = true
+	tv.SyncScroll()
+
+	if tv.scroll.Pos <= 80 {
+		t.Fatalf("SyncScroll did not follow downward: scroll.Pos=%d, want > 80", tv.scroll.Pos)
+	}
+}
+
+func TestTextViewWheelScrollPreservedAcrossDraws(t *testing.T) {
+	// Manual wheel-scroll must not be reset by SyncScroll during the
+	// next Draw cycle.
+	e, s := setupTest(t, 40, 20)
+	col := NewColumn(0, 1, 40, 19, e, e.Execute)
+	e.columns = append(e.columns, col)
+
+	var lines []string
+	for i := 0; i < 50; i++ {
+		lines = append(lines, fmt.Sprintf("L%02d", i))
+	}
+	body := strings.Join(lines, "\n")
+	win := col.AddWindow(" /test ", body)
+	e.Resize()
+	e.Draw()
+	s.Show()
+
+	tx, ty, ok := GetWordCoordinate(s, "L05", 1, 2)
+	if !ok {
+		t.Fatal("could not find 'L05' on screen")
+	}
+
+	for i := 0; i < 3; i++ {
+		e.HandleEvent(tcell.NewEventMouse(tx, ty, tcell.WheelDown, 0))
+	}
+	e.Draw()
+	s.Show()
+
+	_, nty, nok := GetWordCoordinate(s, "L05", 1, 2)
+	if !nok {
+		t.Fatal("'L05' disappeared after wheel-scrolling")
+	}
+	if nty != ty-3 {
+		t.Errorf("expected 'L05' to move up 3 lines to y=%d, got y=%d", ty-3, nty)
+	}
+
+	_ = win
 }

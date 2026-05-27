@@ -92,6 +92,18 @@ func (c *Column) Draw(s tcell.Screen) {
 	for _, win := range c.windows {
 		win.Draw(s)
 	}
+
+	// Fill column body below the last window so the region is fully covered.
+	bottomY := c.y + c.tag.h
+	if len(c.windows) > 0 {
+		last := c.windows[len(c.windows)-1]
+		bottomY = max(bottomY, last.y+last.h)
+	}
+	for y := bottomY; y < c.y+c.h; y++ {
+		for x := c.x + 1; x < c.x+c.w; x++ {
+			s.SetContent(x, y, ' ', nil, tcell.StyleDefault)
+		}
+	}
 }
 
 func (c *Column) Resize(x, y, w, h int) {

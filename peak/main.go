@@ -261,7 +261,13 @@ func (e *Editor) Run() {
 }
 
 func (e *Editor) Draw() {
-	e.screen.Clear()
+	// Phase 1: Layout — compute all geometry and scroll before any paint
+	e.tag.Layout()
+	for _, col := range e.columns {
+		col.tag.Layout()
+	}
+
+	// Phase 2: Paint — pure rendering, no state mutation
 	e.tag.Draw(e.screen)
 	for _, col := range e.columns {
 		col.Draw(e.screen)
