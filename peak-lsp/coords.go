@@ -59,6 +59,10 @@ func advancePoint(start gotreesitter.Point, text []byte) gotreesitter.Point {
 	return point
 }
 
+func fitsUint32(v int) bool {
+	return v >= 0 && uint64(v) <= uint64(^uint32(0))
+}
+
 func mergeByteRanges(ranges []byteRange) []byteRange {
 	if len(ranges) == 0 {
 		return nil

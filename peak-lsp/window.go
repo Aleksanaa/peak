@@ -30,18 +30,12 @@ func watchWindow(fs afero.Fs, id int, retitleCh <-chan string) {
 	}
 	defer eventF.Close()
 
-	type state struct {
-		hl   *gotreesitter.Highlighter
-		lang string
-		tree *gotreesitter.Tree
-		snap []byte // first ~8K of body for content-based re-detection
-	}
-
 	var (
 		mu      sync.Mutex
-		cur     = state{lang: "", hl: detectHighlighter(filename, nil)}
+		cur     highlightState
 		curFile = filename
 	)
+	cur.hl = detectHighlighter(filename, nil)
 	if cur.hl != nil {
 		cur.lang = enry.GetLanguage(filename, nil)
 	}
@@ -60,30 +54,36 @@ func watchWindow(fs afero.Fs, id int, retitleCh <-chan string) {
 	go func() {
 		defer close(done)
 		for range trigger {
-			body, err := afero.ReadFile(fs, base+"/body")
-			if err != nil || len(body) == 0 {
-				continue
+			mu.Lock()
+			if cur.body == nil {
+				mu.Unlock()
+				body, err := afero.ReadFile(fs, base+"/body")
+				if err != nil || len(body) == 0 {
+					continue
+				}
+				mu.Lock()
+				if cur.body == nil {
+					cur.body = append([]byte(nil), body...)
+				}
 			}
 
-			mu.Lock()
-			s := cur
-			if s.snap == nil {
-				// First body read: refine detection with content.
+			body := cur.body
+			if cur.snap == nil {
 				snap := body
 				if len(snap) > 8192 {
 					snap = snap[:8192]
 				}
-				cur.snap = snap
+				cur.snap = append([]byte(nil), snap...)
 				lang := enry.GetLanguage(curFile, snap)
-				if lang != "" && lang != s.lang {
+				if lang != "" && lang != cur.lang {
 					if hl := buildHighlighterForLang(lang); hl != nil {
 						cur.hl = hl
 						cur.lang = lang
-						cur.tree = nil
+						resetIncrementalTree(&cur)
 					}
 				}
-				s = cur
 			}
+			s := cur
 			mu.Unlock()
 
 			if s.hl == nil {
@@ -121,7 +121,7 @@ func watchWindow(fs afero.Fs, id int, retitleCh <-chan string) {
 				if lang != cur.lang {
 					cur.hl = hl
 					cur.lang = lang
-					cur.tree = nil
+					resetIncrementalState(&cur)
 				}
 				mu.Unlock()
 
@@ -146,9 +146,11 @@ func watchWindow(fs afero.Fs, id int, retitleCh <-chan string) {
 		}
 		switch ev.Type {
 		case 'I', 'D':
+			mu.Lock()
+			applyEventToIncrementalState(&cur, ev)
+			mu.Unlock()
 			signal()
 		case 'x', 'l':
-			// Peak processes x/l events directly; no write-back needed.
 		}
 	}
 	close(trigger)
