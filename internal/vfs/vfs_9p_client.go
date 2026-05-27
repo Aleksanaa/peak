@@ -294,33 +294,6 @@ func (f *NinePFile) Truncate(size int64) error {
 }
 func (f *NinePFile) WriteString(s string) (ret int, err error) { return f.Write([]byte(s)) }
 
-// NinePAccepter lets a cross-process 9P server drive ServeAccepter against a
-// virtual /srv entry in peak. NewNinePAccepter opens the entry (creating it if
-// necessary) to claim ownership; each Accept call reopens the same path, which
-// blocks until a client dials (clone-device semantics), and returns the
-// resulting stream. Close tears down the entry.
-type NinePAccepter struct {
-	fs      afero.Fs
-	path    string
-	listenF afero.File
-}
-
-func NewNinePAccepter(fs afero.Fs, path string) (*NinePAccepter, error) {
-	f, err := fs.OpenFile(path, os.O_RDWR, 0)
-	if err != nil {
-		return nil, err
-	}
-	return &NinePAccepter{fs: fs, path: path, listenF: f}, nil
-}
-
-func (a *NinePAccepter) Accept() (io.ReadWriteCloser, error) {
-	return a.fs.OpenFile(a.path, os.O_RDWR, 0)
-}
-
-func (a *NinePAccepter) Close() error {
-	return a.listenF.Close()
-}
-
 type NinePFileInfo struct {
 	stat *proto.Stat
 }

@@ -74,16 +74,14 @@ func main() {
 	}
 
 	// Virtual socket mode: post to peak's /srv/ssh.
-	accepter, err := vfs.NewNinePAccepter(peakFs, "/srv/ssh")
+	conn, err := peakFs.OpenFile("/srv/ssh", os.O_RDWR, 0)
 	if err != nil {
 		log.Fatalf("open /srv/ssh: %v", err)
 	}
 
-	// ServeAccepter must be running before the mount write: the mount triggers
-	// a dial on the unbuffered channel, which blocks until Accept is receiving.
 	done := make(chan struct{})
 	go func() {
-		srv.ServeAccepter(accepter)
+		srv.ServeConn(conn)
 		close(done)
 	}()
 
