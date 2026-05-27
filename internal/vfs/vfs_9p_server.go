@@ -454,26 +454,15 @@ func (s *NinePSrv) Wstat(c go9p.Conn, r *proto.TWstat) (proto.FCall, error) {
 		}
 	}
 
-	return &proto.RWstat{Header: proto.Header{Type: proto.Rwstat, Tag: r.Tag}}, nil
-}
-
-// Accepter is implemented by virtual listen sockets (e.g. srvServerFile) that
-// deliver independent per-connection transports, one per dial.
-type Accepter interface {
-	Accept() (io.ReadWriteCloser, error)
-	Close() error
-}
-
-// ServeAccepter runs the accept loop for a virtual listen socket, serving each
-// incoming connection as an independent 9P session in its own goroutine.
-func (s *NinePSrv) ServeAccepter(a Accepter) {
-	for {
-		rwc, err := a.Accept()
-		if err != nil {
-			return
+	// Mode (Chmod) check: 0xFFFFFFFF means "no change"
+	if r.Stat.Mode != 0xFFFFFFFF {
+		perm := os.FileMode(r.Stat.Mode & 0x1FF)
+		if err := s.fs.Chmod(p, perm); err != nil {
+			return &proto.RError{Header: proto.Header{Type: proto.Rerror, Tag: r.Tag}, Ename: err.Error()}, nil
 		}
-		go s.ServeConn(rwc)
 	}
+
+	return &proto.RWstat{Header: proto.Header{Type: proto.Rwstat, Tag: r.Tag}}, nil
 }
 
 // ServeConn serves a single pre-established 9P connection over rwc.
@@ -566,6 +555,7 @@ func (c *NinePConn) cleanup() {
 		files = append(files, f)
 	}
 	c.openFiles = make(map[uint32]afero.File)
+	c.fids = make(map[uint32]*fidState)
 	cleanups := c.cleanups
 	c.cleanups = nil
 	c.mu.Unlock()
