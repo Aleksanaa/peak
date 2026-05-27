@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"unicode/utf8"
 
 	"github.com/aleksana/peak/internal/vfs/afero"
 	"github.com/aleksana/peak/internal/wevent"
@@ -244,23 +243,6 @@ func writeColorSpans(fs afero.Fs, base string, body []byte, ranges []gotreesitte
 	if sb.Len() > 0 {
 		colorF.WriteString(sb.String())
 	}
-}
-
-// buildByteToRune builds a slice where index i holds the rune offset
-// corresponding to byte offset i in src. Index len(src) is the past-the-end sentinel.
-func buildByteToRune(src []byte) []int {
-	out := make([]int, len(src)+1)
-	runeOff := 0
-	for i := 0; i < len(src); {
-		_, size := utf8.DecodeRune(src[i:])
-		for j := 0; j < size; j++ {
-			out[i+j] = runeOff
-		}
-		i += size
-		runeOff++
-	}
-	out[len(src)] = runeOff
-	return out
 }
 
 // captureToAttr maps a tree-sitter capture name to a peak colour attribute.
