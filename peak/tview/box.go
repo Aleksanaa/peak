@@ -14,12 +14,19 @@ type Box struct {
 	titleAlign int
 
 	paddingTop, paddingBottom, paddingLeft, paddingRight int
+
+	dontClear bool
 }
 
 func NewBox() *Box {
 	return &Box{
 		titleAlign: AlignCenter,
 	}
+}
+
+func (b *Box) SetDontClear(v bool) *Box {
+	b.dontClear = v
+	return b
 }
 
 func (b *Box) SetRect(x, y, width, height int) {
@@ -97,29 +104,25 @@ func (b *Box) InRect(x, y int) bool {
 }
 
 func (b *Box) Draw(screen tcell.Screen) {
-	b.draw(screen, b)
-}
-
-func (b *Box) draw(screen tcell.Screen, focusable Primitive) {
 	if b.width <= 0 || b.height <= 0 {
 		return
 	}
 
-	// Fill background
-	background := tcell.StyleDefault.Background(b.backgroundColor)
-	for row := b.y; row < b.y+b.height; row++ {
-		for col := b.x; col < b.x+b.width; col++ {
-			screen.SetContent(col, row, ' ', nil, background)
+	if !b.dontClear {
+		background := tcell.StyleDefault.Background(b.backgroundColor)
+		for row := b.y; row < b.y+b.height; row++ {
+			for col := b.x; col < b.x+b.width; col++ {
+				screen.SetContent(col, row, ' ', nil, background)
+			}
 		}
 	}
 
-	// Draw border
 	if b.border && b.width >= 2 && b.height >= 2 {
-		b.drawBorder(screen, false)
+		b.drawBorder(screen)
 	}
 }
 
-func (b *Box) drawBorder(screen tcell.Screen, focused bool) {
+func (b *Box) drawBorder(screen tcell.Screen) {
 	horizontal := Borders.Horizontal
 	vertical := Borders.Vertical
 	topLeft := Borders.TopLeft
@@ -127,32 +130,19 @@ func (b *Box) drawBorder(screen tcell.Screen, focused bool) {
 	bottomLeft := Borders.BottomLeft
 	bottomRight := Borders.BottomRight
 
-	if focused {
-		horizontal = Borders.HorizontalFocus
-		vertical = Borders.VerticalFocus
-		topLeft = Borders.TopLeftFocus
-		topRight = Borders.TopRightFocus
-		bottomLeft = Borders.BottomLeftFocus
-		bottomRight = Borders.BottomRightFocus
-	}
-
-	// Top and bottom edges
 	for col := b.x + 1; col < b.x+b.width-1; col++ {
 		screen.SetContent(col, b.y, horizontal, nil, b.borderStyle)
 		screen.SetContent(col, b.y+b.height-1, horizontal, nil, b.borderStyle)
 	}
-	// Left and right edges
 	for row := b.y + 1; row < b.y+b.height-1; row++ {
 		screen.SetContent(b.x, row, vertical, nil, b.borderStyle)
 		screen.SetContent(b.x+b.width-1, row, vertical, nil, b.borderStyle)
 	}
-	// Corners
 	screen.SetContent(b.x, b.y, topLeft, nil, b.borderStyle)
 	screen.SetContent(b.x+b.width-1, b.y, topRight, nil, b.borderStyle)
 	screen.SetContent(b.x, b.y+b.height-1, bottomLeft, nil, b.borderStyle)
 	screen.SetContent(b.x+b.width-1, b.y+b.height-1, bottomRight, nil, b.borderStyle)
 
-	// Draw title
 	if b.title != "" && b.width >= 4 {
 		titleStyle := b.borderStyle.Foreground(b.titleColor)
 		printed, _ := Print(screen, b.title, b.x+1, b.y, b.width-2, b.titleAlign, titleStyle)

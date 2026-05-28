@@ -186,7 +186,7 @@ func (e *Editor) OpenLine(win *Window, path string, line, col int, binaryFallbac
 		if target != nil {
 			newWin := target.AddWindow(" New ", "")
 			e.ActivateWindow(newWin)
-			target.Resize(target.x, target.y, target.w, target.h)
+			target.Reflow()
 		}
 		return
 	}
@@ -243,7 +243,7 @@ func (e *Editor) createWindow(target *Column, full string, content string, isDir
 			tv.GotoLineCol(line, col)
 		}
 	}
-	target.Resize(target.x, target.y, target.w, target.h)
+	target.Reflow()
 	return newWin
 }
 
@@ -388,7 +388,7 @@ func (e *Editor) RemoveWindow(target *Window) {
 	for i, w := range col.windows {
 		if w == target {
 			col.windows = append(col.windows[:i], col.windows[i+1:]...)
-			col.Resize(col.x, col.y, col.w, col.h)
+			col.Reflow()
 			if e.active == target {
 				if len(col.windows) > 0 {
 					e.active = col.windows[0]
@@ -507,7 +507,7 @@ func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {
 		return
 	}
 	e.ActivateWindow(newWin)
-	targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
+	targetCol.Reflow()
 }
 
 func (e *Editor) openRemoteTermWindow(targetCol *Column, win *Window, mountPath, sessRel string) {
@@ -553,7 +553,7 @@ func (e *Editor) openRemoteTermWindow(targetCol *Column, win *Window, mountPath,
 			return
 		}
 		e.ActivateWindow(newWin)
-		targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
+		targetCol.Reflow()
 		reply <- nil
 	}))
 	<-reply
@@ -577,7 +577,7 @@ func (e *Editor) cmdZerox(col *Column, win *Window) {
 		newWin.savedVersion = target.savedVersion
 		newWin.warnedVersion = target.warnedVersion
 		e.ActivateWindow(newWin)
-		target.parent.Resize(target.parent.x, target.parent.y, target.parent.w, target.parent.h)
+		target.parent.Reflow()
 	} else if _, ok := target.body.(*TermView); ok {
 		e.cmdWin(col, target, "Win")
 	}
@@ -617,7 +617,7 @@ func (e *Editor) cmdSort(col *Column, win *Window) {
 		return targetCol.windows[i].GetFilename() < targetCol.windows[j].GetFilename()
 	})
 
-	targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
+	targetCol.Reflow()
 }
 
 func (e *Editor) cmdTab(col *Column, win *Window, cmd string) {
@@ -775,7 +775,7 @@ func (e *Editor) findOrCreateErrorWindow(col *Column, win *Window, dir string) *
 	}
 	newWin := targetCol.AddWindow(" "+errName+" Get Put Del ", "")
 	e.ActivateWindow(newWin)
-	targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
+	targetCol.Reflow()
 	return newWin
 }
 

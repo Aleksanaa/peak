@@ -11,6 +11,7 @@ type flexItem struct {
 	Item       Primitive
 	FixedSize  int
 	Proportion int
+	MinSize    int
 }
 
 type Flex struct {
@@ -25,6 +26,7 @@ func NewFlex() *Flex {
 		direction: FlexColumn,
 	}
 	f.Box = NewBox()
+	f.Box.dontClear = true
 	return f
 }
 
@@ -36,6 +38,24 @@ func (f *Flex) SetDirection(direction int) *Flex {
 func (f *Flex) AddItem(item Primitive, fixedSize, proportion int) *Flex {
 	f.items = append(f.items, &flexItem{Item: item, FixedSize: fixedSize, Proportion: proportion})
 	return f
+}
+
+func (f *Flex) SetMinSize(item Primitive, minSize int) {
+	for _, fi := range f.items {
+		if fi.Item == item {
+			fi.MinSize = minSize
+			return
+		}
+	}
+}
+
+func (f *Flex) ResizeItem(item Primitive, fixedSize, proportion int) {
+	for _, fi := range f.items {
+		if fi.Item == item {
+			fi.FixedSize = fixedSize
+			fi.Proportion = proportion
+		}
+	}
 }
 
 func (f *Flex) RemoveItem(p Primitive) *Flex {
@@ -56,19 +76,28 @@ func (f *Flex) Clear() *Flex {
 	return f
 }
 
-func (f *Flex) Draw(screen tcell.Screen) {
-	f.Box.draw(screen, f)
+func (f *Flex) GetItemSize(item Primitive) (fixedSize, proportion int) {
+	for _, fi := range f.items {
+		if fi.Item == item {
+			return fi.FixedSize, fi.Proportion
+		}
+	}
+	return 0, 0
+}
 
+func (f *Flex) Layout() {
 	x, y, width, height := f.GetInnerRect()
-	var proportionSum int
 	distSize := width
 	if f.direction == FlexRow {
 		distSize = height
 	}
+
+	var proportionSum int
 	for _, item := range f.items {
 		if item.FixedSize > 0 {
 			distSize -= item.FixedSize
 		} else {
+			distSize -= item.MinSize
 			proportionSum += item.Proportion
 		}
 	}
@@ -80,12 +109,12 @@ func (f *Flex) Draw(screen tcell.Screen) {
 	for _, item := range f.items {
 		size := item.FixedSize
 		if size <= 0 {
-			if proportionSum > 0 {
-				size = distSize * item.Proportion / proportionSum
-				distSize -= size
+			size = item.MinSize
+			if proportionSum > 0 && distSize > 0 {
+				extra := distSize * item.Proportion / proportionSum
+				distSize -= extra
 				proportionSum -= item.Proportion
-			} else {
-				size = 0
+				size += extra
 			}
 		}
 		if item.Item != nil {
@@ -96,7 +125,17 @@ func (f *Flex) Draw(screen tcell.Screen) {
 			}
 		}
 		pos += size
+	}
+}
 
+func (f *Flex) Draw(screen tcell.Screen) {
+	f.Box.Draw(screen)
+	// Layout is called here so that Draw is self-contained — callers don't
+	// need a separate pre-draw Layout pass. This mirrors the original tview
+	// design. The double-layout when resize() also calls Layout is pure
+	// arithmetic with no allocation and is accepted as benign.
+	f.Layout()
+	for _, item := range f.items {
 		if item.Item != nil {
 			item.Item.Draw(screen)
 		}

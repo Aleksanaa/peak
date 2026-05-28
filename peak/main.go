@@ -94,13 +94,14 @@ type Editor struct {
 	scrollAmount    int
 	scrollDir       int
 	scrollStartTime time.Time
-	lastWidth       int
 	lastClickY      int
+	lastWidth       int
 	theme           Theme
 	nextWinID       int
 	ninep           *NineP
 
-	colFlex *tview.Flex
+	colFlex  *tview.Flex
+	rootFlex *tview.Flex
 }
 
 // Redraw signals the main loop to redraw on the next iteration.
@@ -158,19 +159,19 @@ func (e *Editor) Init(numCols int, args []string) {
 	e.colFlex = tview.NewFlex()
 	e.colFlex.SetDirection(tview.FlexColumn)
 
+	e.rootFlex = tview.NewFlex()
+	e.rootFlex.SetDirection(tview.FlexRow)
+	e.rootFlex.AddItem(e.tag, 1, 0)
+
 	if numCols < 1 {
 		numCols = 1
 	}
-	colWidth := e.width / numCols
 	for i := 0; i < numCols; i++ {
-		w := colWidth
-		if i == numCols-1 {
-			w = e.width - (i * colWidth)
-		}
-		col := NewColumn(i*colWidth, 1, w, e.height-1, e, e.Execute)
-		col.explicitWidth = w
+		col := NewColumn(0, 0, 0, 0, e, e.Execute)
 		e.columns = append(e.columns, col)
+		e.colFlex.AddItem(col, 0, 1)
 	}
+	e.rootFlex.AddItem(e.colFlex, 0, 1)
 	e.resize()
 
 	if len(args) > 0 {
@@ -272,10 +273,10 @@ func (e *Editor) Draw() {
 	for _, col := range e.columns {
 		col.tag.Layout()
 	}
+	e.resize()
 
 	// Phase 2: Paint — pure rendering, no state mutation
-	e.tag.Draw(e.screen)
-	e.colFlex.Draw(e.screen)
+	e.rootFlex.Draw(e.screen)
 	if e.focusedView != nil {
 		e.focusedView.ShowCursor(e.screen)
 	}
@@ -363,7 +364,7 @@ func (e *Editor) HandleEvent(ev tcell.Event) (bool, bool) {
 		}
 
 		for _, col := range e.columns {
-			if col.Contains(mx, my) {
+			if col.InRect(mx, my) {
 				return col.HandleEvent(ev), true
 			}
 		}
@@ -413,26 +414,29 @@ func (e *Editor) moveColumnTo(col *Column, mx int) {
 	}
 
 	if idx == 0 {
-		if len(e.columns) > 1 && mx > e.columns[1].x+e.columns[1].w/2 {
-			e.columns[0], e.columns[1] = e.columns[1], e.columns[0]
-			e.columns[0].explicitWidth, e.columns[1].explicitWidth = 0, 0
+		if len(e.columns) > 1 {
+			c1x, _, c1w, _ := e.columns[1].GetRect()
+			if mx > c1x+c1w/2 {
+				e.columns[0], e.columns[1] = e.columns[1], e.columns[0]
+			}
 		}
 	} else {
 		prev := e.columns[idx-1]
-		if mx < prev.x+2 { // Swap left
+		px, _, pw, _ := prev.GetRect()
+		_, _, cw, _ := col.GetRect()
+		if mx < px+2 {
 			e.columns[idx], e.columns[idx-1] = e.columns[idx-1], e.columns[idx]
-			e.columns[idx].explicitWidth, e.columns[idx-1].explicitWidth = 0, 0
 		} else {
-			combinedW := prev.w + col.w
+			combinedW := pw + cw
 			minW := 5
-			if mx < prev.x+minW {
-				mx = prev.x + minW
+			if mx < px+minW {
+				mx = px + minW
 			}
-			if mx > prev.x+combinedW-minW {
-				mx = prev.x + combinedW - minW
+			if mx > px+combinedW-minW {
+				mx = px + combinedW - minW
 			}
-			prev.explicitWidth = mx - prev.x
-			col.explicitWidth = combinedW - prev.explicitWidth
+			e.colFlex.ResizeItem(prev, mx-px, 0)
+			e.colFlex.ResizeItem(col, combinedW-(mx-px), 0)
 		}
 	}
 	e.resize()
@@ -441,7 +445,7 @@ func (e *Editor) moveColumnTo(col *Column, mx int) {
 func (e *Editor) moveWindowTo(win *Window, mx, my int) {
 	var target *Column
 	for _, col := range e.columns {
-		if mx >= col.x && mx < col.x+col.w {
+		if col.InRect(mx, my) {
 			target = col
 			break
 		}
@@ -455,23 +459,26 @@ func (e *Editor) moveWindowTo(win *Window, mx, my int) {
 		for i, w := range old.windows {
 			if w == win {
 				old.windows = append(old.windows[:i], old.windows[i+1:]...)
-				old.Resize(old.x, old.y, old.w, old.h)
+				old.Reflow()
 				break
 			}
 		}
-		win.parent, win.explicitHeight = target, 0
+		win.parent = target
 		newIdx := 0
 		for _, w := range target.windows {
-			if my < w.y+w.h/2 {
+			_, wy, _, wh := w.GetRect()
+			if my < wy+wh/2 {
 				break
 			}
 			newIdx++
 		}
 		target.windows = append(target.windows[:newIdx], append([]*Window{win}, target.windows[newIdx:]...)...)
-		target.Resize(target.x, target.y, target.w, target.h)
+		tx, ty, tw, th := target.GetRect()
+		target.SetRect(tx, ty, tw, th)
 		return
 	}
 
+	// Intra-column: swap or resize.
 	idx := -1
 	for i, w := range target.windows {
 		if w == win {
@@ -484,30 +491,38 @@ func (e *Editor) moveWindowTo(win *Window, mx, my int) {
 	}
 
 	if idx == 0 {
-		if len(target.windows) > 1 && my > target.windows[1].y+target.windows[1].tagHeight() {
-			target.windows[0], target.windows[1] = target.windows[1], target.windows[0]
-			target.windows[0].explicitHeight, target.windows[1].explicitHeight = 0, 0
+		if len(target.windows) > 1 {
+			_, w1y, _, _ := target.windows[1].GetRect()
+			if my > w1y+target.windows[1].tagHeight() {
+				target.windows[0], target.windows[1] = target.windows[1], target.windows[0]
+				target.winFlex.ResizeItem(target.windows[0], 0, 1)
+				target.winFlex.ResizeItem(target.windows[1], 0, 1)
+			}
 		}
 	} else {
 		prev := target.windows[idx-1]
-		if my < prev.y+prev.tagHeight() { // Swap up
+		_, py, _, ph := prev.GetRect()
+		_, _, _, wh := win.GetRect()
+		if my < py+prev.tagHeight() {
 			target.windows[idx], target.windows[idx-1] = target.windows[idx-1], target.windows[idx]
-			target.windows[idx].explicitHeight, target.windows[idx-1].explicitHeight = 0, 0
+			target.winFlex.ResizeItem(target.windows[idx], 0, 1)
+			target.winFlex.ResizeItem(target.windows[idx-1], 0, 1)
 		} else {
-			combinedH := prev.h + win.h
+			combinedH := ph + wh
 			minH := win.tagHeight() + 1
 			prevMinH := prev.tagHeight() + 1
-			if my < prev.y+prevMinH {
-				my = prev.y + prevMinH
+			if my < py+prevMinH {
+				my = py + prevMinH
 			}
-			if my > prev.y+combinedH-minH {
-				my = prev.y + combinedH - minH
+			if my > py+combinedH-minH {
+				my = py + combinedH - minH
 			}
-			prev.explicitHeight = my - prev.y
-			win.explicitHeight = combinedH - prev.explicitHeight
+			target.winFlex.ResizeItem(prev, my-py, 0)
+			target.winFlex.ResizeItem(win, combinedH-(my-py), 0)
 		}
 	}
-	target.Resize(target.x, target.y, target.w, target.h)
+	tx, ty, tw, th := target.GetRect()
+	target.SetRect(tx, ty, tw, th)
 }
 
 func (e *Editor) Resize() {
@@ -518,94 +533,47 @@ func (e *Editor) resize() {
 	if len(e.columns) == 0 {
 		return
 	}
-	e.tag.Resize(0, 0, e.width, 1)
 
+	if e.rootFlex == nil {
+		e.rootFlex = tview.NewFlex()
+		e.rootFlex.SetDirection(tview.FlexRow)
+		e.rootFlex.AddItem(e.tag, 1, 0)
+	}
 	if e.colFlex == nil {
 		e.colFlex = tview.NewFlex()
 		e.colFlex.SetDirection(tview.FlexColumn)
 	}
-	e.colFlex.SetRect(0, 1, e.width, e.height-1)
-	e.colFlex.Clear()
-	for _, col := range e.columns {
-		if col.explicitWidth > 0 {
-			e.colFlex.AddItem(col, col.explicitWidth, 0)
-		} else {
-			e.colFlex.AddItem(col, 0, 1)
-		}
+	if e.rootFlex.ItemCount() == 1 {
+		e.rootFlex.AddItem(e.colFlex, 0, 1)
 	}
+
+	e.rootFlex.SetRect(0, 0, e.width, e.height)
+
+	scaleRatio := 1.0
+	if e.lastWidth > 0 && e.lastWidth != e.width {
+		scaleRatio = float64(e.width) / float64(e.lastWidth)
+	}
+	e.lastWidth = e.width
+
+	e.syncColFlex(scaleRatio)
+	e.rootFlex.Layout()
 }
 
-func distributeSpace(totalSpace int, count int, getExplicit func(int) int, getMin func(int) int, lastTotal, currentTotal int) []int {
-	heights := make([]int, count)
-	totalExplicit, numAuto := 0, 0
-
-	// 1. Proportional scaling
-	scaleRatio := 1.0
-	if lastTotal > 0 && lastTotal != currentTotal {
-		scaleRatio = float64(currentTotal) / float64(lastTotal)
-	}
-
-	for i := 0; i < count; i++ {
-		exp := getExplicit(i)
-		if exp > 0 {
-			heights[i] = int(float64(exp) * scaleRatio)
-			totalExplicit += heights[i]
-		} else {
-			numAuto++
+func (e *Editor) syncColFlex(scaleRatio float64) {
+	sizes := make(map[*Column]int)
+	for _, col := range e.columns {
+		if fixed, _ := e.colFlex.GetItemSize(col); fixed > 0 {
+			sizes[col] = fixed
 		}
 	}
-
-	// 2. Redistribute if full
-	if numAuto > 0 && totalExplicit >= totalSpace {
-		targetTotalAuto := (totalSpace * numAuto) / (count + 1)
-		if targetTotalAuto < 5*numAuto {
-			targetTotalAuto = 5 * numAuto
+	e.colFlex.Clear()
+	for _, col := range e.columns {
+		fixedSize := sizes[col]
+		if fixedSize > 0 && scaleRatio != 1.0 {
+			fixedSize = int(float64(fixedSize)*scaleRatio + 0.5)
 		}
-		if totalExplicit > 0 {
-			scale := float64(totalSpace-targetTotalAuto) / float64(totalExplicit)
-			totalExplicit = 0
-			for i := 0; i < count; i++ {
-				if getExplicit(i) > 0 {
-					heights[i] = int(float64(heights[i]) * scale)
-					totalExplicit += heights[i]
-				}
-			}
-		}
+		e.colFlex.AddItem(col, fixedSize, 1)
 	}
-
-	// 3. Final layout
-	autoSpace := 0
-	if numAuto > 0 {
-		autoSpace = (totalSpace - totalExplicit) / numAuto
-		if autoSpace < 5 {
-			autoSpace = 5
-		}
-	}
-
-	actualTotal := 0
-	for i := 0; i < count; i++ {
-		h := heights[i]
-		if h <= 0 {
-			h = autoSpace
-		}
-		min := getMin(i)
-		if h < min {
-			h = min
-		}
-		heights[i] = h
-		actualTotal += h
-	}
-
-	// Adjust last one to fit exactly
-	if count > 0 {
-		diff := totalSpace - actualTotal
-		heights[count-1] += diff
-		if heights[count-1] < getMin(count-1) {
-			heights[count-1] = getMin(count - 1)
-		}
-	}
-
-	return heights
 }
 
 func (t *Theme) colorForAttr(attr string) tcell.Color {

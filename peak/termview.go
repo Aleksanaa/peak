@@ -49,7 +49,7 @@ func NewTermView(editor *Editor, sess session.Session, x, y, w, h int, onClose f
 	ctx, cancel := context.WithCancel(context.Background())
 	tv := &TermView{
 		BaseView: BaseView{
-			x: x, y: y, w: w, h: h,
+			x: -1, y: -1, w: 0, h: 0,
 		},
 		session:       sess,
 		onClose:       onClose,
@@ -206,23 +206,21 @@ func (tv *TermView) updateContentHeight() {
 	tv.contentHeight = lastLine
 }
 
+func (tv *TermView) SetRect(x, y, w, h int) {
+	tv.Resize(x, y, w, h)
+}
+
 func (tv *TermView) Resize(x, y, w, h int) {
 	if tv.x == x && tv.y == y && tv.w == w && tv.h == h {
 		return
 	}
 	tv.x, tv.y, tv.w, tv.h = x, y, w, h
 	if tv.vt != nil {
-		// Always keep emulator at maxHistory to avoid losing Primary buffer data
-		// when switching screens or resizing.
 		tv.vt.Resize(w, max(maxHistory, h))
-
-		// Tell the process the visible size. This must be called AFTER tv.vt.Resize
-		// to override any PTY size changes the emulator might have made.
-		if tv.session != nil {
+		if tv.session != nil && w > 0 && h > 0 {
 			tv.session.Resize(h, w)
 		}
 	}
-	// contentHeight and scroll are recomputed by Layout() on the next draw frame.
 }
 
 func (tv *TermView) SyncScroll() {

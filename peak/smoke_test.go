@@ -530,13 +530,15 @@ func TestDragWindowInternal(t *testing.T) {
 
 	// 1. Drag W1 (idx 0) below W2.
 	// W1 handle at (0, w1.y). We drop it in W2's body area.
-	e.HandleEvent(tcell.NewEventMouse(0, w1.y, tcell.Button1, 0))
+	_, w1y, _, _ := w1.GetRect()
+	e.HandleEvent(tcell.NewEventMouse(0, w1y, tcell.Button1, 0))
 	if e.dragWin != w1 {
 		t.Fatal("drag w1 failed")
 	}
+	_, w2y, _, _ := w2.GetRect()
 	// W2.y + 2 should be in W2's body
-	e.HandleEvent(tcell.NewEventMouse(0, w2.y+2, tcell.Button1, 0))
-	e.HandleEvent(tcell.NewEventMouse(0, w2.y+2, tcell.ButtonNone, 0))
+	e.HandleEvent(tcell.NewEventMouse(0, w2y+2, tcell.Button1, 0))
+	e.HandleEvent(tcell.NewEventMouse(0, w2y+2, tcell.ButtonNone, 0))
 
 	if col.windows[0] != w2 || col.windows[1] != w1 || col.windows[2] != w3 {
 		t.Errorf("Order after first drag wrong: %d, %d, %d", col.windows[0].ID, col.windows[1].ID, col.windows[2].ID)
@@ -545,12 +547,14 @@ func TestDragWindowInternal(t *testing.T) {
 	// 2. Drag W3 (idx 2) above W1 (idx 1).
 	// Current: [w2, w1, w3]
 	// We drop it in W1's tag area (w1.y)
-	e.HandleEvent(tcell.NewEventMouse(0, w3.y, tcell.Button1, 0))
+	_, w3y, _, _ := w3.GetRect()
+	e.HandleEvent(tcell.NewEventMouse(0, w3y, tcell.Button1, 0))
 	if e.dragWin != w3 {
 		t.Fatal("drag w3 failed")
 	}
-	e.HandleEvent(tcell.NewEventMouse(0, w1.y, tcell.Button1, 0))
-	e.HandleEvent(tcell.NewEventMouse(0, w1.y, tcell.ButtonNone, 0))
+	_, w1y, _, _ = w1.GetRect()
+	e.HandleEvent(tcell.NewEventMouse(0, w1y, tcell.Button1, 0))
+	e.HandleEvent(tcell.NewEventMouse(0, w1y, tcell.ButtonNone, 0))
 
 	// Verify final: w2, w3, w1
 	if col.windows[0] != w2 || col.windows[1] != w3 || col.windows[2] != w1 {

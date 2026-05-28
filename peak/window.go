@@ -18,13 +18,9 @@ type VisualLine struct {
 }
 
 type View interface {
-	// Layout computes visual-line wrapping and synchronises scroll position.
-	// Must be called once per frame before Draw, and after every Resize.
-	// Must not paint anything.
+	tview.Primitive
 	Layout()
-	Draw(tcell.Screen)
 	ShowCursor(tcell.Screen)
-	Resize(x, y, w, h int)
 	HandleEvent(tcell.Event) bool
 	GetPos() (x, y, w, h int)
 	SetPos(x, y, w, h int)
@@ -52,6 +48,7 @@ type TextView struct {
 	theme         *Theme
 	tabWidth      int
 	typingStart   *Cursor
+	fillBox       *tview.Box
 	// colorAt, when non-nil, returns a foreground color override for a rune offset.
 	colorAt func(runeOff int) (tcell.Color, bool)
 }
@@ -60,7 +57,12 @@ func (tv *TextView) IsRaw() bool {
 	return false
 }
 
+func (tv *TextView) SetRect(x, y, w, h int) {
+	tv.Resize(x, y, w, h)
+}
+
 func NewTextView(text string, x, y, w, h int, style tcell.Style, singleLine, scrollable bool) *TextView {
+	_, bg, _ := style.Decompose()
 	tv := &TextView{
 		BaseView: BaseView{
 			x: x, y: y, w: w, h: h,
@@ -71,7 +73,9 @@ func NewTextView(text string, x, y, w, h int, style tcell.Style, singleLine, scr
 		scrollable:  scrollable,
 		lastVersion: -1,
 		tabWidth:    4,
+		fillBox:     tview.NewBox(),
 	}
+	tv.fillBox.SetBackgroundColor(bg)
 	tv.UpdateLayout()
 	return tv
 }
@@ -255,10 +259,9 @@ func (tv *TextView) Draw(s tcell.Screen) {
 		}
 		vrow++
 	}
-	for ; vrow < tv.h; vrow++ {
-		for col := 0; col < tv.w; col++ {
-			s.SetContent(tv.x+col, tv.y+vrow, ' ', nil, tv.style)
-		}
+	if vrow < tv.h {
+		tv.fillBox.SetRect(tv.x, tv.y+vrow, tv.w, tv.h-vrow)
+		tv.fillBox.Draw(s)
 	}
 }
 
@@ -541,10 +544,8 @@ type Window struct {
 	tag            *TextView
 	body           View
 	parent         *Column
-	editor         *Editor
-	x, y, w, h     int
-	onExec         func(*Column, *Window, string) bool
-	explicitHeight int
+	editor     *Editor
+	onExec     func(*Column, *Window, string) bool
 
 	isDir         bool
 	hasVersion    bool
@@ -566,6 +567,11 @@ type Window struct {
 	lastSpansVersion uint64
 	cachedSpans      []colorSpan
 	handleBox        *tview.Box
+	gutterBox        *tview.Box
+	thumbBox         *tview.Box
+	tagRowFlex       *tview.Flex
+	bodyRowFlex       *tview.Flex
+	winRootFlex       *tview.Flex
 
 	// mutSeq is incremented on every body mutation.
 	// bodySnapSeq is set to mutSeq when the body is snapped for a 9P read.
@@ -666,10 +672,35 @@ func (win *Window) colorAtFunc(spans []colorSpan) func(int) (tcell.Color, bool) 
 
 func newWindow(tag string, parent *Column, editor *Editor, x, y, w, h int, onExec func(*Column, *Window, string) bool) *Window {
 	tagStyle := tcell.StyleDefault.Background(editor.theme.TagBG).Foreground(editor.theme.TagFG)
+	handleBox := tview.NewBox()
+	gutterBox := tview.NewBox()
+	gutterBox.SetBackgroundColor(editor.theme.ScrollGutter)
+	thumbBox := tview.NewBox()
+
+	tagRowFlex := tview.NewFlex()
+	tagRowFlex.SetDirection(tview.FlexColumn)
+	tagRowFlex.AddItem(handleBox, 1, 0)
+	tagView := NewTextView(tag, 0, 0, 0, 0, tagStyle, false, false)
+	tagRowFlex.AddItem(tagView, 0, 1)
+
+	bodyRowFlex := tview.NewFlex()
+	bodyRowFlex.SetDirection(tview.FlexColumn)
+	bodyRowFlex.AddItem(gutterBox, 1, 0)
+
+	winRootFlex := tview.NewFlex()
+	winRootFlex.SetDirection(tview.FlexRow)
+	winRootFlex.AddItem(tagRowFlex, 1, 0)
+	winRootFlex.AddItem(bodyRowFlex, 0, 1)
+
 	win := &Window{
-		tag:    NewTextView(tag, x+1, y, w-1, 1, tagStyle, false, false),
-		parent: parent, editor: editor, x: x, y: y, w: w, h: h, onExec: onExec,
-		handleBox: tview.NewBox(),
+		tag:         tagView,
+		parent:      parent, editor: editor, onExec: onExec,
+		handleBox:   handleBox,
+		gutterBox:   gutterBox,
+		thumbBox:    thumbBox,
+		tagRowFlex:  tagRowFlex,
+		bodyRowFlex: bodyRowFlex,
+		winRootFlex: winRootFlex,
 	}
 	win.tag.theme = &editor.theme
 	// Reflow body geometry when tag text wraps to a different number of rows.
@@ -694,7 +725,7 @@ func NewTermWindow(tag string, parent *Column, editor *Editor, x, y, w, h int, c
 
 func newTermWindowFromSession(tag string, sess session.Session, parent *Column, editor *Editor, x, y, w, h int, onExec func(*Column, *Window, string) bool) (*Window, error) {
 	win := newWindow(tag, parent, editor, x, y, w, h, onExec)
-	term, err := NewTermView(editor, sess, x+1, y+1, w-1, h-1, func() {
+	term, err := NewTermView(editor, sess, 0, 0, w-1, h-1, func() {
 		editor.RemoveWindow(win)
 	})
 	if err != nil {
@@ -702,6 +733,7 @@ func newTermWindowFromSession(tag string, sess session.Session, parent *Column, 
 		return nil, err
 	}
 	win.body = term
+	win.bodyRowFlex.AddItem(term, 0, 1)
 	if pty, ok := sess.(*ExternalPTY); ok {
 		pty.onResize = func(rows, cols int) {
 			win.broadcastEvent('P', 'Z', rows, cols, 0, "")
@@ -713,9 +745,10 @@ func newTermWindowFromSession(tag string, sess session.Session, parent *Column, 
 func NewWindow(tag, body string, parent *Column, editor *Editor, x, y, w, h int, onExec func(*Column, *Window, string) bool) *Window {
 	bodyStyle := tcell.StyleDefault.Background(editor.theme.BodyBG).Foreground(editor.theme.BodyFG)
 	win := newWindow(tag, parent, editor, x, y, w, h, onExec)
-	tv := NewTextView(body, x+1, y+1, w-1, h-1, bodyStyle, false, true)
+	tv := NewTextView(body, 0, 0, 0, 0, bodyStyle, false, true)
 	tv.theme = &editor.theme
 	win.body = tv
+	win.bodyRowFlex.AddItem(tv, 0, 1)
 	tv.buffer.onMutate = func(q0, q1Old, q1New int, text string) {
 		win.mutSeq++
 		win.adjustSpans(q0, q1Old, q1New)
@@ -805,8 +838,10 @@ func (win *Window) clickWordOffsets(target View, mx, my int, word string) (q0, q
 	return
 }
 
-func (win *Window) Contains(x, y int) bool {
-	return x >= win.x && x < win.x+win.w && y >= win.y && y < win.y+win.h
+func (win *Window) GetRect() (int, int, int, int) { return win.winRootFlex.GetRect() }
+func (win *Window) SetRect(x, y, w, h int) {
+	win.winRootFlex.SetRect(x, y, w, h)
+	win.reflow()
 }
 
 func (win *Window) tagHeight() int {
@@ -818,13 +853,12 @@ func (win *Window) tagHeight() int {
 }
 
 // reflow sizes the tag and body views to match the window's current geometry.
-// Must be called after the tag's visual-line layout is up to date so that
-// tagHeight() returns the correct row count.
 func (win *Window) reflow() {
 	th := win.tagHeight()
-	win.tag.Resize(win.x+1, win.y, win.w-1, th)
-	bh := max(0, win.h-th)
-	win.body.Resize(win.x+1, win.y+th, win.w-1, bh)
+	rx, ry, _, _ := win.GetRect()
+	win.handleBox.SetRect(rx, ry, 1, th)
+	win.winRootFlex.ResizeItem(win.tagRowFlex, th, 0)
+	win.winRootFlex.Layout()
 }
 
 func (win *Window) Draw(s tcell.Screen) {
@@ -837,26 +871,20 @@ func (win *Window) Draw(s tcell.Screen) {
 		handleColor = win.editor.theme.HandleDirty
 	}
 
-	th := win.tagHeight()
-
-	// Draw handle bar via Box.
+	// Tag section under lock.
 	win.handleBox.SetBackgroundColor(handleColor)
-	win.handleBox.SetRect(win.x, win.y, 1, th)
-	win.handleBox.Draw(s)
 
-	// Tag section: layout then paint under lock.
 	win.lk.Lock()
+	win.winRootFlex.Layout()
 	win.tag.Layout()
-	win.tag.Draw(s)
-	var spansSnapshot []colorSpan
+	win.tagRowFlex.Draw(s)
 	if win.spansVersion != win.lastSpansVersion {
 		win.lastSpansVersion = win.spansVersion
 		win.cachedSpans = append(win.cachedSpans[:0], win.spans...)
 	}
-	spansSnapshot = win.cachedSpans
+	spansSnapshot := win.cachedSpans
 	win.lk.Unlock()
 
-	// Body section.
 	if tv, ok := win.body.(*TextView); ok {
 		if len(spansSnapshot) > 0 {
 			tv.colorAt = win.colorAtFunc(spansSnapshot)
@@ -864,24 +892,21 @@ func (win *Window) Draw(s tcell.Screen) {
 			tv.colorAt = nil
 		}
 	}
+
 	win.lk.Lock()
 	win.body.Layout()
+	win.bodyRowFlex.Draw(s)
 	scroll, total, visible := win.body.GetScroll()
 	if visible > 0 && total > visible {
-		thumbStyle := tcell.StyleDefault.Background(win.editor.theme.ScrollThumb)
 		thumbHeight := max(1, (visible*visible)/total)
 		thumbStart := min(visible-thumbHeight, (scroll*visible)/total)
-		for i := 0; i < thumbHeight; i++ {
-			s.SetContent(win.x, win.y+th+thumbStart+i, ' ', nil, thumbStyle)
-		}
+		rx, ry, _, _ := win.GetRect()
+		th := win.tagHeight()
+		win.thumbBox.SetBackgroundColor(win.editor.theme.ScrollThumb)
+		win.thumbBox.SetRect(rx, ry+th+thumbStart, 1, thumbHeight)
+		win.thumbBox.Draw(s)
 	}
-	win.body.Draw(s)
 	win.lk.Unlock()
-}
-
-func (win *Window) Resize(x, y, w, h int) {
-	win.x, win.y, win.w, win.h = x, y, w, h
-	win.reflow()
 }
 
 func (win *Window) HandleEvent(ev tcell.Event) bool {
@@ -893,12 +918,15 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 	mx, my := me.Position()
 	win.tag.UpdateLayout()
 	th := win.tagHeight()
+	rx, ry, _, _ := win.GetRect()
 
-	if mx == win.x {
-		if my < win.y+th {
+	// Gutter column: handle + scrollbar area.
+	if mx == rx {
+		if win.handleBox.InRect(mx, my) {
 			return false
 		}
-		amount := my - (win.y + th) + 1
+		bodyTop := ry + th
+		amount := my - bodyTop + 1
 		btns := me.Buttons()
 		if btns&tcell.Button1 != 0 {
 			if win.editor.scrollWin == nil {
@@ -914,7 +942,7 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 			win.editor.scrollWin, win.editor.scrollAmount, win.editor.scrollDir = win, amount, 1
 		} else if btns&tcell.Button3 != 0 {
 			if scroll, total, visible := win.body.GetScroll(); visible > 0 && total > 0 {
-				newScroll := ((my - (win.y + th)) * total) / visible
+				newScroll := ((my - bodyTop) * total) / visible
 				win.body.Scroll(newScroll - scroll)
 			}
 		}
@@ -922,7 +950,7 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 	}
 
 	target := win.body
-	if my < win.y+th {
+	if my < ry+th {
 		target = win.tag
 	}
 
