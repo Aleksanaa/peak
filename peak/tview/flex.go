@@ -58,22 +58,13 @@ func (f *Flex) ResizeItem(item Primitive, fixedSize, proportion int) {
 	}
 }
 
-func (f *Flex) RemoveItem(p Primitive) *Flex {
-	for index := len(f.items) - 1; index >= 0; index-- {
-		if f.items[index].Item == p {
-			f.items = append(f.items[:index], f.items[index+1:]...)
-		}
-	}
+func (f *Flex) Clear() *Flex {
+	f.items = nil
 	return f
 }
 
 func (f *Flex) ItemCount() int {
 	return len(f.items)
-}
-
-func (f *Flex) Clear() *Flex {
-	f.items = nil
-	return f
 }
 
 func (f *Flex) GetItemSize(item Primitive) (fixedSize, proportion int) {
