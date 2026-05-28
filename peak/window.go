@@ -7,6 +7,7 @@ import (
 
 	"github.com/aleksana/peak/internal/session"
 	"github.com/aleksana/peak/internal/wevent"
+	"github.com/aleksana/peak/peak/tview"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/uniseg"
 )
@@ -560,7 +561,11 @@ type Window struct {
 	addrQ0, addrQ1 int
 
 	// color spans applied during Draw
-	spans []colorSpan
+	spans            []colorSpan
+	spansVersion     uint64
+	lastSpansVersion uint64
+	cachedSpans      []colorSpan
+	handleBox        *tview.Box
 
 	// mutSeq is incremented on every body mutation.
 	// bodySnapSeq is set to mutSeq when the body is snapped for a 9P read.
@@ -643,6 +648,7 @@ func (win *Window) adjustSpans(q0, q1Old, q1New int) {
 		}
 	}
 	win.spans = spans[:j]
+	win.spansVersion++
 }
 
 // colorAtFunc returns a closure that looks up a rune offset in the given spans.
@@ -663,6 +669,7 @@ func newWindow(tag string, parent *Column, editor *Editor, x, y, w, h int, onExe
 	win := &Window{
 		tag:    NewTextView(tag, x+1, y, w-1, 1, tagStyle, false, false),
 		parent: parent, editor: editor, x: x, y: y, w: w, h: h, onExec: onExec,
+		handleBox: tview.NewBox(),
 	}
 	win.tag.theme = &editor.theme
 	// Reflow body geometry when tag text wraps to a different number of rows.
@@ -830,24 +837,29 @@ func (win *Window) Draw(s tcell.Screen) {
 		handleColor = win.editor.theme.HandleDirty
 	}
 
-	// Tag section: layout then paint under lock (9P can modify tag buffer).
+	th := win.tagHeight()
+
+	// Draw handle bar via Box.
+	win.handleBox.SetBackgroundColor(handleColor)
+	win.handleBox.SetRect(win.x, win.y, 1, th)
+	win.handleBox.Draw(s)
+
+	// Tag section: layout then paint under lock.
 	win.lk.Lock()
 	win.tag.Layout()
 	win.tag.Draw(s)
-	spans := append([]colorSpan(nil), win.spans...)
+	var spansSnapshot []colorSpan
+	if win.spansVersion != win.lastSpansVersion {
+		win.lastSpansVersion = win.spansVersion
+		win.cachedSpans = append(win.cachedSpans[:0], win.spans...)
+	}
+	spansSnapshot = win.cachedSpans
 	win.lk.Unlock()
 
-	handleStyle := tcell.StyleDefault.Background(handleColor).Foreground(tcell.ColorBlack)
-	for i := 0; i < win.tagHeight(); i++ {
-		s.SetContent(win.x, win.y+i, ' ', nil, handleStyle)
-	}
-
-	// Body section: layout under lock (9P can mutate the body buffer).
-	// Scrollbar and Draw share one lock section so scrollbar reflects the
-	// layout just computed by Layout() rather than a stale snapshot.
+	// Body section.
 	if tv, ok := win.body.(*TextView); ok {
-		if len(spans) > 0 {
-			tv.colorAt = win.colorAtFunc(spans)
+		if len(spansSnapshot) > 0 {
+			tv.colorAt = win.colorAtFunc(spansSnapshot)
 		} else {
 			tv.colorAt = nil
 		}
@@ -860,7 +872,7 @@ func (win *Window) Draw(s tcell.Screen) {
 		thumbHeight := max(1, (visible*visible)/total)
 		thumbStart := min(visible-thumbHeight, (scroll*visible)/total)
 		for i := 0; i < thumbHeight; i++ {
-			s.SetContent(win.x, win.y+win.tagHeight()+thumbStart+i, ' ', nil, thumbStyle)
+			s.SetContent(win.x, win.y+th+thumbStart+i, ' ', nil, thumbStyle)
 		}
 	}
 	win.body.Draw(s)

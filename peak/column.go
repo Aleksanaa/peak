@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/aleksana/peak/internal/session"
+	"github.com/aleksana/peak/peak/tview"
 	"github.com/gdamore/tcell/v2"
 )
 
@@ -14,7 +15,11 @@ type Column struct {
 	onExec        func(*Column, *Window, string) bool
 	explicitWidth int
 	lastHeight    int
+	bodyBox       *tview.Box
 }
+
+func (c *Column) GetRect() (int, int, int, int) { return c.x, c.y, c.w, c.h }
+func (c *Column) SetRect(x, y, w, h int)       { c.Resize(x, y, w, h) }
 
 func NewColumn(x, y, w, h int, editor *Editor, onExec func(*Column, *Window, string) bool) *Column {
 	tagStyle := tcell.StyleDefault.Background(editor.theme.ColTagBG).Foreground(editor.theme.ColTagFG)
@@ -30,6 +35,8 @@ func NewColumn(x, y, w, h int, editor *Editor, onExec func(*Column, *Window, str
 		h:      h,
 		onExec: onExec,
 	}
+	bodyBox := tview.NewBox()
+	c.bodyBox = bodyBox
 	return c
 }
 
@@ -79,6 +86,12 @@ func (c *Column) Draw(s tcell.Screen) {
 	sepStyle := tcell.StyleDefault.Background(c.editor.theme.ScrollGutter).Foreground(c.editor.theme.HandleColumn)
 	handleStyle := tcell.StyleDefault.Background(c.editor.theme.HandleColumn).Foreground(tcell.ColorBlack)
 
+	// Fill the body area (after separator, below tag) so the region
+	// below the last window is fully covered.
+	c.bodyBox.SetRect(c.x+1, c.y+1, c.w-1, c.h-1)
+	c.bodyBox.SetBackgroundColor(tcell.ColorDefault)
+	c.bodyBox.Draw(s)
+
 	// Draw vertical separator
 	for y := c.y; y < c.y+c.h; y++ {
 		style := sepStyle
@@ -91,18 +104,6 @@ func (c *Column) Draw(s tcell.Screen) {
 	c.tag.Draw(s)
 	for _, win := range c.windows {
 		win.Draw(s)
-	}
-
-	// Fill column body below the last window so the region is fully covered.
-	bottomY := c.y + c.tag.h
-	if len(c.windows) > 0 {
-		last := c.windows[len(c.windows)-1]
-		bottomY = max(bottomY, last.y+last.h)
-	}
-	for y := bottomY; y < c.y+c.h; y++ {
-		for x := c.x + 1; x < c.x+c.w; x++ {
-			s.SetContent(x, y, ' ', nil, tcell.StyleDefault)
-		}
 	}
 }
 

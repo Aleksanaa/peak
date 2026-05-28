@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/aleksana/peak/peak/tview"
 	"github.com/gdamore/tcell/v2"
 )
 
@@ -98,6 +99,8 @@ type Editor struct {
 	theme           Theme
 	nextWinID       int
 	ninep           *NineP
+
+	colFlex *tview.Flex
 }
 
 // Redraw signals the main loop to redraw on the next iteration.
@@ -151,6 +154,9 @@ func (e *Editor) Init(numCols int, args []string) {
 	e.tag = NewTextView(" NewCol Help Exit ", 0, 0, e.width, 1, tagStyle, true, false)
 	e.tag.theme = &e.theme
 	e.focusedView = e.tag
+
+	e.colFlex = tview.NewFlex()
+	e.colFlex.SetDirection(tview.FlexColumn)
 
 	if numCols < 1 {
 		numCols = 1
@@ -269,9 +275,7 @@ func (e *Editor) Draw() {
 
 	// Phase 2: Paint — pure rendering, no state mutation
 	e.tag.Draw(e.screen)
-	for _, col := range e.columns {
-		col.Draw(e.screen)
-	}
+	e.colFlex.Draw(e.screen)
 	if e.focusedView != nil {
 		e.focusedView.ShowCursor(e.screen)
 	}
@@ -516,19 +520,18 @@ func (e *Editor) resize() {
 	}
 	e.tag.Resize(0, 0, e.width, 1)
 
-	widths := distributeSpace(e.width, len(e.columns), func(i int) int {
-		return e.columns[i].explicitWidth
-	}, func(i int) int {
-		return 5
-	}, e.lastWidth, e.width)
-	e.lastWidth = e.width
-
-	xOffset := 0
-	for i, col := range e.columns {
-		cw := widths[i]
-		col.explicitWidth = cw
-		col.Resize(xOffset, 1, cw, e.height-1)
-		xOffset += cw
+	if e.colFlex == nil {
+		e.colFlex = tview.NewFlex()
+		e.colFlex.SetDirection(tview.FlexColumn)
+	}
+	e.colFlex.SetRect(0, 1, e.width, e.height-1)
+	e.colFlex.Clear()
+	for _, col := range e.columns {
+		if col.explicitWidth > 0 {
+			e.colFlex.AddItem(col, col.explicitWidth, 0)
+		} else {
+			e.colFlex.AddItem(col, 0, 1)
+		}
 	}
 }
 

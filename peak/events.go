@@ -166,6 +166,7 @@ func (f *winEventFile) Close() error {
 		f.sub.close()
 		f.win.lk.Lock()
 		f.win.spans = nil
+		f.win.spansVersion++
 		f.win.lk.Unlock()
 	}
 	return nil
@@ -380,6 +381,7 @@ func (f *winColorFile) Close() error {
 	f.win.lk.Lock()
 	if f.win.mutSeq == f.win.bodySnapSeq {
 		f.win.spans = newSpans
+		f.win.spansVersion++
 	}
 	f.win.lk.Unlock()
 	f.win.editor.Redraw()

@@ -62,8 +62,10 @@ type BaseView struct {
 	scroll     ScrollState
 }
 
-func (v *BaseView) GetPos() (x, y, w, h int) { return v.x, v.y, v.w, v.h }
-func (v *BaseView) SetPos(x, y, w, h int)    { v.x, v.y, v.w, v.h = x, y, w, h }
+func (v *BaseView) GetPos() (x, y, w, h int)          { return v.x, v.y, v.w, v.h }
+func (v *BaseView) SetPos(x, y, w, h int)              { v.x, v.y, v.w, v.h = x, y, w, h }
+func (v *BaseView) GetRect() (int, int, int, int)      { return v.x, v.y, v.w, v.h }
+func (v *BaseView) SetRect(x, y, w, h int)             { v.x, v.y, v.w, v.h = x, y, w, h }
 
 func (s *ScrollState) Clamp(total, visible int) {
 	s.Pos = max(0, min(total, s.Pos))
