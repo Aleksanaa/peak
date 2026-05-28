@@ -565,11 +565,13 @@ type srvConnFile struct {
 	name string
 }
 
-func (f *srvConnFile) Name() string                           { return f.name }
-func (f *srvConnFile) Stat() (os.FileInfo, error)            { return &simpleFileInfo{name: f.name, mode: 0600}, nil }
-func (f *srvConnFile) Read(p []byte) (int, error)            { return f.rwc.Read(p) }
-func (f *srvConnFile) ReadAt(p []byte, _ int64) (int, error) { return f.rwc.Read(p) }
-func (f *srvConnFile) Write(p []byte) (int, error)           { return f.rwc.Write(p) }
-func (f *srvConnFile) WriteAt(p []byte, _ int64) (int, error){ return f.rwc.Write(p) }
-func (f *srvConnFile) WriteString(s string) (int, error)     { return f.rwc.Write([]byte(s)) }
-func (f *srvConnFile) Close() error                          { return f.rwc.Close() }
+func (f *srvConnFile) Name() string { return f.name }
+func (f *srvConnFile) Stat() (os.FileInfo, error) {
+	return &simpleFileInfo{name: f.name, mode: 0600}, nil
+}
+func (f *srvConnFile) Read(p []byte) (int, error)             { return f.rwc.Read(p) }
+func (f *srvConnFile) ReadAt(p []byte, _ int64) (int, error)  { return f.rwc.Read(p) }
+func (f *srvConnFile) Write(p []byte) (int, error)            { return f.rwc.Write(p) }
+func (f *srvConnFile) WriteAt(p []byte, _ int64) (int, error) { return f.rwc.Write(p) }
+func (f *srvConnFile) WriteString(s string) (int, error)      { return f.rwc.Write([]byte(s)) }
+func (f *srvConnFile) Close() error                           { return f.rwc.Close() }

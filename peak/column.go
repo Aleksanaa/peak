@@ -35,7 +35,7 @@ type Column struct {
 	windows    []*Window
 	editor     *Editor
 	onExec     func(*Column, *Window, string) bool
-	lastHeight    int
+	lastHeight int
 
 	tagRowFlex  *tview.Flex
 	tagHandle   *tview.Box

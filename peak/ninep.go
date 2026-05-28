@@ -28,7 +28,7 @@ type NineP struct {
 	vfs     *vfs.CompositeFs
 	bus     *globalEventBus
 	nsFs    *peakNamespaceFs
-	nsBase  string       // VFS path where nsFs is mounted
+	nsBase  string // VFS path where nsFs is mounted
 	mountMu sync.RWMutex
 	mounts  []mountEntry // 9P mounts via Mount()
 	binds   []mountEntry // local overlays via Bind()

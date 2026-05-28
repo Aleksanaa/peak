@@ -383,7 +383,7 @@ type termLineProvider struct {
 	tv *TermView
 }
 
-func (p termLineProvider) LineCount() int      { return p.tv.getContentHeight() }
+func (p termLineProvider) LineCount() int       { return p.tv.getContentHeight() }
 func (p termLineProvider) GetLine(y int) []rune { return p.tv.getLine(y) }
 
 func (tv *TermView) GetSelectedText() string {

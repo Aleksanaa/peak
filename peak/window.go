@@ -540,12 +540,12 @@ func (tv *TextView) ShowLineAt(lineNum int, vrow int) {
 }
 
 type Window struct {
-	ID             int
-	tag            *TextView
-	body           View
-	parent         *Column
-	editor     *Editor
-	onExec     func(*Column, *Window, string) bool
+	ID     int
+	tag    *TextView
+	body   View
+	parent *Column
+	editor *Editor
+	onExec func(*Column, *Window, string) bool
 
 	isDir         bool
 	hasVersion    bool
@@ -570,8 +570,8 @@ type Window struct {
 	gutterBox        *tview.Box
 	thumbBox         *tview.Box
 	tagRowFlex       *tview.Flex
-	bodyRowFlex       *tview.Flex
-	winRootFlex       *tview.Flex
+	bodyRowFlex      *tview.Flex
+	winRootFlex      *tview.Flex
 
 	// mutSeq is incremented on every body mutation.
 	// bodySnapSeq is set to mutSeq when the body is snapped for a 9P read.
@@ -693,8 +693,8 @@ func newWindow(tag string, parent *Column, editor *Editor, x, y, w, h int, onExe
 	winRootFlex.AddItem(bodyRowFlex, 0, 1)
 
 	win := &Window{
-		tag:         tagView,
-		parent:      parent, editor: editor, onExec: onExec,
+		tag:    tagView,
+		parent: parent, editor: editor, onExec: onExec,
 		handleBox:   handleBox,
 		gutterBox:   gutterBox,
 		thumbBox:    thumbBox,

@@ -305,7 +305,7 @@ func TestCopyUTF8EndAtNextLineStart(t *testing.T) {
 	b := NewBuffer("你好\n世界")
 	b.SetSelection(Cursor{0, 0}, Cursor{0, 1})
 	got := b.GetSelectedText()
-	want := "\n"  // no chars from line 0 start, no chars from line 1 start
+	want := "\n" // no chars from line 0 start, no chars from line 1 start
 	// Actually: y=0 start.y, x1=0, x2=len("你好")=2 (not end.y). Write "你好", then '\n'.
 	// y=1 end.y, x1=0, x2=end.x=0. x1<x2 false, nothing.
 	want = "你好\n"
@@ -683,7 +683,7 @@ func TestRuneOffsetMixedMultiLine(t *testing.T) {
 		{1, 1, 0, "A"},
 		{2, 2, 0, "好"},
 		{3, 3, 0, "B"},
-		{4, 4, 0, ""},   // end of line 0
+		{4, 4, 0, ""}, // end of line 0
 		{5, 0, 1, "C"},
 		{6, 1, 1, "世"},
 		{7, 2, 1, "D"},
