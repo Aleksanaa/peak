@@ -206,6 +206,58 @@ func TestApplyEventToIncrementalStateUpdatesMirror(t *testing.T) {
 	}
 }
 
+func TestApplyEventToIncrementalStateChangingInsertIncrementsGen(t *testing.T) {
+	cur := &highlightState{body: []byte("abc"), gen: 5}
+	if !applyEventToIncrementalState(cur, wevent.Event{Origin: 'K', Type: 'I', Q0: 1, Q1: 1, Text: "X"}) {
+		t.Fatal("applyEventToIncrementalState returned false")
+	}
+	if got, want := string(cur.body), "aXbc"; got != want {
+		t.Fatalf("cur.body = %q, want %q", got, want)
+	}
+	if cur.gen != 6 {
+		t.Fatalf("gen = %d, want 6 after changing insert", cur.gen)
+	}
+}
+
+func TestApplyEventToIncrementalStateChangingDeleteIncrementsGen(t *testing.T) {
+	cur := &highlightState{body: []byte("abc"), gen: 5}
+	if !applyEventToIncrementalState(cur, wevent.Event{Origin: 'K', Type: 'D', Q0: 1, Q1: 2}) {
+		t.Fatal("applyEventToIncrementalState returned false")
+	}
+	if got, want := string(cur.body), "ac"; got != want {
+		t.Fatalf("cur.body = %q, want %q", got, want)
+	}
+	if cur.gen != 6 {
+		t.Fatalf("gen = %d, want 6 after changing delete", cur.gen)
+	}
+}
+
+func TestApplyEventToIncrementalStateNoopInsertKeepsGen(t *testing.T) {
+	cur := &highlightState{body: []byte("abc"), gen: 5}
+	if !applyEventToIncrementalState(cur, wevent.Event{Origin: 'K', Type: 'I', Q0: 1, Q1: 1, Text: ""}) {
+		t.Fatal("applyEventToIncrementalState returned false")
+	}
+	if got, want := string(cur.body), "abc"; got != want {
+		t.Fatalf("cur.body = %q, want %q", got, want)
+	}
+	if cur.gen != 5 {
+		t.Fatalf("gen = %d, want 5 after no-op insert", cur.gen)
+	}
+}
+
+func TestApplyEventToIncrementalStateNoopDeleteKeepsGen(t *testing.T) {
+	cur := &highlightState{body: []byte("abc"), gen: 5}
+	if !applyEventToIncrementalState(cur, wevent.Event{Origin: 'K', Type: 'D', Q0: 1, Q1: 1}) {
+		t.Fatal("applyEventToIncrementalState returned false")
+	}
+	if got, want := string(cur.body), "abc"; got != want {
+		t.Fatalf("cur.body = %q, want %q", got, want)
+	}
+	if cur.gen != 5 {
+		t.Fatalf("gen = %d, want 5 after no-op delete", cur.gen)
+	}
+}
+
 func TestApplyEventToIncrementalStateRejectsUninitializedMirror(t *testing.T) {
 	cur := &highlightState{tree: &gotreesitter.Tree{}}
 	if applyEventToIncrementalState(cur, wevent.Event{Origin: 'K', Type: 'I', Q0: 0, Q1: 0, Text: "x"}) {
@@ -318,7 +370,7 @@ func TestResetAfterUnknownBodyChangeClearsBodyTreeAndSnap(t *testing.T) {
 	}
 }
 
-func TestOrdinaryInsertDoesNotForceMirrorReset(t *testing.T) {
+func TestOrdinaryInsertKeepsMirrorAndAdvancesGen(t *testing.T) {
 	cur := &highlightState{body: []byte("abc"), tree: testTreeForRelease(), gen: 5}
 	if !applyEventToIncrementalState(cur, wevent.Event{Origin: 'K', Type: 'I', Q0: 1, Q1: 1, Text: "X"}) {
 		t.Fatal("applyEventToIncrementalState returned false")
@@ -329,12 +381,12 @@ func TestOrdinaryInsertDoesNotForceMirrorReset(t *testing.T) {
 	if cur.tree == nil {
 		t.Fatal("tree is nil after ordinary insert; should remain set")
 	}
-	if cur.gen != 5 {
-		t.Fatalf("gen = %d, want 5 (unchanged by ordinary edit)", cur.gen)
+	if cur.gen != 6 {
+		t.Fatalf("gen = %d, want 6 after ordinary insert", cur.gen)
 	}
 }
 
-func TestOrdinaryDeleteDoesNotForceMirrorReset(t *testing.T) {
+func TestOrdinaryDeleteKeepsMirrorAndAdvancesGen(t *testing.T) {
 	cur := &highlightState{body: []byte("abc"), tree: testTreeForRelease(), gen: 5}
 	if !applyEventToIncrementalState(cur, wevent.Event{Origin: 'K', Type: 'D', Q0: 1, Q1: 2}) {
 		t.Fatal("applyEventToIncrementalState returned false")
@@ -345,8 +397,8 @@ func TestOrdinaryDeleteDoesNotForceMirrorReset(t *testing.T) {
 	if cur.tree == nil {
 		t.Fatal("tree is nil after ordinary delete; should remain set")
 	}
-	if cur.gen != 5 {
-		t.Fatalf("gen = %d, want 5 (unchanged by ordinary edit)", cur.gen)
+	if cur.gen != 6 {
+		t.Fatalf("gen = %d, want 6 after ordinary delete", cur.gen)
 	}
 }
 
@@ -512,6 +564,24 @@ func TestCommitHighlightTreeRejectsGenMismatch(t *testing.T) {
 	}
 	if cur.tree != nil {
 		t.Fatal("cur.tree should be nil after rejected commit")
+	}
+	if newTree.RootNode() != nil {
+		t.Fatal("rejected tree should have been released")
+	}
+}
+
+func TestCommitHighlightTreeRejectsSnapshotAfterLaterEdit(t *testing.T) {
+	cur := &highlightState{body: []byte("abc"), gen: 5}
+	snap := snapshotHighlightState(cur)
+	if !applyEventToIncrementalState(cur, wevent.Event{Origin: 'K', Type: 'I', Q0: 3, Q1: 3, Text: "X"}) {
+		t.Fatal("applyEventToIncrementalState returned false")
+	}
+	newTree := testTreeForRelease()
+	if commitHighlightTree(cur, newTree, snap) {
+		t.Fatal("commitHighlightTree returned true for snapshot from older generation")
+	}
+	if cur.tree != nil {
+		t.Fatal("cur.tree should remain nil after rejected stale commit")
 	}
 	if newTree.RootNode() != nil {
 		t.Fatal("rejected tree should have been released")

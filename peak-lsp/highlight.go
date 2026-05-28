@@ -172,8 +172,11 @@ func applyEventToIncrementalState(cur *highlightState, ev wevent.Event) bool {
 		resetIncrementalState(cur)
 		return false
 	}
-	if result.changed && cur.tree != nil {
-		cur.tree.Edit(result.edit)
+	if result.changed {
+		cur.gen++
+		if cur.tree != nil {
+			cur.tree.Edit(result.edit)
+		}
 	}
 	cur.body = result.body
 	return true

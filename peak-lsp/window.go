@@ -54,6 +54,14 @@ func watchWindow(fs afero.Fs, id int, retitleCh <-chan string) {
 	go func() {
 		defer close(done)
 		for range trigger {
+			for {
+				select {
+				case <-trigger:
+					continue
+				default:
+				}
+				break
+			}
 			mu.Lock()
 			if cur.body == nil {
 				mu.Unlock()
