@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"unicode/utf8"
 
 	"github.com/aleksana/peak/internal/vfs/afero"
 	"github.com/aleksana/peak/internal/wevent"
@@ -31,18 +30,12 @@ func watchWindow(fs afero.Fs, id int, retitleCh <-chan string) {
 	}
 	defer eventF.Close()
 
-	type state struct {
-		hl   *gotreesitter.Highlighter
-		lang string
-		tree *gotreesitter.Tree
-		snap []byte // first ~8K of body for content-based re-detection
-	}
-
 	var (
 		mu      sync.Mutex
-		cur     = state{lang: "", hl: detectHighlighter(filename, nil)}
+		cur     highlightState
 		curFile = filename
 	)
+	cur.hl = detectHighlighter(filename, nil)
 	if cur.hl != nil {
 		cur.lang = enry.GetLanguage(filename, nil)
 	}
@@ -61,44 +54,66 @@ func watchWindow(fs afero.Fs, id int, retitleCh <-chan string) {
 	go func() {
 		defer close(done)
 		for range trigger {
-			body, err := afero.ReadFile(fs, base+"/body")
-			if err != nil || len(body) == 0 {
-				continue
+			for {
+				select {
+				case <-trigger:
+					continue
+				default:
+				}
+				break
+			}
+			mu.Lock()
+			if cur.body == nil {
+				mu.Unlock()
+				body, err := afero.ReadFile(fs, base+"/body")
+				if err != nil || len(body) == 0 {
+					continue
+				}
+				mu.Lock()
+				if cur.body == nil {
+					cur.body = append([]byte(nil), body...)
+				}
 			}
 
-			mu.Lock()
-			s := cur
-			if s.snap == nil {
-				// First body read: refine detection with content.
-				snap := body
+			if cur.snap == nil {
+				snap := cur.body
 				if len(snap) > 8192 {
 					snap = snap[:8192]
 				}
-				cur.snap = snap
+				cur.snap = append([]byte(nil), snap...)
 				lang := enry.GetLanguage(curFile, snap)
-				if lang != "" && lang != s.lang {
+				if lang != "" && lang != cur.lang {
 					if hl := buildHighlighterForLang(lang); hl != nil {
 						cur.hl = hl
 						cur.lang = lang
-						cur.tree = nil
+						resetIncrementalTree(&cur)
 					}
 				}
-				s = cur
 			}
+
+			snap := snapshotHighlightState(&cur)
 			mu.Unlock()
 
-			if s.hl == nil {
+			if snap.hl == nil {
+				if snap.tree != nil {
+					snap.tree.Release()
+				}
 				writeColorSpans(fs, base, nil, nil)
 				continue
 			}
 
-			ranges, next := s.hl.HighlightIncremental(body, s.tree)
+			ranges, next := snap.hl.HighlightIncremental(snap.body, snap.tree)
+			releaseSnapshotTree(snap)
 
 			mu.Lock()
-			cur.tree = next
+			if !commitHighlightTree(&cur, next, snap) {
+				mu.Unlock()
+				signal()
+				continue
+			}
 			mu.Unlock()
 
-			writeColorSpans(fs, base, body, ranges)
+			writeColorSpans(fs, base, snap.body, ranges)
 		}
 	}()
 
@@ -122,7 +137,7 @@ func watchWindow(fs afero.Fs, id int, retitleCh <-chan string) {
 				if lang != cur.lang {
 					cur.hl = hl
 					cur.lang = lang
-					cur.tree = nil
+					invalidateHighlightState(&cur)
 				}
 				mu.Unlock()
 
@@ -147,9 +162,16 @@ func watchWindow(fs afero.Fs, id int, retitleCh <-chan string) {
 		}
 		switch ev.Type {
 		case 'I', 'D':
+			mu.Lock()
+			applyEventToIncrementalState(&cur, ev)
+			mu.Unlock()
+			signal()
+		case 'Z':
+			mu.Lock()
+			invalidateHighlightState(&cur)
+			mu.Unlock()
 			signal()
 		case 'x', 'l':
-			// Peak processes x/l events directly; no write-back needed.
 		}
 	}
 	close(trigger)
@@ -218,8 +240,15 @@ func writeColorSpans(fs afero.Fs, base string, body []byte, ranges []gotreesitte
 	}
 	defer colorF.Close()
 
+	text := buildColorSpanText(body, ranges)
+	if text != "" {
+		colorF.WriteString(text)
+	}
+}
+
+func buildColorSpanText(body []byte, ranges []gotreesitter.HighlightRange) string {
 	if len(ranges) == 0 {
-		return
+		return ""
 	}
 
 	byteToRune := buildByteToRune(body)
@@ -232,7 +261,7 @@ func writeColorSpans(fs afero.Fs, base string, body []byte, ranges []gotreesitte
 		}
 		start := int(r.StartByte)
 		end := int(r.EndByte)
-		if start >= len(byteToRune) || end > len(byteToRune) {
+		if start >= len(byteToRune) || end >= len(byteToRune) {
 			continue
 		}
 		q0, q1 := byteToRune[start], byteToRune[end]
@@ -241,26 +270,7 @@ func writeColorSpans(fs afero.Fs, base string, body []byte, ranges []gotreesitte
 		}
 		fmt.Fprintf(&sb, "%d %d %s\n", q0, q1, attr)
 	}
-	if sb.Len() > 0 {
-		colorF.WriteString(sb.String())
-	}
-}
-
-// buildByteToRune builds a slice where index i holds the rune offset
-// corresponding to byte offset i in src. Index len(src) is the past-the-end sentinel.
-func buildByteToRune(src []byte) []int {
-	out := make([]int, len(src)+1)
-	runeOff := 0
-	for i := 0; i < len(src); {
-		_, size := utf8.DecodeRune(src[i:])
-		for j := 0; j < size; j++ {
-			out[i+j] = runeOff
-		}
-		i += size
-		runeOff++
-	}
-	out[len(src)] = runeOff
-	return out
+	return sb.String()
 }
 
 // captureToAttr maps a tree-sitter capture name to a peak colour attribute.
