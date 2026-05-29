@@ -754,19 +754,21 @@ type snapFile struct {
 	data []byte
 }
 
-func (f *snapFile) Name() string                              { return f.name }
-func (f *snapFile) Stat() (os.FileInfo, error)               { return &gitFi{name: f.name, size: int64(len(f.data)), mode: 0444}, nil }
-func (f *snapFile) ReadAt(p []byte, off int64) (int, error)  { return snapReadAt(f.data, p, off) }
-func (f *snapFile) Read(p []byte) (int, error)               { return 0, io.EOF }
-func (f *snapFile) Seek(off int64, w int) (int64, error)     { return 0, nil }
-func (f *snapFile) Close() error                             { return nil }
-func (f *snapFile) Write(p []byte) (int, error)              { return 0, os.ErrPermission }
-func (f *snapFile) WriteAt(p []byte, _ int64) (int, error)   { return 0, os.ErrPermission }
-func (f *snapFile) WriteString(s string) (int, error)        { return 0, os.ErrPermission }
-func (f *snapFile) Readdir(int) ([]os.FileInfo, error)       { return nil, nil }
-func (f *snapFile) Readdirnames(int) ([]string, error)       { return nil, nil }
-func (f *snapFile) Sync() error                              { return nil }
-func (f *snapFile) Truncate(int64) error                     { return os.ErrPermission }
+func (f *snapFile) Name() string { return f.name }
+func (f *snapFile) Stat() (os.FileInfo, error) {
+	return &gitFi{name: f.name, size: int64(len(f.data)), mode: 0444}, nil
+}
+func (f *snapFile) ReadAt(p []byte, off int64) (int, error) { return snapReadAt(f.data, p, off) }
+func (f *snapFile) Read(p []byte) (int, error)              { return 0, io.EOF }
+func (f *snapFile) Seek(off int64, w int) (int64, error)    { return 0, nil }
+func (f *snapFile) Close() error                            { return nil }
+func (f *snapFile) Write(p []byte) (int, error)             { return 0, os.ErrPermission }
+func (f *snapFile) WriteAt(p []byte, _ int64) (int, error)  { return 0, os.ErrPermission }
+func (f *snapFile) WriteString(s string) (int, error)       { return 0, os.ErrPermission }
+func (f *snapFile) Readdir(int) ([]os.FileInfo, error)      { return nil, nil }
+func (f *snapFile) Readdirnames(int) ([]string, error)      { return nil, nil }
+func (f *snapFile) Sync() error                             { return nil }
+func (f *snapFile) Truncate(int64) error                    { return os.ErrPermission }
 
 // writeCloseFile: accumulates writes, calls onClose on Close.
 type writeCloseFile struct {
@@ -775,19 +777,19 @@ type writeCloseFile struct {
 	onClose func(string) error
 }
 
-func (f *writeCloseFile) Name() string                             { return f.name }
-func (f *writeCloseFile) Stat() (os.FileInfo, error)              { return &gitFi{name: f.name, mode: 0200}, nil }
-func (f *writeCloseFile) WriteAt(p []byte, _ int64) (int, error)  { f.buf.Write(p); return len(p), nil }
-func (f *writeCloseFile) Write(p []byte) (int, error)             { return f.WriteAt(p, 0) }
-func (f *writeCloseFile) WriteString(s string) (int, error)       { return f.WriteAt([]byte(s), 0) }
-func (f *writeCloseFile) Close() error                            { return f.onClose(f.buf.String()) }
-func (f *writeCloseFile) Read(p []byte) (int, error)              { return 0, io.EOF }
-func (f *writeCloseFile) ReadAt(p []byte, _ int64) (int, error)   { return 0, io.EOF }
-func (f *writeCloseFile) Seek(off int64, w int) (int64, error)    { return 0, nil }
-func (f *writeCloseFile) Readdir(int) ([]os.FileInfo, error)      { return nil, nil }
-func (f *writeCloseFile) Readdirnames(int) ([]string, error)      { return nil, nil }
-func (f *writeCloseFile) Sync() error                             { return nil }
-func (f *writeCloseFile) Truncate(int64) error                    { return os.ErrPermission }
+func (f *writeCloseFile) Name() string                           { return f.name }
+func (f *writeCloseFile) Stat() (os.FileInfo, error)             { return &gitFi{name: f.name, mode: 0200}, nil }
+func (f *writeCloseFile) WriteAt(p []byte, _ int64) (int, error) { f.buf.Write(p); return len(p), nil }
+func (f *writeCloseFile) Write(p []byte) (int, error)            { return f.WriteAt(p, 0) }
+func (f *writeCloseFile) WriteString(s string) (int, error)      { return f.WriteAt([]byte(s), 0) }
+func (f *writeCloseFile) Close() error                           { return f.onClose(f.buf.String()) }
+func (f *writeCloseFile) Read(p []byte) (int, error)             { return 0, io.EOF }
+func (f *writeCloseFile) ReadAt(p []byte, _ int64) (int, error)  { return 0, io.EOF }
+func (f *writeCloseFile) Seek(off int64, w int) (int64, error)   { return 0, nil }
+func (f *writeCloseFile) Readdir(int) ([]os.FileInfo, error)     { return nil, nil }
+func (f *writeCloseFile) Readdirnames(int) ([]string, error)     { return nil, nil }
+func (f *writeCloseFile) Sync() error                            { return nil }
+func (f *writeCloseFile) Truncate(int64) error                   { return os.ErrPermission }
 
 // dirFile: virtual directory.
 type dirFile struct {
@@ -826,20 +828,20 @@ func (f *dirFile) Readdirnames(n int) ([]string, error) {
 	}
 	return names, nil
 }
-func (f *dirFile) Close() error                            { return nil }
-func (f *dirFile) Read(p []byte) (int, error)              { return 0, io.EOF }
-func (f *dirFile) ReadAt(p []byte, _ int64) (int, error)   { return 0, io.EOF }
-func (f *dirFile) Seek(off int64, w int) (int64, error)    { return 0, nil }
-func (f *dirFile) Write(p []byte) (int, error)             { return 0, os.ErrPermission }
-func (f *dirFile) WriteAt(p []byte, _ int64) (int, error)  { return 0, os.ErrPermission }
-func (f *dirFile) WriteString(s string) (int, error)       { return 0, os.ErrPermission }
-func (f *dirFile) Sync() error                             { return nil }
-func (f *dirFile) Truncate(int64) error                    { return os.ErrPermission }
+func (f *dirFile) Close() error                           { return nil }
+func (f *dirFile) Read(p []byte) (int, error)             { return 0, io.EOF }
+func (f *dirFile) ReadAt(p []byte, _ int64) (int, error)  { return 0, io.EOF }
+func (f *dirFile) Seek(off int64, w int) (int64, error)   { return 0, nil }
+func (f *dirFile) Write(p []byte) (int, error)            { return 0, os.ErrPermission }
+func (f *dirFile) WriteAt(p []byte, _ int64) (int, error) { return 0, os.ErrPermission }
+func (f *dirFile) WriteString(s string) (int, error)      { return 0, os.ErrPermission }
+func (f *dirFile) Sync() error                            { return nil }
+func (f *dirFile) Truncate(int64) error                   { return os.ErrPermission }
 
 // osFile wraps *os.File to satisfy afero.File.
 type osFile struct{ *os.File }
 
-func (f *osFile) WriteString(s string) (int, error) { return f.File.WriteString(s) }
+func (f *osFile) WriteString(s string) (int, error)        { return f.File.WriteString(s) }
 func (f *osFile) WriteAt(p []byte, off int64) (int, error) { return f.File.WriteAt(p, off) }
 func (f *osFile) Readdir(n int) ([]os.FileInfo, error) {
 	entries, err := f.File.ReadDir(n)

@@ -1065,8 +1065,8 @@ func TestMountAutoUnmountOnConnDrop(t *testing.T) {
 		t.Fatal("mount not found after mounting")
 	}
 
-	conn.Close()         // simulate crash
-	<-serveConnDone      // cleanup() has run by the time this fires
+	conn.Close()    // simulate crash
+	<-serveConnDone // cleanup() has run by the time this fires
 
 	if mp, _ := e.ninep.FindMount("/peak/auto-unmount"); mp == "/peak/auto-unmount" {
 		t.Fatal("mount should have been cleaned up after connection drop")

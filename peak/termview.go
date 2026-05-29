@@ -92,9 +92,9 @@ func NewTermView(editor *Editor, sess session.Session, x, y, w, h int, onClose f
 					tv.editor.Call(tv.onClose)
 				}
 				return
-		}
-		tv.bufferDirty = true
-		// Layout() (called from Window.Draw on the next frame) handles
+			}
+			tv.bufferDirty = true
+			// Layout() (called from Window.Draw on the next frame) handles
 			// contentHeight and scroll sync. Just signal a redraw.
 			tv.editor.screen.PostEvent(tcell.NewEventInterrupt(func() {}))
 		}
@@ -399,7 +399,7 @@ type termLineProvider struct {
 	tv *TermView
 }
 
-func (p termLineProvider) LineCount() int      { return p.tv.getContentHeight() }
+func (p termLineProvider) LineCount() int       { return p.tv.getContentHeight() }
 func (p termLineProvider) GetLine(y int) []rune { return p.tv.getLine(y) }
 
 func (tv *TermView) GetSelectedText() string {

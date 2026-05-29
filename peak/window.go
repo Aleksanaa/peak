@@ -540,7 +540,7 @@ type Handle struct {
 	color tcell.Color
 }
 
-func (hd *Handle) Layout()            {}
+func (hd *Handle) Layout()                 {}
 func (hd *Handle) ShowCursor(tcell.Screen) {}
 func (hd *Handle) Draw(s tcell.Screen) {
 	style := tcell.StyleDefault.Background(hd.color).Foreground(tcell.ColorBlack)
@@ -558,7 +558,7 @@ type Scrollbar struct {
 	visibleLines int
 }
 
-func (sb *Scrollbar) Layout()            {}
+func (sb *Scrollbar) Layout()                 {}
 func (sb *Scrollbar) ShowCursor(tcell.Screen) {}
 func (sb *Scrollbar) Draw(s tcell.Screen) {
 	if sb.visibleLines == 0 || sb.totalLines <= sb.visibleLines {
@@ -581,8 +581,8 @@ type BodyView struct {
 	scroll  *Scrollbar
 }
 
-func (bv *BodyView) Layout() {}
-func (bv *BodyView) Draw(tcell.Screen) {}
+func (bv *BodyView) Layout()                   {}
+func (bv *BodyView) Draw(tcell.Screen)         {}
 func (bv *BodyView) ShowCursor(s tcell.Screen) { bv.content.ShowCursor(s) }
 func (bv *BodyView) Resize(x, y, w, h int) {
 	bv.SetPos(x, y, w, h)
@@ -623,12 +623,12 @@ type Window struct {
 	mutSeq, bodySnapSeq uint64
 }
 
-func (w *Window) Layout() {}
-func (w *Window) Draw(tcell.Screen) {}
+func (w *Window) Layout()                 {}
+func (w *Window) Draw(tcell.Screen)       {}
 func (w *Window) ShowCursor(tcell.Screen) {}
-func (w *Window) PreferredSize() int { return w.explicitHeight }
-func (w *Window) MinSize() int       { return w.tagHeight() + 1 }
-func (w *Window) SetExplicit(v int)  { w.explicitHeight = v }
+func (w *Window) PreferredSize() int      { return w.explicitHeight }
+func (w *Window) MinSize() int            { return w.tagHeight() + 1 }
+func (w *Window) SetExplicit(v int)       { w.explicitHeight = v }
 
 func (w *Window) syncChildren() {
 	w.children = []DrawNode{w.handle, w.tag, w.bodyView}
@@ -776,7 +776,7 @@ func newWindow(tag string, parent *Column, editor *Editor, x, y, w, h int, onExe
 		TreeNode: TreeNode{BaseView: BaseView{x: x, y: y, w: w, h: h}},
 		tag:      NewTextView(tag, x+1, y, w-1, 1, tagStyle, false, false),
 		parent:   parent, editor: editor, onExec: onExec,
-		handle:   handle, bodyView: bodyView,
+		handle: handle, bodyView: bodyView,
 	}
 	win.tag.theme = &editor.theme
 	win.tag.buffer.onMutate = func(_, _, _ int, _ string) {

@@ -41,8 +41,8 @@ type repoState struct {
 // watchEvents opens /event and processes window lifecycle events. All map
 // accesses happen in this single goroutine — no mutex needed.
 func watchEvents(peakFs afero.Fs) {
-	repos    := make(map[string]*repoState) // repoPath → state
-	winRepos := make(map[string]string)     // windowID → repoPath
+	repos := make(map[string]*repoState) // repoPath → state
+	winRepos := make(map[string]string)  // windowID → repoPath
 
 	// Open the event stream before snapshotting current windows so we don't
 	// miss windows that open during the snapshot.

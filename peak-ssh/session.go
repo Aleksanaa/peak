@@ -176,7 +176,6 @@ func remoteDir(relPath string) string {
 	return path.Clean("/" + parts[1][len("fs/"):])
 }
 
-
 // ---- path parsing ----
 
 const (

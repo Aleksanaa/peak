@@ -10,7 +10,7 @@ type Gutter struct {
 	theme *Theme
 }
 
-func (g *Gutter) Layout()            {}
+func (g *Gutter) Layout()                 {}
 func (g *Gutter) ShowCursor(tcell.Screen) {}
 func (g *Gutter) Draw(s tcell.Screen) {
 	sepStyle := tcell.StyleDefault.Background(g.theme.ScrollGutter).Foreground(g.theme.HandleColumn)

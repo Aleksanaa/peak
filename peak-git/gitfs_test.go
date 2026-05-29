@@ -23,11 +23,11 @@ var testAuthor = &object.Signature{
 }
 
 type testRepo struct {
-	path    string
-	repo    *gogit.Repository
-	fs      *repoFs
-	hash1   plumbing.Hash // initial commit ("feature" branch)
-	hash2   plumbing.Hash // second commit (HEAD main)
+	path  string
+	repo  *gogit.Repository
+	fs    *repoFs
+	hash1 plumbing.Hash // initial commit ("feature" branch)
+	hash2 plumbing.Hash // second commit (HEAD main)
 }
 
 func setupTestRepo(t *testing.T) *testRepo {

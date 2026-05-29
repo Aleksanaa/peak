@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pkg/sftp"
 	"github.com/aleksana/peak/internal/vfs/afero"
+	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 )
@@ -171,9 +171,13 @@ func (s *SftpFs) OpenWithStat(name string, fi os.FileInfo, flag int, perm os.Fil
 
 func (s *SftpFs) Remove(n string) error {
 	conn, rel := s.parse(n)
-	if conn == "" { return os.ErrInvalid }
+	if conn == "" {
+		return os.ErrInvalid
+	}
 	cli, err := s.getClient(conn)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	return cli.sftp.Remove(rel)
 }
 func (s *SftpFs) RemoveAll(n string) error { return s.Remove(n) }
@@ -182,9 +186,13 @@ func (s *SftpFs) Create(n string) (afero.File, error) {
 }
 func (s *SftpFs) Mkdir(n string, p os.FileMode) error {
 	conn, rel := s.parse(n)
-	if conn == "" { return os.ErrInvalid }
+	if conn == "" {
+		return os.ErrInvalid
+	}
 	cli, err := s.getClient(conn)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	return cli.sftp.Mkdir(rel)
 }
 func (s *SftpFs) MkdirAll(n string, p os.FileMode) error { return s.Mkdir(n, p) }
@@ -202,23 +210,35 @@ func (s *SftpFs) Rename(o, n string) error {
 }
 func (s *SftpFs) Chmod(n string, m os.FileMode) error {
 	conn, rel := s.parse(n)
-	if conn == "" { return os.ErrInvalid }
+	if conn == "" {
+		return os.ErrInvalid
+	}
 	cli, err := s.getClient(conn)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	return cli.sftp.Chmod(rel, m)
 }
 func (s *SftpFs) Chown(n string, u, g int) error {
 	conn, rel := s.parse(n)
-	if conn == "" { return os.ErrInvalid }
+	if conn == "" {
+		return os.ErrInvalid
+	}
 	cli, err := s.getClient(conn)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	return cli.sftp.Chown(rel, u, g)
 }
 func (s *SftpFs) Chtimes(n string, a, m time.Time) error {
 	conn, rel := s.parse(n)
-	if conn == "" { return os.ErrInvalid }
+	if conn == "" {
+		return os.ErrInvalid
+	}
 	cli, err := s.getClient(conn)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	return cli.sftp.Chtimes(rel, a, m)
 }
 func (s *SftpFs) Name() string { return "SftpFs" }
@@ -266,9 +286,13 @@ func (f *SftpFile) Readdir(count int) ([]os.FileInfo, error) {
 }
 func (f *SftpFile) Readdirnames(n int) ([]string, error) {
 	entries, err := f.Readdir(n)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	res := make([]string, len(entries))
-	for i, e := range entries { res[i] = e.Name() }
+	for i, e := range entries {
+		res[i] = e.Name()
+	}
 	return res, nil
 }
 func (f *SftpFile) Stat() (os.FileInfo, error) {
@@ -276,26 +300,36 @@ func (f *SftpFile) Stat() (os.FileInfo, error) {
 		return &SimpleFileInfo{name: f.Name(), isDir: true}, nil
 	}
 	fi, err := f.File.Stat()
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	return &SimpleFileInfo{name: f.Name(), isDir: fi.IsDir(), size: fi.Size(), modTime: fi.ModTime(), mode: fi.Mode()}, nil
 }
 func (f *SftpFile) Sync() error {
-	if f.File == nil { return nil }
+	if f.File == nil {
+		return nil
+	}
 	return nil
 }
 func (f *SftpFile) Truncate(size int64) error {
-	if f.File == nil { return os.ErrInvalid }
+	if f.File == nil {
+		return os.ErrInvalid
+	}
 	return f.File.Truncate(size)
 }
 func (f *SftpFile) WriteString(s string) (ret int, err error) {
 	return f.Write([]byte(s))
 }
 func (f *SftpFile) WriteAt(p []byte, off int64) (n int, err error) {
-	if f.File == nil { return 0, os.ErrInvalid }
+	if f.File == nil {
+		return 0, os.ErrInvalid
+	}
 	return f.File.WriteAt(p, off)
 }
 func (f *SftpFile) Close() error {
-	if f.File != nil { return f.File.Close() }
+	if f.File != nil {
+		return f.File.Close()
+	}
 	return nil
 }
 
@@ -313,8 +347,12 @@ func (s *SimpleFileInfo) IsDir() bool        { return s.isDir }
 func (s *SimpleFileInfo) ModTime() time.Time { return s.modTime }
 func (s *SimpleFileInfo) Sys() interface{}   { return nil }
 func (s *SimpleFileInfo) Mode() os.FileMode {
-	if s.mode != 0 { return s.mode }
-	if s.isDir { return os.ModeDir | 0755 }
+	if s.mode != 0 {
+		return s.mode
+	}
+	if s.isDir {
+		return os.ModeDir | 0755
+	}
 	return 0644
 }
 
@@ -332,19 +370,29 @@ func (v *MemDirFile) Write(p []byte) (n int, err error)              { return 0,
 func (v *MemDirFile) WriteAt(p []byte, off int64) (n int, err error) { return 0, os.ErrPermission }
 func (v *MemDirFile) Name() string                                   { return v.name }
 func (v *MemDirFile) Readdir(count int) ([]os.FileInfo, error) {
-	if count <= 0 { return v.entries, nil }
-	if v.offset >= len(v.entries) { return nil, io.EOF }
+	if count <= 0 {
+		return v.entries, nil
+	}
+	if v.offset >= len(v.entries) {
+		return nil, io.EOF
+	}
 	end := v.offset + count
-	if end > len(v.entries) { end = len(v.entries) }
+	if end > len(v.entries) {
+		end = len(v.entries)
+	}
 	res := v.entries[v.offset:end]
 	v.offset = end
 	return res, nil
 }
 func (v *MemDirFile) Readdirnames(n int) ([]string, error) {
 	entries, err := v.Readdir(n)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	res := make([]string, len(entries))
-	for i, e := range entries { res[i] = e.Name() }
+	for i, e := range entries {
+		res[i] = e.Name()
+	}
 	return res, nil
 }
 func (v *MemDirFile) Stat() (os.FileInfo, error) {
