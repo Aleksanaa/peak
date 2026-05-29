@@ -807,6 +807,9 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 					if buf == nil {
 						continue
 					}
+					if _, ok := win.body.(*TermView); ok {
+						continue
+					}
 					subCtx := &Context{Editor: ctx.Editor, Column: col, Window: win, Buffer: buf, Out: ctx.Out, Log: subLog}
 					subDot := Range{buf.CursorToRuneOffset(buf.cursor), buf.CursorToRuneOffset(buf.cursor)}
 					if buf.selection.Active {

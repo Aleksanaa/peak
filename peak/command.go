@@ -702,11 +702,11 @@ func (e *Editor) cmdEdit(col *Column, win *Window, cmd string) {
 		return
 	}
 
-	tv := target.bodyTextView()
-	if tv == nil {
+	buf := target.body.GetBuffer()
+	if buf == nil {
 		return
 	}
-	buf := tv.buffer
+
 	dot := Range{buf.CursorToRuneOffset(buf.cursor), buf.CursorToRuneOffset(buf.cursor)}
 	if buf.selection.Active {
 		s, end := buf.selection.Ordered()
@@ -720,9 +720,12 @@ func (e *Editor) cmdEdit(col *Column, win *Window, cmd string) {
 		return
 	}
 
+	_, isTerm := target.body.(*TermView)
+	if isTerm && len(log.ops) > 0 {
+		e.showError(col, target, "", "Edit: text modifications not allowed on terminal windows")
+		return
+	}
 	log.Apply(buf)
-
-	// Update selection/cursor from newDot
 	start := buf.RuneOffsetToCursor(newDot.q0)
 	end := buf.RuneOffsetToCursor(newDot.q1)
 	buf.SetSelection(start, end)
@@ -730,6 +733,14 @@ func (e *Editor) cmdEdit(col *Column, win *Window, cmd string) {
 
 	if res.Cmd.cmdc == '\n' {
 		e.alignWindow(target, end.y)
+		if isTerm {
+			target.body.(*TermView).scroll.AutoScroll = false
+		}
+	}
+
+	if isTerm {
+		tv := target.body.(*TermView)
+		tv.selection = buf.selection
 	}
 
 	if pOut.Len() > 0 {

@@ -319,6 +319,9 @@ func (f *winDataFile) Close() error {
 	if f.writes == nil {
 		return nil
 	}
+	if _, ok := f.win.body.(*TermView); ok {
+		return nil
+	}
 	runes := []rune(string(f.writes))
 	var modified bool
 	f.win.lk.Lock()

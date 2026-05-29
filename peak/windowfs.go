@@ -20,15 +20,11 @@ func (fs *windowFs) Stat(name string) (os.FileInfo, error) {
 		return &simpleFileInfo{name: ".", isDir: true, mode: 0555}, nil
 	case "body":
 		var size int64
-		if tv, ok := fs.win.body.(*TermView); ok {
-			size = int64(len(tv.GetScrollback()))
-		} else {
-			fs.win.lk.Lock()
-			if buf := fs.win.body.GetBuffer(); buf != nil {
-				size = int64(len(buf.GetText()))
-			}
-			fs.win.lk.Unlock()
+		fs.win.lk.Lock()
+		if buf := fs.win.body.GetBuffer(); buf != nil {
+			size = int64(len(buf.GetText()))
 		}
+		fs.win.lk.Unlock()
 		return &simpleFileInfo{name: "body", mode: 0644, size: size}, nil
 	case "tag":
 		fs.win.lk.Lock()
@@ -92,16 +88,12 @@ func (fs *windowFs) OpenFile(name string, flag int, perm os.FileMode) (afero.Fil
 	case "body":
 		f := &winBodyFile{win: fs.win}
 		if flag&os.O_WRONLY == 0 {
-			if tv, ok := fs.win.body.(*TermView); ok {
-				f.snap = []byte(tv.GetScrollback())
-			} else {
-				fs.win.lk.Lock()
-				if buf := fs.win.body.GetBuffer(); buf != nil {
-					f.snap = []byte(buf.GetText())
-					fs.win.bodySnapSeq = fs.win.mutSeq
-				}
-				fs.win.lk.Unlock()
+			fs.win.lk.Lock()
+			if buf := fs.win.body.GetBuffer(); buf != nil {
+				f.snap = []byte(buf.GetText())
+				fs.win.bodySnapSeq = fs.win.mutSeq
 			}
+			fs.win.lk.Unlock()
 		}
 		return f, nil
 	case "tag":
@@ -508,6 +500,9 @@ func (f *winWrselFile) WriteString(s string) (int, error) { return f.WriteAt([]b
 
 func (f *winWrselFile) Close() error {
 	if f.writes == nil {
+		return nil
+	}
+	if _, ok := f.win.body.(*TermView); ok {
 		return nil
 	}
 	runes := []rune(string(f.writes))

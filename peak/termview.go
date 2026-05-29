@@ -30,6 +30,8 @@ type TermView struct {
 	selecting bool
 
 	contentHeight int
+	buffer        *Buffer
+	bufferDirty   bool
 }
 
 func (tv *TermView) IsRaw() bool {
@@ -56,6 +58,7 @@ func NewTermView(editor *Editor, sess session.Session, x, y, w, h int, onClose f
 		editor:        editor,
 		cancel:        cancel,
 		contentHeight: h,
+		buffer:        NewBuffer(""),
 	}
 	tv.scroll.AutoScroll = true
 
@@ -89,8 +92,9 @@ func NewTermView(editor *Editor, sess session.Session, x, y, w, h int, onClose f
 					tv.editor.Call(tv.onClose)
 				}
 				return
-			}
-			// Layout() (called from Window.Draw on the next frame) handles
+		}
+		tv.bufferDirty = true
+		// Layout() (called from Window.Draw on the next frame) handles
 			// contentHeight and scroll sync. Just signal a redraw.
 			tv.editor.screen.PostEvent(tcell.NewEventInterrupt(func() {}))
 		}
@@ -131,7 +135,7 @@ func (tv *TermView) Draw(s tcell.Screen) {
 				style = style.Blink(true)
 			}
 
-			if tv.selection.Contains(x, screenY, true) {
+			if tv.selection.Contains(x, screenY, false) {
 				style = style.Background(tv.editor.theme.SelectionBG).
 					Foreground(tv.editor.theme.SelectionFG)
 			}
@@ -344,7 +348,17 @@ func (tv *TermView) GetClickWord(mx, my int) string {
 }
 
 func (tv *TermView) GetBuffer() *Buffer {
-	return nil
+	if tv.bufferDirty {
+		cursor := tv.buffer.cursor
+		sel := tv.buffer.selection
+		tv.buffer.SetText(tv.GetScrollback())
+		tv.buffer.cursor = cursor
+		tv.buffer.selection = sel
+		tv.buffer.history = nil
+		tv.buffer.redoStack = nil
+		tv.bufferDirty = false
+	}
+	return tv.buffer
 }
 
 // externalPTY returns the ExternalPTY backing this view, or nil for local sessions.
@@ -550,12 +564,12 @@ func (tv *TermView) HandleEvent(ev tcell.Event) bool {
 			if buttons&tcell.Button1 != 0 {
 				if !tv.selecting {
 					tv.selecting = true
-					tv.selection = Selection{Start: Cursor{rx, realRY}, Active: true}
+					tv.selection = Selection{Start: Cursor{rx, realRY}, End: Cursor{rx + 1, realRY}, Active: true}
 				}
-				tv.selection.End = Cursor{rx, realRY}
+				tv.selection.End = Cursor{rx + 1, realRY}
 			} else if tv.selecting {
 				tv.selecting = false
-				if tv.selection.Start == tv.selection.End {
+				if tv.selection.Start.y == tv.selection.End.y && tv.selection.End.x-tv.selection.Start.x <= 1 {
 					tv.selection.Active = false
 				}
 			}
