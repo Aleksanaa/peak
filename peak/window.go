@@ -535,13 +535,76 @@ func (tv *TextView) ShowLineAt(lineNum int, vrow int) {
 	tv.SyncScroll()
 }
 
+type Handle struct {
+	BaseView
+	color tcell.Color
+}
+
+func (h *Handle) Layout() {}
+func (h *Handle) ShowCursor(tcell.Screen) {}
+func (h *Handle) Draw(s tcell.Screen) {
+	style := tcell.StyleDefault.Background(h.color).Foreground(tcell.ColorBlack)
+	for i := 0; i < h.h; i++ {
+		s.SetContent(h.x, h.y+i, ' ', nil, style)
+	}
+}
+func (h *Handle) Resize(x, y, w, wh int) { h.SetPos(x, y, w, wh) }
+
+type Scrollbar struct {
+	BaseView
+	thumbStyle   tcell.Style
+	scrollPos    int
+	totalLines   int
+	visibleLines int
+}
+
+func (s *Scrollbar) Layout() {}
+func (s *Scrollbar) ShowCursor(tcell.Screen) {}
+func (s *Scrollbar) Draw(sc tcell.Screen) {
+	if s.visibleLines == 0 || s.totalLines <= s.visibleLines {
+		return
+	}
+	thumbHeight := max(1, (s.visibleLines*s.visibleLines)/s.totalLines)
+	thumbStart := min(s.visibleLines-thumbHeight, (s.scrollPos*s.visibleLines)/s.totalLines)
+	for i := 0; i < thumbHeight; i++ {
+		sc.SetContent(s.x, s.y+thumbStart+i, ' ', nil, s.thumbStyle)
+	}
+}
+func (s *Scrollbar) Set(scroll, total, visible int) {
+	s.scrollPos, s.totalLines, s.visibleLines = scroll, total, visible
+}
+func (s *Scrollbar) Resize(x, y, w, h int) { s.SetPos(x, y, w, h) }
+
+type BodyView struct {
+	TreeNode
+	content View
+	scroll  *Scrollbar
+}
+
+func (bv *BodyView) Layout() {}
+func (bv *BodyView) Draw(tcell.Screen) {}
+func (bv *BodyView) ShowCursor(s tcell.Screen) { bv.content.ShowCursor(s) }
+func (bv *BodyView) Resize(x, y, w, h int) {
+	bv.SetPos(x, y, w, h)
+	bv.scroll.Resize(x, y, 1, h)
+	bv.content.Resize(x+1, y, w-1, h)
+}
+
+func (bv *BodyView) syncChildren() {
+	if dn, ok := bv.content.(DrawNode); ok {
+		bv.children = []DrawNode{bv.scroll, dn}
+	}
+}
+
 type Window struct {
+	TreeNode
 	ID             int
 	tag            *TextView
 	body           View
+	bodyView       *BodyView
+	handle         *Handle
 	parent         *Column
 	editor         *Editor
-	x, y, w, h     int
 	onExec         func(*Column, *Window, string) bool
 	explicitHeight int
 
@@ -550,22 +613,62 @@ type Window struct {
 	savedVersion  int
 	warnedVersion int
 
-	// lk protects eventSubs, spans, addrQ0/Q1, and mutSeq/bodySnapSeq.
-	// Held briefly by the UI thread (Draw, HandleEvent → onMutate) and by
-	// 9P goroutines (file Open/Close). Never nested.
 	lk        sync.Mutex
 	eventSubs []*eventSub
 
-	// current addr (rune offsets) for external tool use
 	addrQ0, addrQ1 int
 
-	// color spans applied during Draw
 	spans []colorSpan
 
-	// mutSeq is incremented on every body mutation.
-	// bodySnapSeq is set to mutSeq when the body is snapped for a 9P read.
-	// winColorFile.Close discards spans if mutSeq != bodySnapSeq.
 	mutSeq, bodySnapSeq uint64
+}
+
+func (w *Window) Layout() {}
+func (w *Window) Draw(tcell.Screen) {}
+func (w *Window) ShowCursor(tcell.Screen) {}
+
+func (w *Window) syncChildren() {
+	w.children = []DrawNode{w.handle, w.tag, w.bodyView}
+}
+
+func (w *Window) WalkLayout() {
+	w.syncChildren()
+}
+
+func (w *Window) WalkDraw(s tcell.Screen) {
+	w.tag.underlineLast = w.editor.active == w
+
+	handleColor := w.editor.theme.Handle
+	if fn := w.GetFilename(); isSpecial(fn) {
+		handleColor = w.editor.theme.HandleError
+	} else if w.IsDirty() {
+		handleColor = w.editor.theme.HandleDirty
+	}
+	w.handle.color = handleColor
+
+	w.lk.Lock()
+	w.tag.Layout()
+	w.tag.Draw(s)
+	spans := append([]colorSpan(nil), w.spans...)
+	w.lk.Unlock()
+
+	w.handle.Draw(s)
+
+	if tv, ok := w.body.(*TextView); ok {
+		if len(spans) > 0 {
+			tv.colorAt = w.colorAtFunc(spans)
+		} else {
+			tv.colorAt = nil
+		}
+	}
+
+	w.lk.Lock()
+	w.body.Layout()
+	scroll, total, visible := w.body.GetScroll()
+	w.bodyView.scroll.Set(scroll, total, visible)
+	w.bodyView.scroll.Draw(s)
+	w.body.Draw(s)
+	w.lk.Unlock()
 }
 
 func (win *Window) subscribeEvent() *eventSub {
@@ -660,13 +763,19 @@ func (win *Window) colorAtFunc(spans []colorSpan) func(int) (tcell.Color, bool) 
 
 func newWindow(tag string, parent *Column, editor *Editor, x, y, w, h int, onExec func(*Column, *Window, string) bool) *Window {
 	tagStyle := tcell.StyleDefault.Background(editor.theme.TagBG).Foreground(editor.theme.TagFG)
+	handle := &Handle{BaseView: BaseView{x: x, y: y, w: 1, h: 1}, color: editor.theme.Handle}
+	bodyView := &BodyView{TreeNode: TreeNode{BaseView: BaseView{x: x + 1, y: y + 1, w: w - 1, h: h - 1}}}
+	bodyView.scroll = &Scrollbar{
+		BaseView:   BaseView{x: x + 1, y: y + 1, w: 1, h: h - 1},
+		thumbStyle: tcell.StyleDefault.Background(editor.theme.ScrollThumb),
+	}
 	win := &Window{
-		tag:    NewTextView(tag, x+1, y, w-1, 1, tagStyle, false, false),
-		parent: parent, editor: editor, x: x, y: y, w: w, h: h, onExec: onExec,
+		TreeNode: TreeNode{BaseView: BaseView{x: x, y: y, w: w, h: h}},
+		tag:      NewTextView(tag, x+1, y, w-1, 1, tagStyle, false, false),
+		parent:   parent, editor: editor, onExec: onExec,
+		handle:   handle, bodyView: bodyView,
 	}
 	win.tag.theme = &editor.theme
-	// Reflow body geometry when tag text wraps to a different number of rows.
-	// Runs on the UI thread (tag edits come via HandleEvent under win.lk).
 	win.tag.buffer.onMutate = func(_, _, _ int, _ string) {
 		prev := len(win.tag.layout)
 		win.tag.UpdateLayout()
@@ -695,6 +804,7 @@ func newTermWindowFromSession(tag string, sess session.Session, parent *Column, 
 		return nil, err
 	}
 	win.body = term
+	win.bodyView.content = term
 	if pty, ok := sess.(*ExternalPTY); ok {
 		pty.onResize = func(rows, cols int) {
 			win.broadcastEvent('P', 'Z', rows, cols, 0, "")
@@ -709,6 +819,7 @@ func NewWindow(tag, body string, parent *Column, editor *Editor, x, y, w, h int,
 	tv := NewTextView(body, x+1, y+1, w-1, h-1, bodyStyle, false, true)
 	tv.theme = &editor.theme
 	win.body = tv
+	win.bodyView.content = tv
 	tv.buffer.onMutate = func(q0, q1Old, q1New int, text string) {
 		win.mutSeq++
 		win.adjustSpans(q0, q1Old, q1New)
@@ -810,65 +921,16 @@ func (win *Window) tagHeight() int {
 	return h
 }
 
-// reflow sizes the tag and body views to match the window's current geometry.
-// Must be called after the tag's visual-line layout is up to date so that
-// tagHeight() returns the correct row count.
 func (win *Window) reflow() {
 	th := win.tagHeight()
 	win.tag.Resize(win.x+1, win.y, win.w-1, th)
+	win.handle.Resize(win.x, win.y, 1, th)
 	bh := max(0, win.h-th)
-	win.body.Resize(win.x+1, win.y+th, win.w-1, bh)
-}
-
-func (win *Window) Draw(s tcell.Screen) {
-	win.tag.underlineLast = win.editor.active == win
-
-	handleColor := win.editor.theme.Handle
-	if fn := win.GetFilename(); isSpecial(fn) {
-		handleColor = win.editor.theme.HandleError
-	} else if win.IsDirty() {
-		handleColor = win.editor.theme.HandleDirty
-	}
-
-	// Tag section: layout then paint under lock (9P can modify tag buffer).
-	win.lk.Lock()
-	win.tag.Layout()
-	win.tag.Draw(s)
-	spans := append([]colorSpan(nil), win.spans...)
-	win.lk.Unlock()
-
-	handleStyle := tcell.StyleDefault.Background(handleColor).Foreground(tcell.ColorBlack)
-	for i := 0; i < win.tagHeight(); i++ {
-		s.SetContent(win.x, win.y+i, ' ', nil, handleStyle)
-	}
-
-	// Body section: layout under lock (9P can mutate the body buffer).
-	// Scrollbar and Draw share one lock section so scrollbar reflects the
-	// layout just computed by Layout() rather than a stale snapshot.
-	if tv, ok := win.body.(*TextView); ok {
-		if len(spans) > 0 {
-			tv.colorAt = win.colorAtFunc(spans)
-		} else {
-			tv.colorAt = nil
-		}
-	}
-	win.lk.Lock()
-	win.body.Layout()
-	scroll, total, visible := win.body.GetScroll()
-	if visible > 0 && total > visible {
-		thumbStyle := tcell.StyleDefault.Background(win.editor.theme.ScrollThumb)
-		thumbHeight := max(1, (visible*visible)/total)
-		thumbStart := min(visible-thumbHeight, (scroll*visible)/total)
-		for i := 0; i < thumbHeight; i++ {
-			s.SetContent(win.x, win.y+win.tagHeight()+thumbStart+i, ' ', nil, thumbStyle)
-		}
-	}
-	win.body.Draw(s)
-	win.lk.Unlock()
+	win.bodyView.Resize(win.x, win.y+th, win.w, bh)
 }
 
 func (win *Window) Resize(x, y, w, h int) {
-	win.x, win.y, win.w, win.h = x, y, w, h
+	win.SetPos(x, y, w, h)
 	win.reflow()
 }
 

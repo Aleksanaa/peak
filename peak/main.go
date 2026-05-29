@@ -75,6 +75,7 @@ type execReq struct {
 
 // Editor is the main application state.
 type Editor struct {
+	TreeNode
 	CmdChan     chan func()
 	redrawCh    chan struct{} // capacity-1; 9P goroutines signal after state changes
 	execCh      chan execReq  // buffered; 9P goroutines send executive ops here
@@ -98,6 +99,13 @@ type Editor struct {
 	theme           Theme
 	nextWinID       int
 	ninep           *NineP
+}
+
+func (e *Editor) syncChildren() {
+	e.children = []DrawNode{e.tag}
+	for _, c := range e.columns {
+		e.children = append(e.children, c)
+	}
 }
 
 // Redraw signals the main loop to redraw on the next iteration.
@@ -166,6 +174,7 @@ func (e *Editor) Init(numCols int, args []string) {
 		e.columns = append(e.columns, col)
 	}
 	e.resize()
+	e.syncChildren()
 
 	if len(args) > 0 {
 		for _, arg := range args {
@@ -261,17 +270,9 @@ func (e *Editor) Run() {
 }
 
 func (e *Editor) Draw() {
-	// Phase 1: Layout — compute all geometry and scroll before any paint
-	e.tag.Layout()
-	for _, col := range e.columns {
-		col.tag.Layout()
-	}
-
-	// Phase 2: Paint — pure rendering, no state mutation
-	e.tag.Draw(e.screen)
-	for _, col := range e.columns {
-		col.Draw(e.screen)
-	}
+	e.syncChildren()
+	e.WalkLayout()
+	e.WalkDraw(e.screen)
 	if e.focusedView != nil {
 		e.focusedView.ShowCursor(e.screen)
 	}
@@ -374,14 +375,13 @@ func (e *Editor) HandleEvent(ev tcell.Event) (bool, bool) {
 
 // windowOf returns the Window that owns view v, or nil for the global tag.
 func (e *Editor) windowOf(v View) *Window {
-	for _, col := range e.columns {
-		for _, win := range col.windows {
-			if win.body == v || win.tag == v {
-				return win
-			}
+	var found *Window
+	e.Walk(func(d DrawNode) {
+		if w, ok := d.(*Window); ok && (w.body == v || w.tag == v) {
+			found = w
 		}
-	}
-	return nil
+	})
+	return found
 }
 
 func (e *Editor) ActivateWindow(win *Window) {
