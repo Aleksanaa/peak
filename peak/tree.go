@@ -55,46 +55,6 @@ func (n *TreeNode) Walk(fn func(DrawNode)) {
 	}
 }
 
-func (n *TreeNode) DistributeHorizontal(available int) {
-	children := n.Children()
-	if len(children) == 0 {
-		return
-	}
-	sizes := distribute(children, available, n.lastSize)
-	n.lastSize = available
-
-	x := 0
-	for i, c := range children {
-		sz := sizes[i]
-		if s, ok := c.(Sizer); ok {
-			s.SetExplicit(sz)
-		}
-		_, y, _, h := c.GetBounds()
-		c.Resize(x, y, sz, h)
-		x += sz
-	}
-}
-
-func (n *TreeNode) DistributeVertical(available int) {
-	children := n.Children()
-	if len(children) == 0 {
-		return
-	}
-	sizes := distribute(children, available, n.lastSize)
-	n.lastSize = available
-
-	y := 0
-	for i, c := range children {
-		sz := sizes[i]
-		if s, ok := c.(Sizer); ok {
-			s.SetExplicit(sz)
-		}
-		x, _, w, _ := c.GetBounds()
-		c.Resize(x, y, w, sz)
-		y += sz
-	}
-}
-
 func distribute(children []DrawNode, total int, lastTotal int) []int {
 	heights := make([]int, len(children))
 	totalExplicit, numAuto := 0, 0

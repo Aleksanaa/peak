@@ -33,6 +33,7 @@ type Column struct {
 	gutter        *Gutter
 	onExec        func(*Column, *Window, string) bool
 	explicitWidth int
+	winCache      []DrawNode
 }
 
 func (c *Column) Layout() {}
@@ -139,23 +140,28 @@ func (c *Column) Resize(x, y, w, h int) {
 	}
 
 	availableH := h - 1
-	sizes := distribute(c.windowNodes(), availableH, c.lastSize)
+	sizes := distribute(c.winNodes(), availableH, c.lastSize)
 	c.lastSize = availableH
 
 	yOffset := y + 1
 	for i, win := range c.windows {
-		win.explicitHeight = sizes[i]
+		if win.explicitHeight > 0 {
+			win.explicitHeight = sizes[i]
+		}
 		win.Resize(x, yOffset, w, sizes[i])
 		yOffset += sizes[i]
 	}
 }
 
-func (c *Column) windowNodes() []DrawNode {
-	nodes := make([]DrawNode, len(c.windows))
-	for i, w := range c.windows {
-		nodes[i] = w
+func (c *Column) winNodes() []DrawNode {
+	if cap(c.winCache) < len(c.windows) {
+		c.winCache = make([]DrawNode, len(c.windows))
 	}
-	return nodes
+	c.winCache = c.winCache[:len(c.windows)]
+	for i, w := range c.windows {
+		c.winCache[i] = w
+	}
+	return c.winCache
 }
 
 func (c *Column) Contains(x, y int) bool {

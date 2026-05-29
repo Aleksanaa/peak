@@ -82,9 +82,8 @@ type Editor struct {
 	screen      tcell.Screen
 	tag         *TextView
 	columns     []*Column
+	columnNodes []DrawNode
 	active      *Window
-	width       int
-	height      int
 	dragView    View
 	dragWin     *Window
 	dragCol     *Column
@@ -152,23 +151,23 @@ func (e *Editor) Init(numCols int, args []string) {
 
 	e.screen = s
 	e.screen.EnableMouse()
-	e.width, e.height = e.screen.Size()
+	e.w, e.h = e.screen.Size()
 
 	tagStyle := tcell.StyleDefault.Background(e.theme.GlobalTagBG).Foreground(e.theme.GlobalTagFG)
-	e.tag = NewTextView(" NewCol Help Exit ", 0, 0, e.width, 1, tagStyle, true, false)
+	e.tag = NewTextView(" NewCol Help Exit ", 0, 0, e.w, 1, tagStyle, true, false)
 	e.tag.theme = &e.theme
 	e.focusedView = e.tag
 
 	if numCols < 1 {
 		numCols = 1
 	}
-	colWidth := e.width / numCols
+	colWidth := e.w / numCols
 	for i := 0; i < numCols; i++ {
 		w := colWidth
 		if i == numCols-1 {
-			w = e.width - (i * colWidth)
+			w = e.w - (i * colWidth)
 		}
-		col := NewColumn(i*colWidth, 1, w, e.height-1, e, e.Execute)
+		col := NewColumn(i*colWidth, 1, w, e.h-1, e, e.Execute)
 		col.explicitWidth = w
 		e.columns = append(e.columns, col)
 	}
@@ -364,7 +363,7 @@ func (e *Editor) HandleEvent(ev tcell.Event) (bool, bool) {
 			}
 		}
 	case *tcell.EventResize:
-		e.width, e.height = e.screen.Size()
+		e.w, e.h = e.screen.Size()
 		e.resize()
 		e.screen.Sync()
 		return false, true
@@ -513,19 +512,24 @@ func (e *Editor) resize() {
 	if len(e.columns) == 0 {
 		return
 	}
-	e.tag.Resize(0, 0, e.width, 1)
+	e.tag.Resize(0, 0, e.w, 1)
 
-	nodes := make([]DrawNode, len(e.columns))
+	if cap(e.columnNodes) < len(e.columns) {
+		e.columnNodes = make([]DrawNode, len(e.columns))
+	}
+	nodes := e.columnNodes[:len(e.columns)]
 	for i, col := range e.columns {
 		nodes[i] = col
 	}
-	sizes := distribute(nodes, e.width, e.lastSize)
-	e.lastSize = e.width
+	sizes := distribute(nodes, e.w, e.lastSize)
+	e.lastSize = e.w
 
 	x := 0
 	for i, col := range e.columns {
-		col.explicitWidth = sizes[i]
-		col.Resize(x, 1, sizes[i], e.height-1)
+		if col.explicitWidth > 0 {
+			col.explicitWidth = sizes[i]
+		}
+		col.Resize(x, 1, sizes[i], e.h-1)
 		x += sizes[i]
 	}
 }

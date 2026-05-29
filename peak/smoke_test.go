@@ -66,7 +66,7 @@ func setupTest(t *testing.T, w, h int) (*Editor, tcell.SimulationScreen) {
 	}
 	appEditor = e
 	e.ninep = NewNineP(e)
-	e.width, e.height = s.Size()
+	e.w, e.h = s.Size()
 
 	go func() {
 		for fn := range e.CmdChan {
@@ -92,7 +92,7 @@ func setupTest(t *testing.T, w, h int) (*Editor, tcell.SimulationScreen) {
 	}()
 
 	tagStyle := tcell.StyleDefault.Background(e.theme.GlobalTagBG).Foreground(e.theme.GlobalTagFG)
-	e.tag = NewTextView(" NewCol Help Exit ", 0, 0, e.width, 1, tagStyle, true, false)
+	e.tag = NewTextView(" NewCol Help Exit ", 0, 0, e.w, 1, tagStyle, true, false)
 	e.tag.theme = &e.theme
 	return e, s
 }
@@ -173,11 +173,11 @@ func TestNewColClick(t *testing.T) {
 	e, s := setupTest(t, 100, 24)
 
 	// Initialize with 2 columns as in main.go
-	leftWidth := e.width / 2
-	colLeft := NewColumn(0, 1, leftWidth, e.height-1, e, e.Execute)
+	leftWidth := e.w / 2
+	colLeft := NewColumn(0, 1, leftWidth, e.h-1, e, e.Execute)
 	e.columns = append(e.columns, colLeft)
 
-	colRight := NewColumn(leftWidth, 1, e.width-leftWidth, e.height-1, e, e.Execute)
+	colRight := NewColumn(leftWidth, 1, e.w-leftWidth, e.h-1, e, e.Execute)
 	e.columns = append(e.columns, colRight)
 
 	e.Resize()
@@ -219,7 +219,7 @@ func TestNewColClick(t *testing.T) {
 func TestHelpClick(t *testing.T) {
 	e, s := setupTest(t, 100, 24)
 
-	col := NewColumn(0, 1, e.width, e.height-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
 	e.columns = append(e.columns, col)
 
 	e.Resize()
@@ -256,9 +256,9 @@ func TestDelColClick(t *testing.T) {
 	e, s := setupTest(t, 120, 24)
 
 	// Start with 3 columns
-	colWidth := e.width / 3
+	colWidth := e.w / 3
 	for i := 0; i < 3; i++ {
-		col := NewColumn(i*colWidth, 1, colWidth, e.height-1, e, e.Execute)
+		col := NewColumn(i*colWidth, 1, colWidth, e.h-1, e, e.Execute)
 		e.columns = append(e.columns, col)
 	}
 
@@ -296,7 +296,7 @@ func TestDelColClick(t *testing.T) {
 func TestZeroxClick(t *testing.T) {
 	e, s := setupTest(t, 100, 24)
 
-	col := NewColumn(0, 1, e.width, e.height-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
 	e.columns = append(e.columns, col)
 
 	win := col.AddWindow(" test.txt Zerox ", "Hello Zerox")
@@ -333,7 +333,7 @@ func TestZeroxClick(t *testing.T) {
 func TestGetDirClick(t *testing.T) {
 	e, s := setupTest(t, 100, 100)
 
-	col := NewColumn(0, 1, e.width, e.height-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
 	e.columns = append(e.columns, col)
 
 	// Create window with /peak/doc as the name
@@ -429,9 +429,9 @@ func TestDragWindow(t *testing.T) {
 	e, s := setupTest(t, 120, 40)
 
 	// Create 3 columns
-	colWidth := e.width / 3
+	colWidth := e.w / 3
 	for i := 0; i < 3; i++ {
-		col := NewColumn(i*colWidth, 1, colWidth, e.height-1, e, e.Execute)
+		col := NewColumn(i*colWidth, 1, colWidth, e.h-1, e, e.Execute)
 		e.columns = append(e.columns, col)
 	}
 
@@ -513,7 +513,7 @@ func TestDragWindow(t *testing.T) {
 func TestDragWindowInternal(t *testing.T) {
 	e, s := setupTest(t, 120, 60)
 
-	col := NewColumn(0, 1, e.width, e.height-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
 	e.columns = append(e.columns, col)
 
 	w1 := col.AddWindow(" w1 ", "c1")
@@ -561,7 +561,7 @@ func TestDragWindowInternal(t *testing.T) {
 func TestSimpleEdit(t *testing.T) {
 	e, s := setupTest(t, 100, 24)
 
-	col := NewColumn(0, 1, e.width, e.height-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
 	e.columns = append(e.columns, col)
 
 	e.Resize()
@@ -673,7 +673,7 @@ func TestSimpleEdit(t *testing.T) {
 func TestExternalCommand(t *testing.T) {
 	e, s := setupTest(t, 120, 30)
 
-	col := NewColumn(0, 1, e.width, e.height-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
 	e.columns = append(e.columns, col)
 
 	e.Resize()
@@ -760,7 +760,7 @@ func TestExternalCommand(t *testing.T) {
 func TestSimplePlumb(t *testing.T) {
 	e, s := setupTest(t, 100, 30)
 
-	col := NewColumn(0, 1, e.width, e.height-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
 	e.columns = append(e.columns, col)
 
 	e.Resize()

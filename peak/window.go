@@ -540,15 +540,15 @@ type Handle struct {
 	color tcell.Color
 }
 
-func (h *Handle) Layout() {}
-func (h *Handle) ShowCursor(tcell.Screen) {}
-func (h *Handle) Draw(s tcell.Screen) {
-	style := tcell.StyleDefault.Background(h.color).Foreground(tcell.ColorBlack)
-	for i := 0; i < h.h; i++ {
-		s.SetContent(h.x, h.y+i, ' ', nil, style)
+func (hd *Handle) Layout()            {}
+func (hd *Handle) ShowCursor(tcell.Screen) {}
+func (hd *Handle) Draw(s tcell.Screen) {
+	style := tcell.StyleDefault.Background(hd.color).Foreground(tcell.ColorBlack)
+	for i := 0; i < hd.h; i++ {
+		s.SetContent(hd.x, hd.y+i, ' ', nil, style)
 	}
 }
-func (h *Handle) Resize(x, y, w, wh int) { h.SetPos(x, y, w, wh) }
+func (hd *Handle) Resize(x, y, w, h int) { hd.SetPos(x, y, w, h) }
 
 type Scrollbar struct {
 	BaseView
@@ -558,22 +558,22 @@ type Scrollbar struct {
 	visibleLines int
 }
 
-func (s *Scrollbar) Layout() {}
-func (s *Scrollbar) ShowCursor(tcell.Screen) {}
-func (s *Scrollbar) Draw(sc tcell.Screen) {
-	if s.visibleLines == 0 || s.totalLines <= s.visibleLines {
+func (sb *Scrollbar) Layout()            {}
+func (sb *Scrollbar) ShowCursor(tcell.Screen) {}
+func (sb *Scrollbar) Draw(s tcell.Screen) {
+	if sb.visibleLines == 0 || sb.totalLines <= sb.visibleLines {
 		return
 	}
-	thumbHeight := max(1, (s.visibleLines*s.visibleLines)/s.totalLines)
-	thumbStart := min(s.visibleLines-thumbHeight, (s.scrollPos*s.visibleLines)/s.totalLines)
+	thumbHeight := max(1, (sb.visibleLines*sb.visibleLines)/sb.totalLines)
+	thumbStart := min(sb.visibleLines-thumbHeight, (sb.scrollPos*sb.visibleLines)/sb.totalLines)
 	for i := 0; i < thumbHeight; i++ {
-		sc.SetContent(s.x, s.y+thumbStart+i, ' ', nil, s.thumbStyle)
+		s.SetContent(sb.x, sb.y+thumbStart+i, ' ', nil, sb.thumbStyle)
 	}
 }
-func (s *Scrollbar) Set(scroll, total, visible int) {
-	s.scrollPos, s.totalLines, s.visibleLines = scroll, total, visible
+func (sb *Scrollbar) Set(scroll, total, visible int) {
+	sb.scrollPos, sb.totalLines, sb.visibleLines = scroll, total, visible
 }
-func (s *Scrollbar) Resize(x, y, w, h int) { s.SetPos(x, y, w, h) }
+func (sb *Scrollbar) Resize(x, y, w, h int) { sb.SetPos(x, y, w, h) }
 
 type BodyView struct {
 	TreeNode

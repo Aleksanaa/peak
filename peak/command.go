@@ -276,7 +276,7 @@ func (e *Editor) getTargetColumn(col *Column, win *Window) *Column {
 	}
 
 	// create a column if none is present
-	nc := NewColumn(e.width, 1, 0, e.height-1, e, e.Execute)
+	nc := NewColumn(e.w, 1, 0, e.h-1, e, e.Execute)
 	e.columns = append(e.columns, nc)
 	e.resize()
 	return nc
@@ -436,7 +436,7 @@ func (e *Editor) cmdDelcol(col *Column, win *Window) {
 }
 
 func (e *Editor) cmdNewCol() {
-	nc := NewColumn(e.width, 1, 0, e.height-1, e, e.Execute)
+	nc := NewColumn(e.w, 1, 0, e.h-1, e, e.Execute)
 	e.columns = append(e.columns, nc)
 	e.createWindow(nc, "./untitled.txt", "", false, -1, 0)
 	e.Resize()
