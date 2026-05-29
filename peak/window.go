@@ -626,6 +626,9 @@ type Window struct {
 func (w *Window) Layout() {}
 func (w *Window) Draw(tcell.Screen) {}
 func (w *Window) ShowCursor(tcell.Screen) {}
+func (w *Window) PreferredSize() int { return w.explicitHeight }
+func (w *Window) MinSize() int       { return w.tagHeight() + 1 }
+func (w *Window) SetExplicit(v int)  { w.explicitHeight = v }
 
 func (w *Window) syncChildren() {
 	w.children = []DrawNode{w.handle, w.tag, w.bodyView}

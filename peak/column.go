@@ -33,10 +33,13 @@ type Column struct {
 	gutter        *Gutter
 	onExec        func(*Column, *Window, string) bool
 	explicitWidth int
-	lastHeight    int
 }
 
 func (c *Column) Layout() {}
+
+func (c *Column) PreferredSize() int { return c.explicitWidth }
+func (c *Column) MinSize() int       { return 5 }
+func (c *Column) SetExplicit(v int)  { c.explicitWidth = v }
 
 func (c *Column) WalkLayout() {
 	c.syncChildren()
@@ -136,20 +139,23 @@ func (c *Column) Resize(x, y, w, h int) {
 	}
 
 	availableH := h - 1
-	heights := distributeSpace(availableH, len(c.windows), func(i int) int {
-		return c.windows[i].explicitHeight
-	}, func(i int) int {
-		return c.windows[i].tagHeight() + 1
-	}, c.lastHeight, h)
-	c.lastHeight = h
+	sizes := distribute(c.windowNodes(), availableH, c.lastSize)
+	c.lastSize = availableH
 
 	yOffset := y + 1
 	for i, win := range c.windows {
-		winH := heights[i]
-		win.explicitHeight = winH
-		win.Resize(x, yOffset, w, winH)
-		yOffset += winH
+		win.explicitHeight = sizes[i]
+		win.Resize(x, yOffset, w, sizes[i])
+		yOffset += sizes[i]
 	}
+}
+
+func (c *Column) windowNodes() []DrawNode {
+	nodes := make([]DrawNode, len(c.windows))
+	for i, w := range c.windows {
+		nodes[i] = w
+	}
+	return nodes
 }
 
 func (c *Column) Contains(x, y int) bool {

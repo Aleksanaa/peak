@@ -94,7 +94,6 @@ type Editor struct {
 	scrollAmount    int
 	scrollDir       int
 	scrollStartTime time.Time
-	lastWidth       int
 	lastClickY      int
 	theme           Theme
 	nextWinID       int
@@ -516,93 +515,19 @@ func (e *Editor) resize() {
 	}
 	e.tag.Resize(0, 0, e.width, 1)
 
-	widths := distributeSpace(e.width, len(e.columns), func(i int) int {
-		return e.columns[i].explicitWidth
-	}, func(i int) int {
-		return 5
-	}, e.lastWidth, e.width)
-	e.lastWidth = e.width
-
-	xOffset := 0
+	nodes := make([]DrawNode, len(e.columns))
 	for i, col := range e.columns {
-		cw := widths[i]
-		col.explicitWidth = cw
-		col.Resize(xOffset, 1, cw, e.height-1)
-		xOffset += cw
+		nodes[i] = col
 	}
-}
+	sizes := distribute(nodes, e.width, e.lastSize)
+	e.lastSize = e.width
 
-func distributeSpace(totalSpace int, count int, getExplicit func(int) int, getMin func(int) int, lastTotal, currentTotal int) []int {
-	heights := make([]int, count)
-	totalExplicit, numAuto := 0, 0
-
-	// 1. Proportional scaling
-	scaleRatio := 1.0
-	if lastTotal > 0 && lastTotal != currentTotal {
-		scaleRatio = float64(currentTotal) / float64(lastTotal)
+	x := 0
+	for i, col := range e.columns {
+		col.explicitWidth = sizes[i]
+		col.Resize(x, 1, sizes[i], e.height-1)
+		x += sizes[i]
 	}
-
-	for i := 0; i < count; i++ {
-		exp := getExplicit(i)
-		if exp > 0 {
-			heights[i] = int(float64(exp) * scaleRatio)
-			totalExplicit += heights[i]
-		} else {
-			numAuto++
-		}
-	}
-
-	// 2. Redistribute if full
-	if numAuto > 0 && totalExplicit >= totalSpace {
-		targetTotalAuto := (totalSpace * numAuto) / (count + 1)
-		if targetTotalAuto < 5*numAuto {
-			targetTotalAuto = 5 * numAuto
-		}
-		if totalExplicit > 0 {
-			scale := float64(totalSpace-targetTotalAuto) / float64(totalExplicit)
-			totalExplicit = 0
-			for i := 0; i < count; i++ {
-				if getExplicit(i) > 0 {
-					heights[i] = int(float64(heights[i]) * scale)
-					totalExplicit += heights[i]
-				}
-			}
-		}
-	}
-
-	// 3. Final layout
-	autoSpace := 0
-	if numAuto > 0 {
-		autoSpace = (totalSpace - totalExplicit) / numAuto
-		if autoSpace < 5 {
-			autoSpace = 5
-		}
-	}
-
-	actualTotal := 0
-	for i := 0; i < count; i++ {
-		h := heights[i]
-		if h <= 0 {
-			h = autoSpace
-		}
-		min := getMin(i)
-		if h < min {
-			h = min
-		}
-		heights[i] = h
-		actualTotal += h
-	}
-
-	// Adjust last one to fit exactly
-	if count > 0 {
-		diff := totalSpace - actualTotal
-		heights[count-1] += diff
-		if heights[count-1] < getMin(count-1) {
-			heights[count-1] = getMin(count - 1)
-		}
-	}
-
-	return heights
 }
 
 func (t *Theme) colorForAttr(attr string) tcell.Color {
