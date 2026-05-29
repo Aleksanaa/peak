@@ -268,6 +268,11 @@ func (e *Editor) Run() {
 }
 
 func (e *Editor) Draw() {
+	for y := 1; y < e.h; y++ {
+		for x := 0; x < e.w; x++ {
+			e.screen.SetContent(x, y, ' ', nil, tcell.StyleDefault)
+		}
+	}
 	e.syncChildren()
 	e.WalkLayout()
 	e.WalkDraw(e.screen)
