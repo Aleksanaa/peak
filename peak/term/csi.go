@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -76,9 +77,20 @@ func (t *State) handleCSI() {
 		t.moveTo(t.cur.x, t.cur.y-c.maxarg(0, 1))
 	case 'B', 'e': // CUD, VPR - cursor <n> down
 		t.moveTo(t.cur.x, t.cur.y+c.maxarg(0, 1))
-	case 'c': // DA - device attributes
-		if c.arg(0, 0) == 0 {
-			// TODO: write vt102 id
+	case 'c': // DA1 - primary device attributes
+		if !c.priv && c.arg(0, 0) == 0 {
+			t.respond("\033[?1;2c")
+		}
+	case 'n': // DSR - device status report
+		switch c.arg(0, 0) {
+		case 5: // operating status
+			t.respond("\033[0n")
+		case 6: // cursor position report
+			if c.priv {
+				t.respond(fmt.Sprintf("\033[?%d;%dR", t.cur.y+1, t.cur.x+1))
+			} else {
+				t.respond(fmt.Sprintf("\033[%d;%dR", t.cur.y+1, t.cur.x+1))
+			}
 		}
 	case 'C', 'a': // CUF, HPR - cursor <n> forward
 		t.moveTo(t.cur.x+c.maxarg(0, 1), t.cur.y)

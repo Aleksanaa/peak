@@ -36,6 +36,7 @@ func Start(state *State, cmd *exec.Cmd) (*VT, *os.File, error) {
 	}
 	t.rc = t.pty
 	t.init()
+	t.dest.ResponseWriter = t.pty
 	return t, t.pty, nil
 }
 

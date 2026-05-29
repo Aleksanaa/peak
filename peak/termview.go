@@ -67,6 +67,7 @@ func NewTermView(editor *Editor, sess session.Session, x, y, w, h int, onClose f
 		cancel()
 		return nil, err
 	}
+	tv.state.ResponseWriter = sess
 	tv.vt = vt
 
 	// Initial resize

@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"io"
 	"log"
 	"sync"
 
@@ -82,7 +83,8 @@ type parseState func(c rune)
 // State represents the terminal emulation state. Use Lock/Unlock
 // methods to synchronize data access with VT.
 type State struct {
-	DebugLogger *log.Logger
+	DebugLogger    *log.Logger
+	ResponseWriter io.Writer
 
 	mu            sync.Mutex
 	changed       ChangeFlag
@@ -111,6 +113,12 @@ func (t *State) logf(format string, args ...interface{}) {
 func (t *State) logln(s string) {
 	if t.DebugLogger != nil {
 		t.DebugLogger.Println(s)
+	}
+}
+
+func (t *State) respond(s string) {
+	if t.ResponseWriter != nil {
+		t.ResponseWriter.Write([]byte(s))
 	}
 }
 
