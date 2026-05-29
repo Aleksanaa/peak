@@ -19,7 +19,7 @@ import (
 func setupWindowTest(t *testing.T) (*Editor, *Column, *Window, tcell.SimulationScreen) {
 	t.Helper()
 	e, s := setupTest(t, 120, 30)
-	col := NewColumn(0, 1, e.width, e.height-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
 	e.columns = append(e.columns, col)
 	win := col.AddWindow(" /tmp/test.txt Get Put Del ", "hello world\n")
 	e.ActivateWindow(win)
@@ -656,7 +656,7 @@ func subscribeGlobal(e *Editor) *eventSub {
 
 func TestLifecycleEventsNewClose(t *testing.T) {
 	e, s := setupTest(t, 120, 30)
-	col := NewColumn(0, 1, e.width, e.height-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
 	e.columns = append(e.columns, col)
 	e.Resize()
 	_ = s
@@ -692,7 +692,7 @@ func TestLifecycleEventsNewClose(t *testing.T) {
 
 func TestLifecycleEventsFocus(t *testing.T) {
 	e, s := setupTest(t, 120, 30)
-	col := NewColumn(0, 1, e.width, e.height-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
 	e.columns = append(e.columns, col)
 	e.Resize()
 	_ = s
@@ -732,7 +732,7 @@ func TestLifecycleEventsGetPut(t *testing.T) {
 	defer os.Remove(tmp.Name())
 
 	e, s := setupTest(t, 120, 30)
-	col := NewColumn(0, 1, e.width, e.height-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
 	e.columns = append(e.columns, col)
 	win := col.AddWindow(" "+tmp.Name()+" Get Put Del ", "")
 	e.ActivateWindow(win)
@@ -870,7 +870,7 @@ func TestWindowFsDirListing(t *testing.T) {
 
 func TestEventScannerIntegration(t *testing.T) {
 	e, s := setupTest(t, 120, 30)
-	col := NewColumn(0, 1, e.width, e.height-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
 	e.columns = append(e.columns, col)
 	e.Resize()
 	_ = s

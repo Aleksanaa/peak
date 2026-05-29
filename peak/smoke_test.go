@@ -66,7 +66,7 @@ func setupTest(t *testing.T, w, h int) (*Editor, tcell.SimulationScreen) {
 	}
 	appEditor = e
 	e.ninep = NewNineP(e)
-	e.width, e.height = s.Size()
+	e.w, e.h = s.Size()
 
 	go func() {
 		for fn := range e.CmdChan {
@@ -92,7 +92,7 @@ func setupTest(t *testing.T, w, h int) (*Editor, tcell.SimulationScreen) {
 	}()
 
 	tagStyle := tcell.StyleDefault.Background(e.theme.GlobalTagBG).Foreground(e.theme.GlobalTagFG)
-	e.tag = NewTextView(" NewCol Help Exit ", 0, 0, e.width, 1, tagStyle, true, false)
+	e.tag = NewTextView(" NewCol Help Exit ", 0, 0, e.w, 1, tagStyle, true, false)
 	e.tag.theme = &e.theme
 	return e, s
 }
@@ -173,11 +173,11 @@ func TestNewColClick(t *testing.T) {
 	e, s := setupTest(t, 100, 24)
 
 	// Initialize with 2 columns as in main.go
-	leftWidth := e.width / 2
-	colLeft := NewColumn(0, 1, leftWidth, e.height-1, e, e.Execute)
+	leftWidth := e.w / 2
+	colLeft := NewColumn(0, 1, leftWidth, e.h-1, e, e.Execute)
 	e.columns = append(e.columns, colLeft)
 
-	colRight := NewColumn(leftWidth, 1, e.width-leftWidth, e.height-1, e, e.Execute)
+	colRight := NewColumn(leftWidth, 1, e.w-leftWidth, e.h-1, e, e.Execute)
 	e.columns = append(e.columns, colRight)
 
 	e.Resize()
@@ -219,7 +219,7 @@ func TestNewColClick(t *testing.T) {
 func TestHelpClick(t *testing.T) {
 	e, s := setupTest(t, 100, 24)
 
-	col := NewColumn(0, 1, e.width, e.height-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
 	e.columns = append(e.columns, col)
 
 	e.Resize()
@@ -256,9 +256,9 @@ func TestDelColClick(t *testing.T) {
 	e, s := setupTest(t, 120, 24)
 
 	// Start with 3 columns
-	colWidth := e.width / 3
+	colWidth := e.w / 3
 	for i := 0; i < 3; i++ {
-		col := NewColumn(i*colWidth, 1, colWidth, e.height-1, e, e.Execute)
+		col := NewColumn(i*colWidth, 1, colWidth, e.h-1, e, e.Execute)
 		e.columns = append(e.columns, col)
 	}
 
@@ -296,7 +296,7 @@ func TestDelColClick(t *testing.T) {
 func TestZeroxClick(t *testing.T) {
 	e, s := setupTest(t, 100, 24)
 
-	col := NewColumn(0, 1, e.width, e.height-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
 	e.columns = append(e.columns, col)
 
 	win := col.AddWindow(" test.txt Zerox ", "Hello Zerox")
@@ -333,7 +333,7 @@ func TestZeroxClick(t *testing.T) {
 func TestGetDirClick(t *testing.T) {
 	e, s := setupTest(t, 100, 100)
 
-	col := NewColumn(0, 1, e.width, e.height-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
 	e.columns = append(e.columns, col)
 
 	// Create window with /peak/doc as the name
@@ -429,9 +429,9 @@ func TestDragWindow(t *testing.T) {
 	e, s := setupTest(t, 120, 40)
 
 	// Create 3 columns
-	colWidth := e.width / 3
+	colWidth := e.w / 3
 	for i := 0; i < 3; i++ {
-		col := NewColumn(i*colWidth, 1, colWidth, e.height-1, e, e.Execute)
+		col := NewColumn(i*colWidth, 1, colWidth, e.h-1, e, e.Execute)
 		e.columns = append(e.columns, col)
 	}
 
@@ -513,7 +513,7 @@ func TestDragWindow(t *testing.T) {
 func TestDragWindowInternal(t *testing.T) {
 	e, s := setupTest(t, 120, 60)
 
-	col := NewColumn(0, 1, e.width, e.height-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
 	e.columns = append(e.columns, col)
 
 	w1 := col.AddWindow(" w1 ", "c1")
@@ -561,7 +561,7 @@ func TestDragWindowInternal(t *testing.T) {
 func TestSimpleEdit(t *testing.T) {
 	e, s := setupTest(t, 100, 24)
 
-	col := NewColumn(0, 1, e.width, e.height-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
 	e.columns = append(e.columns, col)
 
 	e.Resize()
@@ -673,7 +673,7 @@ func TestSimpleEdit(t *testing.T) {
 func TestExternalCommand(t *testing.T) {
 	e, s := setupTest(t, 120, 30)
 
-	col := NewColumn(0, 1, e.width, e.height-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
 	e.columns = append(e.columns, col)
 
 	e.Resize()
@@ -760,7 +760,7 @@ func TestExternalCommand(t *testing.T) {
 func TestSimplePlumb(t *testing.T) {
 	e, s := setupTest(t, 100, 30)
 
-	col := NewColumn(0, 1, e.width, e.height-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
 	e.columns = append(e.columns, col)
 
 	e.Resize()
@@ -1078,4 +1078,138 @@ func TestTextViewWheelScrollPreservedAcrossDraws(t *testing.T) {
 	}
 
 	_ = win
+}
+
+func TestDragWindowBetweenColumns(t *testing.T) {
+	e, s := setupTest(t, 120, 40)
+
+	col0 := NewColumn(0, 1, 60, e.h-1, e, e.Execute)
+	col1 := NewColumn(60, 1, 60, e.h-1, e, e.Execute)
+	e.columns = append(e.columns, col0, col1)
+
+	w1 := col0.AddWindow(" w1 ", "left")
+	w2 := col1.AddWindow(" w2 ", "right")
+	_ = w1
+
+	e.Resize()
+	e.Draw()
+	s.Show()
+
+	// Drag w2 from col1 to col0, below w1.
+	e.HandleEvent(tcell.NewEventMouse(60, 2, tcell.Button1, 0))
+	if e.dragWin != w2 {
+		t.Fatal("failed to start dragging w2")
+	}
+	e.HandleEvent(tcell.NewEventMouse(10, 15, tcell.Button1, 0))
+	e.HandleEvent(tcell.NewEventMouse(10, 15, tcell.ButtonNone, 0))
+
+	if len(col0.windows) != 2 || len(col1.windows) != 0 {
+		t.Fatalf("after first drag: col0=%d col1=%d, want 2 and 0",
+			len(col0.windows), len(col1.windows))
+	}
+	e.Draw()
+
+	// Drag w2 back to col1.
+	w2HandleY := w2.y
+	e.HandleEvent(tcell.NewEventMouse(0, w2HandleY, tcell.Button1, 0))
+	if e.dragWin != w2 {
+		t.Fatal("failed to start dragging w2 back")
+	}
+	e.HandleEvent(tcell.NewEventMouse(70, 10, tcell.Button1, 0))
+	e.HandleEvent(tcell.NewEventMouse(70, 10, tcell.ButtonNone, 0))
+
+	if len(col0.windows) != 1 || len(col1.windows) != 1 {
+		t.Fatalf("after second drag: col0=%d col1=%d, want 1 and 1",
+			len(col0.windows), len(col1.windows))
+	}
+	e.Draw()
+
+	// w1 must fill col0: y=2, h = col0.h - col0.tag.h = (e.h-1) - 1 = e.h-2
+	expectedH := e.h - 2
+	if w1.h != expectedH {
+		t.Errorf("w1.h=%d, want %d (should fill col0)", w1.h, expectedH)
+	}
+}
+
+func TestColumnDragPreservesBackground(t *testing.T) {
+	e, s := setupTest(t, 120, 24)
+
+	col0 := NewColumn(0, 1, 60, e.h-1, e, e.Execute)
+	col1 := NewColumn(60, 1, 60, e.h-1, e, e.Execute)
+	e.columns = append(e.columns, col0, col1)
+
+	col1.AddWindow(" win ", "hello")
+
+	e.Resize()
+	e.Draw()
+	s.Show()
+
+	// Drag col1's column tag handle at (60, 1) left by 7 cells.
+	e.HandleEvent(tcell.NewEventMouse(60, 1, tcell.Button1, 0))
+	if e.dragCol != col1 {
+		t.Fatal("failed to start column drag")
+	}
+	e.HandleEvent(tcell.NewEventMouse(7, 1, tcell.Button1, 0))
+	e.HandleEvent(tcell.NewEventMouse(7, 1, tcell.ButtonNone, 0))
+
+	// Drag col1's handle back to 60.
+	e.HandleEvent(tcell.NewEventMouse(7, 1, tcell.Button1, 0))
+	if e.dragCol != col1 {
+		t.Fatalf("expected dragCol=col1 after second start, got %v", e.dragCol)
+	}
+	e.HandleEvent(tcell.NewEventMouse(60, 1, tcell.Button1, 0))
+	e.HandleEvent(tcell.NewEventMouse(60, 1, tcell.ButtonNone, 0))
+
+	e.Draw()
+
+	for y := 2; y < e.h; y++ {
+		for x := 0; x < col0.w; x++ {
+			mainc, _, _, _ := s.GetContent(x, y)
+			if mainc != ' ' {
+				t.Errorf("non-blank cell at (%d,%d) in left column after drag: mainc=%q", x, y, mainc)
+				return
+			}
+		}
+	}
+}
+
+func TestDelcolLeavesBlank(t *testing.T) {
+	e, s := setupTest(t, 100, 24)
+
+	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+	e.columns = append(e.columns, col)
+	col.AddWindow(" win ", "content")
+
+	e.Resize()
+	e.Draw()
+	s.Show()
+
+	if len(e.columns) != 1 {
+		t.Fatal("expected 1 column")
+	}
+
+	x, y, found := GetWordCoordinate(s, "Delcol", 0, 1)
+	if !found {
+		t.Fatal("could not find 'Delcol'")
+	}
+
+	ev := tcell.NewEventMouse(x, y, tcell.Button3, 0)
+	e.HandleEvent(ev)
+
+	if len(e.columns) != 0 {
+		t.Fatalf("expected 0 columns after Delcol, got %d", len(e.columns))
+	}
+
+	e.Draw()
+
+	// Everything below global tag (y >= 1) must be blank.
+	for y := 1; y < e.h; y++ {
+		for x := 0; x < e.w; x++ {
+			mainc, _, _, _ := s.GetContent(x, y)
+			if mainc != ' ' {
+				t.Errorf("non-blank cell at (%d,%d) after Delcol: mainc=%q", x, y, mainc)
+				return
+			}
+		}
+	}
 }

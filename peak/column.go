@@ -5,15 +5,68 @@ import (
 	"github.com/gdamore/tcell/v2"
 )
 
+type Gutter struct {
+	BaseView
+	theme *Theme
+}
+
+func (g *Gutter) Layout()            {}
+func (g *Gutter) ShowCursor(tcell.Screen) {}
+func (g *Gutter) Draw(s tcell.Screen) {
+	sepStyle := tcell.StyleDefault.Background(g.theme.ScrollGutter).Foreground(g.theme.HandleColumn)
+	handleStyle := tcell.StyleDefault.Background(g.theme.HandleColumn).Foreground(tcell.ColorBlack)
+	for y := g.y; y < g.y+g.h; y++ {
+		style := sepStyle
+		if y == g.y {
+			style = handleStyle
+		}
+		s.SetContent(g.x, y, ' ', nil, style)
+	}
+}
+func (g *Gutter) Resize(x, y, w, h int) { g.SetPos(x, y, w, h) }
+
 type Column struct {
+	TreeNode
 	tag           *TextView
 	windows       []*Window
 	editor        *Editor
-	x, y          int
-	w, h          int
+	gutter        *Gutter
 	onExec        func(*Column, *Window, string) bool
 	explicitWidth int
-	lastHeight    int
+	winCache      []DrawNode
+}
+
+func (c *Column) Layout() {}
+
+func (c *Column) PreferredSize() int { return c.explicitWidth }
+func (c *Column) MinSize() int       { return 5 }
+func (c *Column) SetExplicit(v int)  { c.explicitWidth = v }
+
+func (c *Column) WalkLayout() {
+	c.syncChildren()
+	c.TreeNode.WalkLayout()
+}
+
+func (c *Column) WalkDraw(s tcell.Screen) {
+	c.Draw(s)
+	c.TreeNode.WalkDraw(s)
+}
+
+func (c *Column) Draw(s tcell.Screen) {
+	for y := c.y; y < c.y+c.h; y++ {
+		for x := c.x + 1; x < c.x+c.w; x++ {
+			s.SetContent(x, y, ' ', nil, tcell.StyleDefault)
+		}
+	}
+}
+
+func (c *Column) ShowCursor(tcell.Screen) {}
+
+func (c *Column) syncChildren() {
+	c.children = []DrawNode{c.gutter, c.tag}
+	for _, w := range c.windows {
+		c.children = append(c.children, w)
+	}
 }
 
 func NewColumn(x, y, w, h int, editor *Editor, onExec func(*Column, *Window, string) bool) *Column {
@@ -21,14 +74,17 @@ func NewColumn(x, y, w, h int, editor *Editor, onExec func(*Column, *Window, str
 	tag := NewTextView(" New Zerox Win Delcol ", x+1, y, w-1, 1, tagStyle, true, false)
 	tag.theme = &editor.theme
 
+	gutter := &Gutter{
+		BaseView: BaseView{x: x, y: y, w: 1, h: h},
+		theme:    &editor.theme,
+	}
+
 	c := &Column{
-		tag:    tag,
-		editor: editor,
-		x:      x,
-		y:      y,
-		w:      w,
-		h:      h,
-		onExec: onExec,
+		TreeNode: TreeNode{BaseView: BaseView{x: x, y: y, w: w, h: h}},
+		tag:      tag,
+		editor:   editor,
+		gutter:   gutter,
+		onExec:   onExec,
 	}
 	return c
 }
@@ -75,59 +131,37 @@ func (c *Column) AddSessionTermWindow(title string, sess session.Session) (*Wind
 	return newWin, nil
 }
 
-func (c *Column) Draw(s tcell.Screen) {
-	sepStyle := tcell.StyleDefault.Background(c.editor.theme.ScrollGutter).Foreground(c.editor.theme.HandleColumn)
-	handleStyle := tcell.StyleDefault.Background(c.editor.theme.HandleColumn).Foreground(tcell.ColorBlack)
-
-	// Draw vertical separator
-	for y := c.y; y < c.y+c.h; y++ {
-		style := sepStyle
-		if y == c.y {
-			style = handleStyle
-		}
-		s.SetContent(c.x, y, ' ', nil, style)
-	}
-
-	c.tag.Draw(s)
-	for _, win := range c.windows {
-		win.Draw(s)
-	}
-
-	// Fill column body below the last window so the region is fully covered.
-	bottomY := c.y + c.tag.h
-	if len(c.windows) > 0 {
-		last := c.windows[len(c.windows)-1]
-		bottomY = max(bottomY, last.y+last.h)
-	}
-	for y := bottomY; y < c.y+c.h; y++ {
-		for x := c.x + 1; x < c.x+c.w; x++ {
-			s.SetContent(x, y, ' ', nil, tcell.StyleDefault)
-		}
-	}
-}
-
 func (c *Column) Resize(x, y, w, h int) {
-	c.x, c.y, c.w, c.h = x, y, w, h
+	c.SetPos(x, y, w, h)
+	c.gutter.Resize(x, y, 1, h)
 	c.tag.Resize(x+1, y, w-1, 1)
 	if len(c.windows) == 0 {
 		return
 	}
 
 	availableH := h - 1
-	heights := distributeSpace(availableH, len(c.windows), func(i int) int {
-		return c.windows[i].explicitHeight
-	}, func(i int) int {
-		return c.windows[i].tagHeight() + 1
-	}, c.lastHeight, h)
-	c.lastHeight = h
+	sizes := distribute(c.winNodes(), availableH, c.lastSize)
+	c.lastSize = availableH
 
 	yOffset := y + 1
 	for i, win := range c.windows {
-		winH := heights[i]
-		win.explicitHeight = winH
-		win.Resize(x, yOffset, w, winH)
-		yOffset += winH
+		if win.explicitHeight > 0 {
+			win.explicitHeight = sizes[i]
+		}
+		win.Resize(x, yOffset, w, sizes[i])
+		yOffset += sizes[i]
 	}
+}
+
+func (c *Column) winNodes() []DrawNode {
+	if cap(c.winCache) < len(c.windows) {
+		c.winCache = make([]DrawNode, len(c.windows))
+	}
+	c.winCache = c.winCache[:len(c.windows)]
+	for i, w := range c.windows {
+		c.winCache[i] = w
+	}
+	return c.winCache
 }
 
 func (c *Column) Contains(x, y int) bool {
@@ -147,10 +181,10 @@ func (c *Column) HandleEvent(ev tcell.Event) bool {
 			if mx > c.x {
 				word := c.tag.GetClickWord(mx, my)
 				if word != "" {
-					if buttons == tcell.Button3 { // Middle-click
+					if buttons == tcell.Button3 {
 						return c.onExec(c, nil, word)
 					}
-					if buttons == tcell.Button2 { // Right-click
+					if buttons == tcell.Button2 {
 						return c.editor.Plumb(nil, word)
 					}
 				}

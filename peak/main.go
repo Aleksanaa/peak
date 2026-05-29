@@ -75,15 +75,15 @@ type execReq struct {
 
 // Editor is the main application state.
 type Editor struct {
+	TreeNode
 	CmdChan     chan func()
 	redrawCh    chan struct{} // capacity-1; 9P goroutines signal after state changes
 	execCh      chan execReq  // buffered; 9P goroutines send executive ops here
 	screen      tcell.Screen
 	tag         *TextView
 	columns     []*Column
+	columnNodes []DrawNode
 	active      *Window
-	width       int
-	height      int
 	dragView    View
 	dragWin     *Window
 	dragCol     *Column
@@ -93,11 +93,17 @@ type Editor struct {
 	scrollAmount    int
 	scrollDir       int
 	scrollStartTime time.Time
-	lastWidth       int
 	lastClickY      int
 	theme           Theme
 	nextWinID       int
 	ninep           *NineP
+}
+
+func (e *Editor) syncChildren() {
+	e.children = []DrawNode{e.tag}
+	for _, c := range e.columns {
+		e.children = append(e.children, c)
+	}
 }
 
 // Redraw signals the main loop to redraw on the next iteration.
@@ -145,27 +151,28 @@ func (e *Editor) Init(numCols int, args []string) {
 
 	e.screen = s
 	e.screen.EnableMouse()
-	e.width, e.height = e.screen.Size()
+	e.w, e.h = e.screen.Size()
 
 	tagStyle := tcell.StyleDefault.Background(e.theme.GlobalTagBG).Foreground(e.theme.GlobalTagFG)
-	e.tag = NewTextView(" NewCol Help Exit ", 0, 0, e.width, 1, tagStyle, true, false)
+	e.tag = NewTextView(" NewCol Help Exit ", 0, 0, e.w, 1, tagStyle, true, false)
 	e.tag.theme = &e.theme
 	e.focusedView = e.tag
 
 	if numCols < 1 {
 		numCols = 1
 	}
-	colWidth := e.width / numCols
+	colWidth := e.w / numCols
 	for i := 0; i < numCols; i++ {
 		w := colWidth
 		if i == numCols-1 {
-			w = e.width - (i * colWidth)
+			w = e.w - (i * colWidth)
 		}
-		col := NewColumn(i*colWidth, 1, w, e.height-1, e, e.Execute)
+		col := NewColumn(i*colWidth, 1, w, e.h-1, e, e.Execute)
 		col.explicitWidth = w
 		e.columns = append(e.columns, col)
 	}
 	e.resize()
+	e.syncChildren()
 
 	if len(args) > 0 {
 		for _, arg := range args {
@@ -261,17 +268,14 @@ func (e *Editor) Run() {
 }
 
 func (e *Editor) Draw() {
-	// Phase 1: Layout — compute all geometry and scroll before any paint
-	e.tag.Layout()
-	for _, col := range e.columns {
-		col.tag.Layout()
+	for y := 1; y < e.h; y++ {
+		for x := 0; x < e.w; x++ {
+			e.screen.SetContent(x, y, ' ', nil, tcell.StyleDefault)
+		}
 	}
-
-	// Phase 2: Paint — pure rendering, no state mutation
-	e.tag.Draw(e.screen)
-	for _, col := range e.columns {
-		col.Draw(e.screen)
-	}
+	e.syncChildren()
+	e.WalkLayout()
+	e.WalkDraw(e.screen)
 	if e.focusedView != nil {
 		e.focusedView.ShowCursor(e.screen)
 	}
@@ -364,7 +368,7 @@ func (e *Editor) HandleEvent(ev tcell.Event) (bool, bool) {
 			}
 		}
 	case *tcell.EventResize:
-		e.width, e.height = e.screen.Size()
+		e.w, e.h = e.screen.Size()
 		e.resize()
 		e.screen.Sync()
 		return false, true
@@ -374,14 +378,13 @@ func (e *Editor) HandleEvent(ev tcell.Event) (bool, bool) {
 
 // windowOf returns the Window that owns view v, or nil for the global tag.
 func (e *Editor) windowOf(v View) *Window {
-	for _, col := range e.columns {
-		for _, win := range col.windows {
-			if win.body == v || win.tag == v {
-				return win
-			}
+	var found *Window
+	e.Walk(func(d DrawNode) {
+		if w, ok := d.(*Window); ok && (w.body == v || w.tag == v) {
+			found = w
 		}
-	}
-	return nil
+	})
+	return found
 }
 
 func (e *Editor) ActivateWindow(win *Window) {
@@ -514,95 +517,26 @@ func (e *Editor) resize() {
 	if len(e.columns) == 0 {
 		return
 	}
-	e.tag.Resize(0, 0, e.width, 1)
+	e.tag.Resize(0, 0, e.w, 1)
 
-	widths := distributeSpace(e.width, len(e.columns), func(i int) int {
-		return e.columns[i].explicitWidth
-	}, func(i int) int {
-		return 5
-	}, e.lastWidth, e.width)
-	e.lastWidth = e.width
-
-	xOffset := 0
+	if cap(e.columnNodes) < len(e.columns) {
+		e.columnNodes = make([]DrawNode, len(e.columns))
+	}
+	nodes := e.columnNodes[:len(e.columns)]
 	for i, col := range e.columns {
-		cw := widths[i]
-		col.explicitWidth = cw
-		col.Resize(xOffset, 1, cw, e.height-1)
-		xOffset += cw
+		nodes[i] = col
 	}
-}
+	sizes := distribute(nodes, e.w, e.lastSize)
+	e.lastSize = e.w
 
-func distributeSpace(totalSpace int, count int, getExplicit func(int) int, getMin func(int) int, lastTotal, currentTotal int) []int {
-	heights := make([]int, count)
-	totalExplicit, numAuto := 0, 0
-
-	// 1. Proportional scaling
-	scaleRatio := 1.0
-	if lastTotal > 0 && lastTotal != currentTotal {
-		scaleRatio = float64(currentTotal) / float64(lastTotal)
+	x := 0
+	for i, col := range e.columns {
+		if col.explicitWidth > 0 {
+			col.explicitWidth = sizes[i]
+		}
+		col.Resize(x, 1, sizes[i], e.h-1)
+		x += sizes[i]
 	}
-
-	for i := 0; i < count; i++ {
-		exp := getExplicit(i)
-		if exp > 0 {
-			heights[i] = int(float64(exp) * scaleRatio)
-			totalExplicit += heights[i]
-		} else {
-			numAuto++
-		}
-	}
-
-	// 2. Redistribute if full
-	if numAuto > 0 && totalExplicit >= totalSpace {
-		targetTotalAuto := (totalSpace * numAuto) / (count + 1)
-		if targetTotalAuto < 5*numAuto {
-			targetTotalAuto = 5 * numAuto
-		}
-		if totalExplicit > 0 {
-			scale := float64(totalSpace-targetTotalAuto) / float64(totalExplicit)
-			totalExplicit = 0
-			for i := 0; i < count; i++ {
-				if getExplicit(i) > 0 {
-					heights[i] = int(float64(heights[i]) * scale)
-					totalExplicit += heights[i]
-				}
-			}
-		}
-	}
-
-	// 3. Final layout
-	autoSpace := 0
-	if numAuto > 0 {
-		autoSpace = (totalSpace - totalExplicit) / numAuto
-		if autoSpace < 5 {
-			autoSpace = 5
-		}
-	}
-
-	actualTotal := 0
-	for i := 0; i < count; i++ {
-		h := heights[i]
-		if h <= 0 {
-			h = autoSpace
-		}
-		min := getMin(i)
-		if h < min {
-			h = min
-		}
-		heights[i] = h
-		actualTotal += h
-	}
-
-	// Adjust last one to fit exactly
-	if count > 0 {
-		diff := totalSpace - actualTotal
-		heights[count-1] += diff
-		if heights[count-1] < getMin(count-1) {
-			heights[count-1] = getMin(count - 1)
-		}
-	}
-
-	return heights
 }
 
 func (t *Theme) colorForAttr(attr string) tcell.Color {
