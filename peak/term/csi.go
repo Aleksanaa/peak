@@ -13,6 +13,7 @@ type csiEscape struct {
 	args []int
 	mode byte
 	priv bool
+	gt   bool
 }
 
 func (c *csiEscape) reset() {
@@ -20,6 +21,7 @@ func (c *csiEscape) reset() {
 	c.args = c.args[:0]
 	c.mode = 0
 	c.priv = false
+	c.gt = false
 }
 
 func (c *csiEscape) put(b byte) bool {
@@ -40,6 +42,9 @@ func (c *csiEscape) parse() {
 	c.args = c.args[:0]
 	if s[0] == '?' {
 		c.priv = true
+		s = s[1:]
+	} else if s[0] == '>' {
+		c.gt = true
 		s = s[1:]
 	}
 	s = s[:len(s)-1]
@@ -183,8 +188,12 @@ func (t *State) handleCSI() {
 		}
 	case 's': // DECSC - save cursor position (ANSI.SYS)
 		t.saveCursor()
-	case 'u': // DECRC - restore cursor position (ANSI.SYS)
-		t.restoreCursor()
+	case 'u':
+		if c.priv || c.gt { // CSI ? u / CSI > u - kitty keyboard protocol query
+			t.respond("\033[?0u")
+		} else {
+			t.restoreCursor() // DECRC - restore cursor position (ANSI.SYS)
+		}
 	}
 	return
 unknown: // TODO: get rid of this goto

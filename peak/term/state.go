@@ -85,6 +85,8 @@ type parseState func(c rune)
 type State struct {
 	DebugLogger    *log.Logger
 	ResponseWriter io.Writer
+	FGColor        Color // actual RGB for DefaultFG (used for OSC 10 queries)
+	BGColor        Color // actual RGB for DefaultBG (used for OSC 11 queries)
 
 	mu            sync.Mutex
 	changed       ChangeFlag
@@ -120,6 +122,20 @@ func (t *State) respond(s string) {
 	if t.ResponseWriter != nil {
 		t.ResponseWriter.Write([]byte(s))
 	}
+}
+
+func (t *State) oscFGColor() (r, g, b uint8) {
+	if t.FGColor.IsRGB() {
+		return t.FGColor.RGBComponents()
+	}
+	return 0xcc, 0xcc, 0xcc
+}
+
+func (t *State) oscBGColor() (r, g, b uint8) {
+	if t.BGColor.IsRGB() {
+		return t.BGColor.RGBComponents()
+	}
+	return 0x00, 0x00, 0x00
 }
 
 func (t *State) lock() {

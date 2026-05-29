@@ -68,6 +68,12 @@ func NewTermView(editor *Editor, sess session.Session, x, y, w, h int, onClose f
 		return nil, err
 	}
 	tv.state.ResponseWriter = sess
+	if h := editor.theme.BodyFG.Hex(); h >= 0 {
+		tv.state.FGColor = terminal.RGB(uint8(h>>16), uint8(h>>8), uint8(h))
+	}
+	if h := editor.theme.BodyBG.Hex(); h >= 0 {
+		tv.state.BGColor = terminal.RGB(uint8(h>>16), uint8(h>>8), uint8(h))
+	}
 	tv.vt = vt
 
 	// Initial resize

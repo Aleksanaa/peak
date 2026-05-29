@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -65,17 +66,31 @@ func (t *State) handleSTR() {
 			if title != "" {
 				t.setTitle(title)
 			}
-		case 4: // color set
+		case 4: // palette color query/set
 			if len(s.args) < 3 {
 				break
 			}
-			// setcolorname(s.arg(1, 0), s.argString(2, ""))
+			if s.argString(2, "") == "?" {
+				idx := s.arg(1, -1)
+				if idx >= 0 && idx < 16 {
+					c := ansiPalette[idx]
+					t.respond(fmt.Sprintf("\033]4;%d;rgb:%02x%02x/%02x%02x/%02x%02x\007",
+						idx, c[0], c[0], c[1], c[1], c[2], c[2]))
+				}
+			}
+		case 10: // foreground color query
+			if s.argString(1, "") == "?" {
+				r, g, b := t.oscFGColor()
+				t.respond(fmt.Sprintf("\033]10;rgb:%02x%02x/%02x%02x/%02x%02x\007", r, r, g, g, b, b))
+			}
+		case 11: // background color query
+			if s.argString(1, "") == "?" {
+				r, g, b := t.oscBGColor()
+				t.respond(fmt.Sprintf("\033]11;rgb:%02x%02x/%02x%02x/%02x%02x\007", r, r, g, g, b, b))
+			}
 		case 104: // color reset
-			// TODO: complain about invalid color, redraw, etc.
-			// setcolorname(s.arg(1, 0), nil)
 		default:
 			t.logf("unknown OSC command %d\n", d)
-			// TODO: s.dump()
 		}
 	case 'k': // old title set compatibility
 		title := s.argString(0, "")
