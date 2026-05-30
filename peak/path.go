@@ -216,47 +216,57 @@ func readFileOrDir(path string) (string, bool, error) {
 		if err != nil && err != io.EOF {
 			return "", false, err
 		}
-		checkLen := n
-		if checkLen > 512 {
-			checkLen = 512
-		}
-		for i := 0; i < checkLen; i++ {
-			if data[i] == 0 {
-				return "", false, fmt.Errorf("binary file")
+		if int64(n) < int64(len(data)) || err == io.EOF {
+			if err := isBinary(data[:n]); err != nil {
+				return "", false, err
 			}
+			return string(data[:n]), false, nil
 		}
-		return string(data[:n]), false, nil
+		if err := isBinary(data); err != nil {
+			return "", false, err
+		}
+		content, err := readFileTail(f, data, int64(len(data)))
+		return content, false, err
 	}
+	content, err := readFileTail(f, nil, 0)
+	return content, false, err
+}
 
-	// Unknown size: accumulate with ReadAt, check first 512 bytes for binary.
-	var chunks []byte
+func isBinary(data []byte) error {
+	checkLen := len(data)
+	if checkLen > 512 {
+		checkLen = 512
+	}
+	for i := 0; i < checkLen; i++ {
+		if data[i] == 0 {
+			return fmt.Errorf("binary file")
+		}
+	}
+	return nil
+}
+
+func readFileTail(f afero.File, prefix []byte, off int64) (string, error) {
+	chunks := prefix
 	buf := make([]byte, 4096)
-	var off int64
 	for {
 		n, err := f.ReadAt(buf, off)
 		if n > 0 {
 			if len(chunks) == 0 {
-				checkLen := n
-				if checkLen > 512 {
-					checkLen = 512
-				}
-				for i := 0; i < checkLen; i++ {
-					if buf[i] == 0 {
-						return "", false, fmt.Errorf("binary file")
-					}
+				if err := isBinary(buf[:n]); err != nil {
+					return "", err
 				}
 			}
 			chunks = append(chunks, buf[:n]...)
 			off += int64(n)
 		}
-		if err == io.EOF {
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
 			break
 		}
 		if err != nil {
-			return "", false, err
+			return "", err
 		}
 	}
-	return string(chunks), false, nil
+	return string(chunks), nil
 }
 
 // listDir returns a formatted string listing the contents of a directory.

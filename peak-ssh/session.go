@@ -363,6 +363,21 @@ func (fs *hostFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File,
 	return nil, os.ErrNotExist
 }
 
+func (fs *hostFs) OpenWithStat(name string, fi os.FileInfo, flag int, perm os.FileMode) (afero.File, error) {
+	p := parsePath(name)
+	switch p.kind {
+	case kindFsRoot:
+		f, err := fs.sftp.OpenWithStat("/"+p.host+"/", fi, flag, perm)
+		if err != nil {
+			return nil, err
+		}
+		return &namedDir{File: f, name: "fs"}, nil
+	case kindFsFile:
+		return fs.sftp.OpenWithStat("/"+p.host+p.fsRel, fi, flag, perm)
+	}
+	return fs.OpenFile(name, flag, perm)
+}
+
 func (fs *hostFs) rootDir() afero.File {
 	seen := make(map[string]bool)
 	entries := []os.FileInfo{
