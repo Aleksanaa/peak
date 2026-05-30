@@ -6,7 +6,7 @@ TagBG	0xefebd4
 TagFG	0x5c6a72
 BodyBG	0xfdf6e3
 BodyFG	0x5c6a72
-Handle	0x3a94c5
+Handle	0xdfa000
 ScrollThumb	0xa6b0a0
 ScrollGutter	0xf4f0d9
 HandleDirty	0xf85552
