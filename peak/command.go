@@ -469,7 +469,8 @@ func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {
 	if e.ninep != nil && win != nil {
 		winPath := win.GetFilename()
 		if mountPath, mountFs := e.ninep.FindMount(winPath); mountPath != "" {
-			relPath, _ := filepath.Rel(mountPath, getPathDir(winPath))
+			dir := getPathDir(winPath)
+			relPath, _ := filepath.Rel(mountPath, dir)
 			relPath += "/"
 			newF, err := mountFs.OpenFile("new", os.O_RDWR, 0)
 			if err != nil {
@@ -488,7 +489,7 @@ func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {
 				n, _ := newF.ReadAt(buf, 0)
 				sessRel := strings.TrimSpace(string(buf[:n]))
 				if sessRel != "" {
-					e.openRemoteTermWindow(targetCol, win, mountPath, sessRel)
+					e.openRemoteTermWindow(targetCol, win, mountPath, sessRel, dir)
 				}
 			}()
 			return
@@ -510,7 +511,7 @@ func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {
 	targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
 }
 
-func (e *Editor) openRemoteTermWindow(targetCol *Column, win *Window, mountPath, sessRel string) {
+func (e *Editor) openRemoteTermWindow(targetCol *Column, win *Window, mountPath, sessRel, dir string) {
 	vfsRoot := getVFS()
 	ioPath := filepath.Join(mountPath, sessRel, "io")
 	ctlPath := filepath.Join(mountPath, sessRel, "ctl")
@@ -541,7 +542,7 @@ func (e *Editor) openRemoteTermWindow(targetCol *Column, win *Window, mountPath,
 	}
 
 	sess := session.NewRemote(ioRead, ioWrite, ctlF)
-	title := filepath.Base(mountPath) + ":" + sessRel
+	title := join(dir, "+Errors")
 
 	reply := make(chan error, 1)
 	e.screen.PostEvent(tcell.NewEventInterrupt(func() {

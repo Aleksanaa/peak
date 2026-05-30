@@ -311,7 +311,7 @@ func (fs *hostFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File,
 			return nil, err
 		}
 		if fs.peakFs != nil {
-			go fs.bridgePeakWindow(sh, p.host)
+			go fs.bridgePeakWindow(sh, p.host+"/+Errors")
 		}
 		return &ioFile{session: sh}, nil
 	case kindFsRoot:
