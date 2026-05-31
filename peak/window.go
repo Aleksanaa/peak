@@ -315,6 +315,32 @@ func (tv *TextView) prepareTyping() bool {
 	return false
 }
 
+func (tv *TextView) selectionEdgeScrollDir(my int) int {
+	if !tv.scrollable || tv.h <= 0 {
+		return 0
+	}
+	if my <= tv.y {
+		return -1
+	}
+	if my >= tv.y+tv.h-1 {
+		return 1
+	}
+	return 0
+}
+
+func (tv *TextView) extendSelectionForEdgeScroll(dir int) {
+	if !tv.drag || !tv.buffer.selection.Active || len(tv.layout) == 0 || tv.h <= 0 {
+		return
+	}
+	visibleRow := 0
+	if dir > 0 {
+		visibleRow = min(tv.h-1, len(tv.layout)-tv.scroll.Pos-1)
+	}
+	bx, by := tv.visualToBuffer(0, tv.scroll.Pos+visibleRow)
+	tv.buffer.cursor = Cursor{bx, by}
+	tv.buffer.selection.End = tv.buffer.cursor
+}
+
 func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 	switch ev := ev.(type) {
 	case *tcell.EventKey:
@@ -552,7 +578,7 @@ func (hd *Handle) Resize(x, y, w, h int) { hd.SetPos(x, y, w, h) }
 
 type Scrollbar struct {
 	BaseView
-	thumbStyle func() tcell.Style
+	thumbStyle   func() tcell.Style
 	scrollPos    int
 	totalLines   int
 	visibleLines int
@@ -992,6 +1018,9 @@ func (win *Window) HandleEvent(ev tcell.Event) bool {
 
 	win.lk.Lock()
 	target.HandleEvent(ev)
+	if tv, ok := target.(*TextView); ok {
+		win.editor.updateSelectionScroll(win, tv, my, me.Buttons())
+	}
 	btns := me.Buttons()
 	var word string
 	var q0, q1 int

@@ -386,6 +386,9 @@ func (e *Editor) cmdDelete(win *Window) {
 
 func (e *Editor) RemoveWindow(target *Window) {
 	e.ninep.UmountWindow(target)
+	if e.scrollWin == target {
+		e.scrollWin = nil
+	}
 	col := target.parent
 	for i, w := range col.windows {
 		if w == target {

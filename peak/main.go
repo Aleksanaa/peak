@@ -234,8 +234,7 @@ func (e *Editor) Run() {
 			}
 			e.Draw()
 		case <-tick:
-			if e.scrollWin != nil && time.Since(e.scrollStartTime) > 200*time.Millisecond {
-				e.scrollWin.body.Scroll(e.scrollDir * e.scrollAmount)
+			if e.tickRepeatingScroll() {
 				e.Draw()
 			}
 		}
@@ -314,6 +313,9 @@ func (e *Editor) HandleEvent(ev tcell.Event) (bool, bool) {
 		}
 		if e.dragView != nil {
 			quit := e.dragView.HandleEvent(ev)
+			if tv, ok := e.dragView.(*TextView); ok {
+				e.updateSelectionScroll(e.windowOf(tv), tv, my, buttons)
+			}
 			if buttons == tcell.ButtonNone {
 				e.dragView = nil
 			}
@@ -350,16 +352,62 @@ func (e *Editor) HandleEvent(ev tcell.Event) (bool, bool) {
 	}
 	return false, true
 }
+func (e *Editor) updateSelectionScroll(win *Window, tv *TextView, my int, buttons tcell.ButtonMask) {
+	if win == nil || buttons&tcell.Button1 == 0 || !tv.drag {
+		if e.scrollWin == win {
+			e.scrollWin = nil
+		}
+		return
+	}
+	dir := tv.selectionEdgeScrollDir(my)
+	if dir == 0 {
+		if e.scrollWin == win {
+			e.scrollWin = nil
+		}
+		return
+	}
+	if e.scrollWin == nil {
+		e.scrollStartTime = time.Now()
+	}
+	e.scrollWin, e.scrollAmount, e.scrollDir = win, 1, dir
+}
+
+func (e *Editor) tickRepeatingScroll() bool {
+	if e.scrollWin == nil {
+		return false
+	}
+	tv, isTextView := e.scrollWin.body.(*TextView)
+	selectionScroll := isTextView && tv.drag
+	if !selectionScroll && time.Since(e.scrollStartTime) <= 200*time.Millisecond {
+		return false
+	}
+	before, _, _ := e.scrollWin.body.GetScroll()
+	e.scrollWin.body.Scroll(e.scrollDir * e.scrollAmount)
+	after, total, visible := e.scrollWin.body.GetScroll()
+	if selectionScroll && e.scrollDir > 0 {
+		after = min(after, max(0, total-visible))
+		tv.scroll.Pos = after
+	}
+	if after == before {
+		e.scrollWin = nil
+		return false
+	}
+	if selectionScroll {
+		tv.extendSelectionForEdgeScroll(e.scrollDir)
+	}
+	return true
+}
 
 // windowOf returns the Window that owns view v, or nil for the global tag.
 func (e *Editor) windowOf(v View) *Window {
-	var found *Window
-	e.Walk(func(d DrawNode) {
-		if w, ok := d.(*Window); ok && (w.body == v || w.tag == v) {
-			found = w
+	for _, col := range e.columns {
+		for _, win := range col.windows {
+			if win.body == v || win.tag == v {
+				return win
+			}
 		}
-	})
-	return found
+	}
+	return nil
 }
 
 func (e *Editor) ActivateWindow(win *Window) {
