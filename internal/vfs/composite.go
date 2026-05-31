@@ -111,7 +111,16 @@ func (fs *CompositeFs) MkdirAll(path string, perm os.FileMode) error {
 }
 
 func (fs *CompositeFs) Open(name string) (afero.File, error) {
-	return fs.OpenFile(name, os.O_RDONLY, 0)
+	targetFs, relPath := fs.getFs(name)
+	f, err := targetFs.Open(relPath)
+	if err != nil {
+		return nil, err
+	}
+	fi, err := f.Stat()
+	if err == nil && fi.IsDir() {
+		return &CompositeFile{File: f, fs: fs, name: name}, nil
+	}
+	return f, nil
 }
 
 func (fs *CompositeFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {

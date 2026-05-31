@@ -59,13 +59,15 @@ func setupTest(t *testing.T, w, h int) (*Editor, tcell.SimulationScreen) {
 	s.SetSize(w, h)
 	e := &Editor{
 		screen:   s,
-		theme:    defaultTheme,
 		CmdChan:  make(chan func()),
 		redrawCh: make(chan struct{}, 1),
 		execCh:   make(chan execReq, 8),
 	}
 	appEditor = e
 	e.ninep = NewNineP(e)
+	if err := e.ApplyTheme("catppuccin_mocha"); err != nil {
+		t.Fatalf("ApplyTheme: %v", err)
+	}
 	e.w, e.h = s.Size()
 
 	go func() {
@@ -93,6 +95,9 @@ func setupTest(t *testing.T, w, h int) (*Editor, tcell.SimulationScreen) {
 
 	tagStyle := tcell.StyleDefault.Background(e.theme.GlobalTagBG).Foreground(e.theme.GlobalTagFG)
 	e.tag = NewTextView(" NewCol Help Exit ", 0, 0, e.w, 1, tagStyle, true, false)
+	e.tag.style = func() tcell.Style {
+		return tcell.StyleDefault.Background(e.theme.GlobalTagBG).Foreground(e.theme.GlobalTagFG)
+	}
 	e.tag.theme = &e.theme
 	return e, s
 }

@@ -94,11 +94,49 @@ func (u *CopyOnWriteFs) Stat(name string) (os.FileInfo, error) {
 	if err != nil {
 		isNotExist := u.isNotExist(err)
 		if isNotExist {
-			return u.base.Stat(name)
+			fi, err = u.base.Stat(name)
+			if err != nil {
+				return nil, err
+			}
+			return u.withWritePerm(fi, name), nil
 		}
 		return nil, err
 	}
 	return fi, nil
+}
+
+// canWriteAt reports whether the layer fs accepts writes at dir — either
+// because dir is already present with the write bit set, or because a
+// writable ancestor exists so MkdirAll can create it on demand.
+func (u *CopyOnWriteFs) canWriteAt(dir string) bool {
+	fi, err := u.layer.Stat(dir)
+	if err == nil {
+		return fi.Mode().Perm()&0200 != 0
+	}
+	parent := filepath.Dir(dir)
+	if parent == dir {
+		return false
+	}
+	return u.canWriteAt(parent)
+}
+
+// withWritePerm wraps fi to add the write bit when the file at name only
+// exists in the base but the layer can accept a write there (either because
+// the parent directory already exists in the layer with write permission, or
+// because a writable ancestor means MkdirAll can create it).
+func (u *CopyOnWriteFs) withWritePerm(fi os.FileInfo, name string) os.FileInfo {
+	if u.canWriteAt(filepath.Dir(name)) {
+		return &copyOnWriteInfo{fi}
+	}
+	return fi
+}
+
+type copyOnWriteInfo struct {
+	os.FileInfo
+}
+
+func (i *copyOnWriteInfo) Mode() os.FileMode {
+	return i.FileInfo.Mode() | 0200
 }
 
 func (u *CopyOnWriteFs) LstatIfPossible(name string) (os.FileInfo, bool, error) {
@@ -119,7 +157,7 @@ func (u *CopyOnWriteFs) LstatIfPossible(name string) (os.FileInfo, bool, error) 
 	if ok2 {
 		fi, b, err := lbase.LstatIfPossible(name)
 		if err == nil {
-			return fi, b, nil
+			return u.withWritePerm(fi, name), b, nil
 		}
 		if !u.isNotExist(err) {
 			return nil, b, err

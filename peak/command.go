@@ -88,6 +88,8 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 		e.cmdUmount(win, cmd)
 	case "Help":
 		e.Open(win, "/peak/doc/README.md")
+	case "Theme":
+		e.cmdTheme(win, cmd)
 	default:
 		e.runExternal(col, win, cmd)
 	}
@@ -861,5 +863,107 @@ func (e *Editor) RemoveColumn(c *Column) {
 		e.ActivateWindow(first.windows[0])
 	} else {
 		e.active, e.focusedView = nil, first.tag
+	}
+}
+
+func (e *Editor) cmdTheme(win *Window, cmd string) {
+	name := e.getArg(win, cmd)
+	if name == "" {
+		e.Open(win, "/peak/theme")
+		return
+	}
+	if err := e.ApplyTheme(name); err != nil {
+		e.showError(nil, win, "", "Theme: "+err.Error())
+		return
+	}
+	e.Redraw()
+}
+
+func (e *Editor) ApplyTheme(name string) error {
+	data, err := readFile("/peak/theme/" + name)
+	if err != nil {
+		return err
+	}
+	return applyThemeFromData(&e.theme, data)
+}
+
+func applyThemeFromData(t *Theme, data []byte) error {
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := parts[0]
+		hex, err := strconv.ParseUint(parts[1], 0, 32)
+		if err != nil {
+			continue
+		}
+		setThemeField(t, key, tcell.NewHexColor(int32(hex)))
+	}
+	return nil
+}
+
+func setThemeField(t *Theme, key string, c tcell.Color) {
+	switch key {
+	case "GlobalTagBG":
+		t.GlobalTagBG = c
+	case "GlobalTagFG":
+		t.GlobalTagFG = c
+	case "ColTagBG":
+		t.ColTagBG = c
+	case "ColTagFG":
+		t.ColTagFG = c
+	case "TagBG":
+		t.TagBG = c
+	case "TagFG":
+		t.TagFG = c
+	case "BodyBG":
+		t.BodyBG = c
+	case "BodyFG":
+		t.BodyFG = c
+	case "Handle":
+		t.Handle = c
+	case "ScrollThumb":
+		t.ScrollThumb = c
+	case "ScrollGutter":
+		t.ScrollGutter = c
+	case "HandleDirty":
+		t.HandleDirty = c
+	case "HandleError":
+		t.HandleError = c
+	case "HandleWritable":
+		t.HandleWritable = c
+	case "HandleUnwritable":
+		t.HandleUnwritable = c
+	case "SelectionBG":
+		t.SelectionBG = c
+	case "SelectionFG":
+		t.SelectionFG = c
+	case "HandleColumn":
+		t.HandleColumn = c
+	case "SynKeyword":
+		t.SynKeyword = c
+	case "SynType":
+		t.SynType = c
+	case "SynComment":
+		t.SynComment = c
+	case "SynString":
+		t.SynString = c
+	case "SynNumber":
+		t.SynNumber = c
+	case "SynFunction":
+		t.SynFunction = c
+	case "SynOperator":
+		t.SynOperator = c
+	case "SynVariable":
+		t.SynVariable = c
+	case "SynConstant":
+		t.SynConstant = c
+	case "SynError":
+		t.SynError = c
 	}
 }

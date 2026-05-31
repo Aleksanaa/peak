@@ -34,39 +34,6 @@ type Theme struct {
 	SynError    tcell.Color
 }
 
-var defaultTheme = Theme{
-	GlobalTagBG:      tcell.NewHexColor(0x11111b),
-	GlobalTagFG:      tcell.NewHexColor(0xbac2de),
-	ColTagBG:         tcell.NewHexColor(0x181825),
-	ColTagFG:         tcell.NewHexColor(0xbac2de),
-	TagBG:            tcell.NewHexColor(0x1e1e2e),
-	TagFG:            tcell.NewHexColor(0xbac2de),
-	BodyBG:           tcell.NewHexColor(0x313244),
-	BodyFG:           tcell.NewHexColor(0xcdd6f4),
-	Handle:           tcell.NewHexColor(0x89dceb),
-	HandleDirty:      tcell.NewHexColor(0xf38ba8),
-	HandleError:      tcell.NewHexColor(0xfab387),
-	HandleWritable:   tcell.NewHexColor(0xa6e3a1),
-	HandleUnwritable: tcell.NewHexColor(0x89b4fa),
-	ScrollThumb:      tcell.NewHexColor(0x45475a),
-	ScrollGutter:     tcell.NewHexColor(0x181825),
-	SelectionBG:      tcell.NewHexColor(0x585b70),
-	SelectionFG:      tcell.NewHexColor(0xbac2de),
-	HandleColumn:     tcell.NewHexColor(0xb4befe),
-
-	// Catppuccin Mocha syntax palette
-	SynKeyword:  tcell.NewHexColor(0xcba6f7), // mauve
-	SynType:     tcell.NewHexColor(0x89b4fa), // blue
-	SynComment:  tcell.NewHexColor(0x6c7086), // overlay0
-	SynString:   tcell.NewHexColor(0xa6e3a1), // green
-	SynNumber:   tcell.NewHexColor(0xf9e2af), // yellow
-	SynFunction: tcell.NewHexColor(0x89dceb), // sky
-	SynOperator: tcell.NewHexColor(0x89dceb), // sky
-	SynVariable: tcell.NewHexColor(0xcdd6f4), // text (unstyled)
-	SynConstant: tcell.NewHexColor(0xfab387), // peach
-	SynError:    tcell.NewHexColor(0xf38ba8), // red
-}
-
 // execReq is a non-blocking request for the UI thread to run an executive
 // operation: execute a command, plumb a string, or append to the error window.
 type execReq struct {
@@ -140,9 +107,11 @@ func (e *Editor) Init(numCols int, args []string) {
 	e.CmdChan = make(chan func())
 	e.redrawCh = make(chan struct{}, 1)
 	e.execCh = make(chan execReq, 8)
-	e.theme = defaultTheme
 	e.nextWinID = 1
 	e.ninep = NewNineP(e)
+	if err := e.ApplyTheme("catppuccin_mocha"); err != nil {
+		log.Printf("theme: %v", err)
+	}
 	e.ninep.Listen()
 	s, err := tcell.NewScreen()
 	if err != nil {
@@ -158,6 +127,9 @@ func (e *Editor) Init(numCols int, args []string) {
 
 	tagStyle := tcell.StyleDefault.Background(e.theme.GlobalTagBG).Foreground(e.theme.GlobalTagFG)
 	e.tag = NewTextView(" NewCol Help Exit ", 0, 0, e.w, 1, tagStyle, true, false)
+	e.tag.style = func() tcell.Style {
+		return tcell.StyleDefault.Background(e.theme.GlobalTagBG).Foreground(e.theme.GlobalTagFG)
+	}
 	e.tag.theme = &e.theme
 	e.focusedView = e.tag
 

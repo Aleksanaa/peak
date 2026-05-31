@@ -40,7 +40,7 @@ type View interface {
 type TextView struct {
 	BaseView
 	buffer        *Buffer
-	style         tcell.Style
+	style         func() tcell.Style
 	drag          bool
 	singleLine    bool
 	scrollable    bool
@@ -65,7 +65,7 @@ func NewTextView(text string, x, y, w, h int, style tcell.Style, singleLine, scr
 			x: x, y: y, w: w, h: h,
 		},
 		buffer:      NewBuffer(text),
-		style:       style,
+		style:       func() tcell.Style { return style },
 		singleLine:  singleLine,
 		scrollable:  scrollable,
 		lastVersion: -1,
@@ -213,7 +213,7 @@ func (tv *TextView) Draw(s tcell.Screen) {
 	for lidx := tv.scroll.Pos; lidx < len(tv.layout) && vrow < tv.h; lidx++ {
 		vl, vcol := tv.layout[lidx], 0
 		line := tv.buffer.lines[vl.BufferLine]
-		lineStyle := tv.style
+		lineStyle := tv.style()
 		if tv.underlineLast && lidx == len(tv.layout)-1 {
 			lineStyle = lineStyle.Underline(true)
 		}
@@ -256,7 +256,7 @@ func (tv *TextView) Draw(s tcell.Screen) {
 	}
 	for ; vrow < tv.h; vrow++ {
 		for col := 0; col < tv.w; col++ {
-			s.SetContent(tv.x+col, tv.y+vrow, ' ', nil, tv.style)
+			s.SetContent(tv.x+col, tv.y+vrow, ' ', nil, tv.style())
 		}
 	}
 }
@@ -552,7 +552,7 @@ func (hd *Handle) Resize(x, y, w, h int) { hd.SetPos(x, y, w, h) }
 
 type Scrollbar struct {
 	BaseView
-	thumbStyle   tcell.Style
+	thumbStyle func() tcell.Style
 	scrollPos    int
 	totalLines   int
 	visibleLines int
@@ -567,7 +567,7 @@ func (sb *Scrollbar) Draw(s tcell.Screen) {
 	thumbHeight := max(1, (sb.visibleLines*sb.visibleLines)/sb.totalLines)
 	thumbStart := min(sb.visibleLines-thumbHeight, (sb.scrollPos*sb.visibleLines)/sb.totalLines)
 	for i := 0; i < thumbHeight; i++ {
-		s.SetContent(sb.x, sb.y+thumbStart+i, ' ', nil, sb.thumbStyle)
+		s.SetContent(sb.x, sb.y+thumbStart+i, ' ', nil, sb.thumbStyle())
 	}
 }
 func (sb *Scrollbar) Set(scroll, total, visible int) {
@@ -774,7 +774,7 @@ func newWindow(tag string, parent *Column, editor *Editor, x, y, w, h int, onExe
 	bodyView := &BodyView{TreeNode: TreeNode{BaseView: BaseView{x: x + 1, y: y + 1, w: w - 1, h: h - 1}}}
 	bodyView.scroll = &Scrollbar{
 		BaseView:   BaseView{x: x + 1, y: y + 1, w: 1, h: h - 1},
-		thumbStyle: tcell.StyleDefault.Background(editor.theme.ScrollThumb),
+		thumbStyle: func() tcell.Style { return tcell.StyleDefault.Background(editor.theme.ScrollThumb) },
 	}
 	win := &Window{
 		TreeNode: TreeNode{BaseView: BaseView{x: x, y: y, w: w, h: h}},
@@ -783,6 +783,9 @@ func newWindow(tag string, parent *Column, editor *Editor, x, y, w, h int, onExe
 		handle: handle, bodyView: bodyView,
 	}
 	win.tag.theme = &editor.theme
+	win.tag.style = func() tcell.Style {
+		return tcell.StyleDefault.Background(editor.theme.TagBG).Foreground(editor.theme.TagFG)
+	}
 	win.tag.buffer.onMutate = func(_, _, _ int, _ string) {
 		prev := len(win.tag.layout)
 		win.tag.UpdateLayout()
@@ -825,6 +828,9 @@ func NewWindow(tag, body string, parent *Column, editor *Editor, x, y, w, h int,
 	win := newWindow(tag, parent, editor, x, y, w, h, onExec)
 	tv := NewTextView(body, x+1, y+1, w-1, h-1, bodyStyle, false, true)
 	tv.theme = &editor.theme
+	tv.style = func() tcell.Style {
+		return tcell.StyleDefault.Background(editor.theme.BodyBG).Foreground(editor.theme.BodyFG)
+	}
 	win.body = tv
 	win.bodyView.content = tv
 	tv.buffer.onMutate = func(q0, q1Old, q1New int, text string) {

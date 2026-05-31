@@ -72,6 +72,9 @@ func (c *Column) syncChildren() {
 func NewColumn(x, y, w, h int, editor *Editor, onExec func(*Column, *Window, string) bool) *Column {
 	tagStyle := tcell.StyleDefault.Background(editor.theme.ColTagBG).Foreground(editor.theme.ColTagFG)
 	tag := NewTextView(" New Zerox Win Delcol ", x+1, y, w-1, 1, tagStyle, true, false)
+	tag.style = func() tcell.Style {
+		return tcell.StyleDefault.Background(editor.theme.ColTagBG).Foreground(editor.theme.ColTagFG)
+	}
 	tag.theme = &editor.theme
 
 	gutter := &Gutter{

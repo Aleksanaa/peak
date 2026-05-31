@@ -18,6 +18,9 @@ import (
 //go:embed doc
 var docFS embed.FS
 
+//go:embed theme
+var themeFS embed.FS
+
 type mountEntry struct {
 	src, dst string
 }
@@ -45,6 +48,12 @@ func NewNineP(e *Editor) *NineP {
 
 	docFs := afero.FromIOFS{FS: docFS}
 	p.vfs.Mount("/peak/doc", afero.NewBasePathFs(docFs, "doc"))
+
+	themeLayer := afero.NewMemMapFs()
+	themeLayer.Mkdir("/", 0755)
+	themeBase := afero.NewBasePathFs(afero.FromIOFS{FS: themeFS}, "theme")
+	p.vfs.Mount("/peak/theme", afero.NewCopyOnWriteFs(themeBase, themeLayer))
+
 	p.vfs.Mount("/peak/mirage", afero.NewMemMapFs())
 
 	return p
