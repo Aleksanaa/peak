@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/aleksana/peak/internal/coords"
 	"github.com/aleksana/peak/internal/vfs/afero"
 	"github.com/aleksana/peak/internal/wevent"
 	enry "github.com/go-enry/go-enry/v2"
@@ -251,7 +252,7 @@ func buildColorSpanText(body []byte, ranges []gotreesitter.HighlightRange) strin
 		return ""
 	}
 
-	byteToRune := buildByteToRune(body)
+	byteToRune := coords.BuildByteToRune(body)
 
 	var sb strings.Builder
 	for _, r := range ranges {

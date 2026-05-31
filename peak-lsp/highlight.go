@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 
+	"github.com/aleksana/peak/internal/coords"
 	"github.com/aleksana/peak/internal/wevent"
 	"github.com/odvcencio/gotreesitter"
 )
@@ -98,8 +99,8 @@ func applyContentEdit(body []byte, ev wevent.Event) (contentEdit, bool) {
 		if ev.Text == "" {
 			return contentEdit{body: append([]byte(nil), body...), changed: false}, true
 		}
-		startByte, ok := runeToByteOffset(body, ev.Q0)
-		if !ok || !fitsUint32(startByte) || !fitsUint32(startByte+len(ev.Text)) {
+		startByte, ok := coords.RuneToByteOffset(body, ev.Q0)
+		if !ok || !coords.FitsUint32(startByte) || !coords.FitsUint32(startByte+len(ev.Text)) {
 			return contentEdit{}, false
 		}
 		startPoint, ok := pointAtByte(body, startByte)
@@ -124,12 +125,12 @@ func applyContentEdit(body []byte, ev wevent.Event) (contentEdit, bool) {
 		if ev.Q0 > ev.Q1 {
 			return contentEdit{}, false
 		}
-		startByte, ok := runeToByteOffset(body, ev.Q0)
-		if !ok || !fitsUint32(startByte) {
+		startByte, ok := coords.RuneToByteOffset(body, ev.Q0)
+		if !ok || !coords.FitsUint32(startByte) {
 			return contentEdit{}, false
 		}
-		oldEndByte, ok := runeToByteOffset(body, ev.Q1)
-		if !ok || !fitsUint32(oldEndByte) {
+		oldEndByte, ok := coords.RuneToByteOffset(body, ev.Q1)
+		if !ok || !coords.FitsUint32(oldEndByte) {
 			return contentEdit{}, false
 		}
 		startPoint, ok := pointAtByte(body, startByte)
