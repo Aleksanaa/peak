@@ -1264,3 +1264,153 @@ func TestDelcolNarrowNoExtraTagRow(t *testing.T) {
 		t.Errorf("row %d below window tag has TagBG background — stale extra tag row", bodyRow)
 	}
 }
+
+// --- drag-select scroll tests ---
+
+func TestDragSelectAtBottomEdgeSetsScrollWin(t *testing.T) {
+	e, s := setupTest(t, 80, 20)
+	col := NewColumn(0, 1, 80, 19, e, e.Execute)
+	e.columns = append(e.columns, col)
+
+	lines := make([]string, 30)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("L%02d", i)
+	}
+	win := col.AddWindow(" test ", strings.Join(lines, "\n"))
+	e.ActivateWindow(win)
+	e.Resize()
+	e.Draw()
+	s.Show()
+
+	bodyX, bodyY, _, bodyH := win.body.GetPos()
+
+	// Press in the middle of the body to start a drag.
+	e.HandleEvent(tcell.NewEventMouse(bodyX, bodyY+bodyH/2, tcell.Button1, 0))
+	// Move to the bottom edge.
+	e.HandleEvent(tcell.NewEventMouse(bodyX, bodyY+bodyH-1, tcell.Button1, 0))
+
+	if e.scrollWin != win {
+		t.Fatalf("at bottom edge: scrollWin = %v, want win", e.scrollWin)
+	}
+	if e.scrollDir != 1 {
+		t.Errorf("at bottom edge: scrollDir = %d, want 1", e.scrollDir)
+	}
+
+	// Move back into the middle — scrollWin must be cleared.
+	e.HandleEvent(tcell.NewEventMouse(bodyX, bodyY+bodyH/2, tcell.Button1, 0))
+	if e.scrollWin != nil {
+		t.Errorf("after moving to middle: scrollWin should be nil")
+	}
+
+	_ = s
+}
+
+func TestDragSelectTickExtendsSelection(t *testing.T) {
+	e, s := setupTest(t, 80, 20)
+	col := NewColumn(0, 1, 80, 19, e, e.Execute)
+	e.columns = append(e.columns, col)
+
+	lines := make([]string, 30)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("L%02d", i)
+	}
+	win := col.AddWindow(" test ", strings.Join(lines, "\n"))
+	e.ActivateWindow(win)
+	e.Resize()
+	e.Draw()
+	s.Show()
+
+	tv := win.bodyTextView()
+	bodyX, bodyY, _, bodyH := win.body.GetPos()
+
+	// Start drag and drag to bottom edge (sets scrollWin + dir=1).
+	e.HandleEvent(tcell.NewEventMouse(bodyX, bodyY, tcell.Button1, 0))
+	e.HandleEvent(tcell.NewEventMouse(bodyX, bodyY+bodyH-1, tcell.Button1, 0))
+
+	if e.scrollWin != win {
+		t.Fatal("scrollWin not set after dragging to bottom edge")
+	}
+
+	wantScrollPos := tv.scroll.Pos + 1
+	wantEndY := tv.buffer.selection.End.y + 1
+
+	// Simulate one timer tick: scroll then advance the drag cursor.
+	win.body.Scroll(e.scrollDir * e.scrollAmount)
+	win.body.(dragCursor).AdvanceDragCursor(e.scrollDir)
+
+	if tv.scroll.Pos != wantScrollPos {
+		t.Errorf("after tick: scroll.Pos = %d, want %d", tv.scroll.Pos, wantScrollPos)
+	}
+	if tv.buffer.selection.End.y != wantEndY {
+		t.Errorf("after tick: selection.End.y = %d, want %d", tv.buffer.selection.End.y, wantEndY)
+	}
+
+	_ = s
+	_ = time.Now // keep import used
+}
+
+func TestDragSelectInTagDoesNotScrollBody(t *testing.T) {
+	e, s := setupTest(t, 80, 20)
+	col := NewColumn(0, 1, 80, 19, e, e.Execute)
+	e.columns = append(e.columns, col)
+
+	lines := make([]string, 30)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("L%02d", i)
+	}
+	win := col.AddWindow(" test Put Del ", strings.Join(lines, "\n"))
+	e.ActivateWindow(win)
+	e.Resize()
+	e.Draw()
+	s.Show()
+
+	// Click-drag across the tag (y = win.tag.y).
+	tagY := win.tag.y
+	e.HandleEvent(tcell.NewEventMouse(win.x+1, tagY, tcell.Button1, 0))
+	e.HandleEvent(tcell.NewEventMouse(win.x+5, tagY, tcell.Button1, 0))
+
+	if e.scrollWin != nil {
+		t.Error("dragging in tag must not set scrollWin")
+	}
+
+	_ = s
+}
+
+func TestDragSelectStopsAtLastLine(t *testing.T) {
+	e, s := setupTest(t, 80, 20)
+	col := NewColumn(0, 1, 80, 19, e, e.Execute)
+	e.columns = append(e.columns, col)
+
+	// 3 lines fit exactly in a small body — leave room for tag row.
+	win := col.AddWindow(" test ", "a\nb\nc")
+	e.ActivateWindow(win)
+	e.Resize()
+	e.Draw()
+	s.Show()
+
+	tv := win.bodyTextView()
+	bodyX, bodyY, _, bodyH := win.body.GetPos()
+
+	// Drag to the bottom edge to arm the scroll timer.
+	e.HandleEvent(tcell.NewEventMouse(bodyX, bodyY, tcell.Button1, 0))
+	e.HandleEvent(tcell.NewEventMouse(bodyX, bodyY+bodyH-1, tcell.Button1, 0))
+
+	scrollBefore := tv.scroll.Pos
+	endYBefore := tv.buffer.selection.End.y
+
+	// Simulate a tick: boundary guard must prevent scroll and selection extension.
+	scroll, total, visible := win.body.GetScroll()
+	if !(e.scrollDir > 0 && scroll+visible >= total) {
+		win.body.Scroll(e.scrollDir * e.scrollAmount)
+		win.body.(dragCursor).AdvanceDragCursor(e.scrollDir)
+	}
+
+	if tv.scroll.Pos != scrollBefore {
+		t.Errorf("scroll.Pos changed from %d to %d; should stay at boundary", scrollBefore, tv.scroll.Pos)
+	}
+	if tv.buffer.selection.End.y != endYBefore {
+		t.Errorf("selection.End.y changed from %d to %d; should stay at boundary", endYBefore, tv.buffer.selection.End.y)
+	}
+
+	_ = s
+}

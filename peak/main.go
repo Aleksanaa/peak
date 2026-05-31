@@ -235,10 +235,38 @@ func (e *Editor) Run() {
 			e.Draw()
 		case <-tick:
 			if e.scrollWin != nil && time.Since(e.scrollStartTime) > 200*time.Millisecond {
-				e.scrollWin.body.Scroll(e.scrollDir * e.scrollAmount)
+				scroll, total, visible := e.scrollWin.body.GetScroll()
+				if !(e.scrollDir > 0 && scroll+visible >= total) {
+					e.scrollWin.body.Scroll(e.scrollDir * e.scrollAmount)
+					if dc, ok := e.scrollWin.body.(dragCursor); ok {
+						dc.AdvanceDragCursor(e.scrollDir)
+					}
+				}
 				e.Draw()
 			}
 		}
+	}
+}
+
+// trackDragScroll sets or clears scrollWin when a drag selection reaches a
+// view edge, so the 50ms timer keeps extending the selection automatically.
+func (e *Editor) trackDragScroll(view View, my int) {
+	if e.active == nil || view != e.active.body {
+		return
+	}
+	_, vy, _, vh := view.GetPos()
+	var dir int
+	if my >= vy+vh-1 {
+		dir = 1
+	} else if my <= vy {
+		dir = -1
+	}
+	if dir != 0 {
+		e.scrollWin = e.active
+		e.scrollAmount, e.scrollDir = 1, dir
+		e.scrollStartTime = time.Time{} // zero bypasses the 200ms delay
+	} else if e.scrollWin != nil && e.scrollWin.body == view {
+		e.scrollWin = nil
 	}
 }
 
@@ -316,6 +344,8 @@ func (e *Editor) HandleEvent(ev tcell.Event) (bool, bool) {
 			quit := e.dragView.HandleEvent(ev)
 			if buttons == tcell.ButtonNone {
 				e.dragView = nil
+			} else if buttons&tcell.Button1 != 0 {
+				e.trackDragScroll(e.dragView, my)
 			}
 			return quit, true
 		}
