@@ -268,6 +268,13 @@ func (tv *TermView) Scroll(n int) {
 	tv.scroll.Scroll(n, total, visible)
 }
 
+func (tv *TermView) AdvanceDragCursor(dir int) {
+	if !tv.selecting {
+		return
+	}
+	tv.selection.End.y += dir
+}
+
 func (tv *TermView) GetScroll() (scroll, total, visible int) {
 	tv.state.Lock()
 	defer tv.state.Unlock()

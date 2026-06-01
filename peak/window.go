@@ -37,6 +37,10 @@ type View interface {
 	IsRaw() bool
 }
 
+type dragCursor interface {
+	AdvanceDragCursor(dir int)
+}
+
 type TextView struct {
 	BaseView
 	buffer        *Buffer
@@ -486,6 +490,18 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 	return false
 }
 
+func (tv *TextView) AdvanceDragCursor(dir int) {
+	if !tv.drag {
+		return
+	}
+	if dir > 0 {
+		tv.buffer.MoveDown()
+	} else {
+		tv.buffer.MoveUp()
+	}
+	tv.buffer.selection.End = tv.buffer.cursor
+}
+
 func (tv *TextView) SyncScroll() {
 	if !tv.scrollable || !tv.scroll.AutoScroll {
 		return
@@ -552,7 +568,7 @@ func (hd *Handle) Resize(x, y, w, h int) { hd.SetPos(x, y, w, h) }
 
 type Scrollbar struct {
 	BaseView
-	thumbStyle func() tcell.Style
+	thumbStyle   func() tcell.Style
 	scrollPos    int
 	totalLines   int
 	visibleLines int
