@@ -311,8 +311,8 @@ func (e *Editor) cmdGet(win *Window, cmd string) {
 			if err == nil {
 				if isDir {
 					path = toDir(path)
-					target.SetName(path)
 				}
+				target.SetName(path)
 				if tv := target.bodyTextView(); tv != nil {
 					tv.buffer.SetText(content)
 					target.isDir = isDir
