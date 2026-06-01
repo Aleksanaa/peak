@@ -1,6 +1,6 @@
 # Peak - An Acme-inspired TUI Text Editor
 
-<img width="2430" height="1512" alt="image" src="https://github.com/user-attachments/assets/5f7c71cc-ba28-4b86-ad4b-81f5733c8725" />
+<img width="2422" height="1517" alt="image" src="https://github.com/user-attachments/assets/ff8f6813-bd30-43bd-b1dd-aaba209870cc" />
 
 
 ## What
