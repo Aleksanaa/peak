@@ -174,6 +174,168 @@ func TestTextViewClickPlacesCursorOnClickedCharacter(t *testing.T) {
 	}
 }
 
+func TestTextViewSelectionEdgeScrollDirection(t *testing.T) {
+	tv := NewTextView(strings.Repeat("line\n", 20), 2, 3, 10, 5, tcell.StyleDefault, false, true)
+	tv.UpdateLayout()
+
+	tests := []struct {
+		name string
+		my   int
+		want int
+	}{
+		{"above view", 2, -1},
+		{"top edge row", 3, -1},
+		{"middle row", 5, 0},
+		{"bottom edge row", 7, 1},
+		{"below view", 8, 1},
+	}
+
+	for _, tt := range tests {
+		if got := tv.selectionEdgeScrollDir(tt.my); got != tt.want {
+			t.Fatalf("%s: selectionEdgeScrollDir(%d)=%d, want %d", tt.name, tt.my, got, tt.want)
+		}
+	}
+
+	tv.scrollable = false
+	if got := tv.selectionEdgeScrollDir(4); got != 0 {
+		t.Fatalf("non-scrollable selectionEdgeScrollDir=%d, want 0", got)
+	}
+
+	tv.scrollable = true
+	tv.h = 0
+	if got := tv.selectionEdgeScrollDir(0); got != 0 {
+		t.Fatalf("zero-height selectionEdgeScrollDir=%d, want 0", got)
+	}
+}
+
+func setupSelectionScrollWindow(t *testing.T, lineCount int) (*Editor, *Window, *TextView) {
+	t.Helper()
+	e, _ := setupTest(t, 40, 20)
+	col := NewColumn(0, 1, 40, 19, e, e.Execute)
+	e.columns = append(e.columns, col)
+
+	var lines []string
+	for i := 0; i < lineCount; i++ {
+		lines = append(lines, fmt.Sprintf("L%02d", i))
+	}
+	win := col.AddWindow(" /test ", strings.Join(lines, "\n"))
+	e.Resize()
+
+	return e, win, win.body.(*TextView)
+}
+
+func TestEditorStartsSelectionEdgeScrollOnBottomEdgeDrag(t *testing.T) {
+	e, win, tv := setupSelectionScrollWindow(t, 30)
+	startX, startY := tv.x, tv.y
+	bottomY := tv.y + tv.h - 1
+
+	e.HandleEvent(tcell.NewEventMouse(startX, startY, tcell.Button1, 0))
+	e.HandleEvent(tcell.NewEventMouse(startX, bottomY, tcell.Button1, 0))
+
+	if e.scrollWin != win {
+		t.Fatal("scrollWin not set to dragged window")
+	}
+	if e.scrollDir != 1 {
+		t.Fatalf("scrollDir=%d, want 1", e.scrollDir)
+	}
+}
+
+func TestEditorStopsSelectionEdgeScrollOnRelease(t *testing.T) {
+	e, _, tv := setupSelectionScrollWindow(t, 30)
+	e.HandleEvent(tcell.NewEventMouse(tv.x, tv.y, tcell.Button1, 0))
+	e.HandleEvent(tcell.NewEventMouse(tv.x, tv.y+tv.h-1, tcell.Button1, 0))
+	e.HandleEvent(tcell.NewEventMouse(tv.x, tv.y+tv.h-1, tcell.ButtonNone, 0))
+
+	if e.scrollWin != nil {
+		t.Fatal("scrollWin still set after release")
+	}
+}
+
+func TestEditorStartsSelectionEdgeScrollOnInitialTopEdgePress(t *testing.T) {
+	e, win, tv := setupSelectionScrollWindow(t, 30)
+	tv.Scroll(10)
+	e.HandleEvent(tcell.NewEventMouse(tv.x, tv.y, tcell.Button1, 0))
+
+	if e.scrollWin != win {
+		t.Fatal("scrollWin not set on top edge press")
+	}
+	if e.scrollDir != -1 {
+		t.Fatalf("scrollDir=%d, want -1", e.scrollDir)
+	}
+}
+
+func TestRemoveWindowClearsSelectionScroll(t *testing.T) {
+	e, win, tv := setupSelectionScrollWindow(t, 30)
+	e.HandleEvent(tcell.NewEventMouse(tv.x, tv.y, tcell.Button1, 0))
+	e.HandleEvent(tcell.NewEventMouse(tv.x, tv.y+tv.h-1, tcell.Button1, 0))
+	if e.scrollWin != win {
+		t.Fatal("scrollWin not set before RemoveWindow")
+	}
+
+	e.RemoveWindow(win)
+
+	if e.scrollWin != nil {
+		t.Fatal("scrollWin still set after RemoveWindow")
+	}
+}
+
+func TestEditorSelectionScrollTickDownExtendsSelection(t *testing.T) {
+	e, _, tv := setupSelectionScrollWindow(t, 50)
+	e.HandleEvent(tcell.NewEventMouse(tv.x, tv.y, tcell.Button1, 0))
+	e.HandleEvent(tcell.NewEventMouse(tv.x, tv.y+tv.h-1, tcell.Button1, 0))
+
+	startScroll := tv.scroll.Pos
+	e.tickRepeatingScroll()
+
+	if tv.scroll.Pos <= startScroll {
+		t.Fatalf("scroll.Pos=%d, want > %d", tv.scroll.Pos, startScroll)
+	}
+	if !tv.buffer.selection.Active {
+		t.Fatal("selection inactive after edge scroll tick")
+	}
+	if tv.buffer.selection.End.y <= tv.buffer.selection.Start.y {
+		t.Fatalf("selection end=%+v start=%+v, want end below start", tv.buffer.selection.End, tv.buffer.selection.Start)
+	}
+}
+
+func TestEditorSelectionScrollTickDownExtendsSelectionToFileEnd(t *testing.T) {
+	e, _, tv := setupSelectionScrollWindow(t, 30)
+	e.HandleEvent(tcell.NewEventMouse(tv.x, tv.y, tcell.Button1, 0))
+	e.HandleEvent(tcell.NewEventMouse(tv.x, tv.y+tv.h-1, tcell.Button1, 0))
+
+	for e.tickRepeatingScroll() {
+	}
+
+	maxScroll := max(0, len(tv.layout)-tv.h)
+	if tv.scroll.Pos != maxScroll {
+		t.Fatalf("scroll.Pos=%d, want bottom scroll %d", tv.scroll.Pos, maxScroll)
+	}
+	lastLine := len(tv.buffer.lines) - 1
+	if tv.buffer.selection.End.y != lastLine {
+		t.Fatalf("selection end=%+v, want line %d", tv.buffer.selection.End, lastLine)
+	}
+}
+
+func TestEditorSelectionScrollTickUpExtendsSelection(t *testing.T) {
+	e, _, tv := setupSelectionScrollWindow(t, 50)
+	tv.Scroll(20)
+	e.HandleEvent(tcell.NewEventMouse(tv.x, tv.y+tv.h-1, tcell.Button1, 0))
+	e.HandleEvent(tcell.NewEventMouse(tv.x, tv.y, tcell.Button1, 0))
+
+	startScroll := tv.scroll.Pos
+	e.tickRepeatingScroll()
+
+	if tv.scroll.Pos >= startScroll {
+		t.Fatalf("scroll.Pos=%d, want < %d", tv.scroll.Pos, startScroll)
+	}
+	if !tv.buffer.selection.Active {
+		t.Fatal("selection inactive after edge scroll tick")
+	}
+	if tv.buffer.selection.End.y >= tv.buffer.selection.Start.y {
+		t.Fatalf("selection end=%+v start=%+v, want end above start", tv.buffer.selection.End, tv.buffer.selection.Start)
+	}
+}
+
 func TestNewColClick(t *testing.T) {
 	e, s := setupTest(t, 100, 24)
 
