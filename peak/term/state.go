@@ -86,8 +86,9 @@ type parseState func(c rune)
 type State struct {
 	DebugLogger    *log.Logger
 	ResponseWriter io.Writer
-	FGColor        Color // actual RGB for DefaultFG (used for OSC 10 queries)
-	BGColor        Color // actual RGB for DefaultBG (used for OSC 11 queries)
+	OnCWD          func(uri string) // if non-nil, called under mu with OSC 7 URI; must not block
+	FGColor        Color            // actual RGB for DefaultFG (used for OSC 10 queries)
+	BGColor        Color            // actual RGB for DefaultBG (used for OSC 11 queries)
 
 	mu            sync.Mutex
 	changed       ChangeFlag
@@ -762,3 +763,4 @@ func (t *State) setTitle(title string) {
 	t.changed |= ChangedTitle
 	t.title = title
 }
+

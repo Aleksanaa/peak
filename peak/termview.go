@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/aleksana/peak/internal/session"
@@ -32,6 +33,9 @@ type TermView struct {
 	contentHeight int
 	buffer        *Buffer
 	bufferDirty   bool
+
+	OnCWD        func(string) // called on main goroutine with decoded absolute path; set by owner
+	onCWDStarted bool         // true once OnCWD has been called at least once
 }
 
 func (tv *TermView) IsRaw() bool {
@@ -75,6 +79,30 @@ func NewTermView(editor *Editor, sess session.Session, x, y, w, h int, onClose f
 		tv.state.BGColor = terminal.RGB(uint8(h>>16), uint8(h>>8), uint8(h))
 	}
 	tv.vt = vt
+	tv.state.OnCWD = func(uri string) {
+		var path string
+		switch {
+		case strings.HasPrefix(uri, "file://"):
+			u, err := url.Parse(uri)
+			if err != nil || u.Path == "" {
+				return
+			}
+			path = u.Path
+		case strings.HasPrefix(uri, "/"):
+			var err error
+			if path, err = url.PathUnescape(uri); err != nil {
+				return
+			}
+		default:
+			return
+		}
+		tv.editor.screen.PostEvent(tcell.NewEventInterrupt(func() {
+			if tv.OnCWD != nil {
+				tv.onCWDStarted = true
+				tv.OnCWD(path)
+			}
+		}))
+	}
 
 	// Initial resize
 	tv.Resize(x, y, w, h)
@@ -430,6 +458,9 @@ func (tv *TermView) HandleEvent(ev tcell.Event) bool {
 				return false
 			}
 		}
+		if !tv.onCWDStarted {
+			tv.OnCWD = nil
+		}
 		tv.session.Write([]byte(keyToEscSeq(e)))
 		return false
 	case *tcell.EventMouse:
@@ -582,6 +613,9 @@ func (tv *TermView) Snarf() {
 func (tv *TermView) Paste() {
 	text, _ := clipboard.ReadAll()
 	if text != "" {
+		if !tv.onCWDStarted {
+			tv.OnCWD = nil
+		}
 		tv.session.Write([]byte(text))
 	}
 }

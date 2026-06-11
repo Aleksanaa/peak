@@ -82,6 +82,25 @@ func normalizePath(path, base string) string {
 	return abs
 }
 
+// commonPathBase finds the longest common path-component suffix between tagDir
+// (which must have a trailing slash) and firstPath, returning the preceding
+// prefixes: tagBase (the local/ninep side) and remoteBase (the shell side).
+// These are used to map subsequent OSC 7 paths: strip remoteBase, prepend tagBase.
+// Returns ("", "") if tagDir is not absolute.
+func commonPathBase(tagDir, firstPath string) (tagBase, remoteBase string) {
+	if !strings.HasPrefix(tagDir, "/") {
+		return
+	}
+	ta := strings.Split(strings.TrimSuffix(tagDir, "/"), "/")
+	tb := strings.Split(firstPath, "/")
+	i, j := len(ta)-1, len(tb)-1
+	for i >= 0 && j >= 0 && ta[i] == tb[j] {
+		i--
+		j--
+	}
+	return strings.Join(ta[:i+1], "/"), strings.Join(tb[:j+1], "/")
+}
+
 // getwd returns the current working directory with a trailing slash.
 func getwd() string {
 	dir, _ := os.Getwd()

@@ -23,7 +23,7 @@ func (s *strEscape) reset() {
 
 func (s *strEscape) put(c rune) {
 	// TODO: improve allocs with an array backed slice; bench first
-	if len(s.buf) < 256 {
+	if len(s.buf) < 2048 {
 		s.buf = append(s.buf, c)
 	}
 	// Going by st, it is better to remain silent when the STR sequence is not
@@ -65,6 +65,10 @@ func (t *State) handleSTR() {
 			title := s.argString(1, "")
 			if title != "" {
 				t.setTitle(title)
+			}
+		case 7: // OSC 7 - shell CWD notification
+			if uri := s.argString(1, ""); uri != "" && t.OnCWD != nil {
+				t.OnCWD(uri)
 			}
 		case 4: // palette color query/set
 			if len(s.args) < 3 {

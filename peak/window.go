@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -825,6 +826,45 @@ func newTermWindowFromSession(tag string, sess session.Session, parent *Column, 
 	if pty, ok := sess.(*ExternalPTY); ok {
 		pty.onResize = func(rows, cols int) {
 			win.broadcastEvent('P', 'Z', rows, cols, 0, "")
+		}
+	}
+	filename := win.GetFilename()
+	suffix := ""
+	if base := filepath.Base(filename); strings.HasPrefix(base, "-") {
+		suffix = base
+	}
+	tagDir := getPathDir(filename)
+	var (
+		tagDirBase    string
+		remoteDirBase string
+		enabled       bool
+	)
+	term.OnCWD = func(path string) {
+		if !enabled {
+			tagDirBase, remoteDirBase = commonPathBase(tagDir, path)
+			enabled = true
+		}
+		var newPath string
+		if strings.HasPrefix(path+"/", remoteDirBase+"/") {
+			newPath = tagDirBase + path[len(remoteDirBase):]
+		} else {
+			newPath = tagDirBase + "/"
+		}
+		for {
+			if _, err := getVFS().Stat(newPath); err == nil {
+				break
+			}
+			if parent := filepath.Dir(newPath); parent != newPath {
+				newPath = parent
+			} else {
+				newPath = tagDirBase + "/"
+				break
+			}
+		}
+		if suffix != "" {
+			win.SetName(filepath.Join(newPath, suffix))
+		} else {
+			win.SetName(newPath + "/")
 		}
 	}
 	return win, nil
