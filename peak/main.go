@@ -63,6 +63,7 @@ type Editor struct {
 	theme           Theme
 	nextWinID       int
 	ninep           *NineP
+	chordActive     bool
 }
 
 func (e *Editor) syncChildren() {
@@ -259,7 +260,7 @@ func (e *Editor) HandleEvent(ev tcell.Event) (bool, bool) {
 		if me.Buttons() != tcell.ButtonNone {
 			_, my := me.Position()
 			e.lastClickY = my
-		} else if e.dragCol == nil && e.dragWin == nil && e.dragView == nil && e.scrollWin == nil {
+		} else if e.dragCol == nil && e.dragWin == nil && e.dragView == nil && e.scrollWin == nil && !e.chordActive {
 			// Skip redraw on mouse moves with no buttons/drag/scroll
 			return false, false
 		}
@@ -284,6 +285,10 @@ func (e *Editor) HandleEvent(ev tcell.Event) (bool, bool) {
 	case *tcell.EventMouse:
 		mx, my := ev.Position()
 		buttons := ev.Buttons()
+
+		if e.handleMouseChord(mx, my, buttons) {
+			return false, true
+		}
 
 		if buttons == tcell.ButtonNone {
 			e.scrollWin = nil

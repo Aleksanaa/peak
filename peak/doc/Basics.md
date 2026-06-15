@@ -32,13 +32,7 @@ Three mouse buttons do different things:
   - Drag to select text.
   - Drag a Handle to move or resize columns and windows.
 
-- Button 2 (Middle): Execute.
-  - Middle-clicking a word executes it as a command.
-  - Selecting text first and then middle-clicking executes the whole selection.
-  - Commands can be built-ins (Put, Get) or any shell command (ls, make, ...).
-  - You can execute text from anywhere: the tag, the body, or command output.
-
-- Button 3 (Right): Plumb.
+- Button 2 (Right): Plumb.
   - Sends the clicked text to the plumber, which decides what to do with it.
   - If the text is a file path, Peak opens it.
   - Supports line and column navigation:
@@ -48,6 +42,26 @@ Three mouse buttons do different things:
   - SSH paths with ports use host::port to avoid ambiguity with line numbers.
   - URLs (http://, https://, mailto:, magnet:) are opened in the system browser.
   - If the text is not a recognized path or URL, Peak searches for it (Look).
+
+- Button 3 (Middle): Execute.
+  - Middle-clicking a word executes it as a command.
+  - Selecting text first and then middle-clicking executes the whole selection.
+  - Commands can be built-ins (Put, Get) or any shell command (ls, make, ...).
+  - You can execute text from anywhere: the tag, the body, or command output.
+
+### Mouse Chording
+
+While holding Button 1 (Left) in a window body or window tag, pressing a
+second button triggers an editing chord:
+
+- Button 1 + Button 3 (Middle): Cut the active selection. If no non-empty
+  selection is active, nothing happens.
+- Button 1 + Button 2 (Right): Paste from the clipboard at the cursor, or
+  replace the active selection if one exists.
+
+Chords are not active in terminal windows, the global tag, column tags,
+scroll gutters, or resize handles.
+
 
 ### Scrollbar
 
