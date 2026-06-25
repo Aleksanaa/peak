@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"al.essio.dev/pkg/shellescape"
+	"github.com/aleksana/peak/internal/quote"
+	
 	"github.com/aleksana/peak/internal/vfs/afero"
 )
 
@@ -209,7 +211,7 @@ func listDir(path string) (string, error) {
 		if entry.IsDir() {
 			name += "/"
 		}
-		names[i] = name
+		names[i] = quote.Quote(name)
 	}
 	return strings.Join(names, "\n"), nil
 }

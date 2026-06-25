@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"strings"
 
+	
+	"github.com/aleksana/peak/internal/quote"
 	"github.com/aleksana/peak/internal/session"
 	"github.com/aleksana/peak/peak/term"
 	"github.com/atotto/clipboard"
@@ -358,7 +360,12 @@ func (tv *TermView) GetClickWord(mx, my int) string {
 		}
 	}
 	tv.state.Unlock()
-	return strings.TrimSpace(sb.String())
+	word := strings.TrimSpace(sb.String())
+	// Unwrap a backtick-quoted word returned by GetWordBoundaries.
+	if parts := quote.Fields(word); len(parts) == 1 {
+		word = parts[0]
+	}
+	return word
 }
 
 func (tv *TermView) GetBuffer() *Buffer {

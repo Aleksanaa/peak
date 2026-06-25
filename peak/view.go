@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"unicode"
+
+	"github.com/aleksana/peak/internal/quote"
 )
 
 // Cursor represents a 2D position.
@@ -80,9 +82,16 @@ func IsWordChar(r rune) bool {
 	return r != 0 && !unicode.IsSpace(r)
 }
 
+// GetWordBoundaries returns the [start, end) rune indices of the word at position x.
+// If x falls inside a backtick-quoted span (`...`), the span boundaries (including
+// the backtick delimiters) are returned. Otherwise, the standard non-space word
+// boundaries apply.
 func GetWordBoundaries(x int, length int, getChar func(int) rune) (int, int) {
 	if x < 0 || x >= length {
 		return x, x
+	}
+	if start, end, ok := quote.SpanAt(x, length, getChar); ok {
+		return start, end
 	}
 	start, end := x, x
 	for start > 0 && IsWordChar(getChar(start-1)) {
