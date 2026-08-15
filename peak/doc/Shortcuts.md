@@ -53,12 +53,13 @@ Handle (left edge of each window):
 - Middle (no drag)  Expand window, keeping others at minimum size.
 - Drag              Move or resize the window.
 
-Chording (while holding Button 1 in a window body or tag):
+Chording (while holding Button 1 in a body, window tag, column tag, or the
+global tag):
 
 - Button 1 + Button 3 (Middle) Cut the active selection.
 - Button 1 + Button 2 (Right)  Paste at cursor or replace selection.
 
-Chords are not active in terminal windows.
+Chords are not active in terminal windows, scroll gutters, or resize handles.
 
 
 ## 5. Terminal Windows

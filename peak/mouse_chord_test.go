@@ -3,7 +3,6 @@ package main
 import (
 	"testing"
 
-	"github.com/atotto/clipboard"
 	"github.com/gdamore/tcell/v3"
 )
 
@@ -36,8 +35,8 @@ func TestMouseChordPrimaryMiddleCutsSelectedBodyText(t *testing.T) {
 	if !e.handleMouseChord(tv.x, tv.y, tcell.ButtonPrimary|tcell.ButtonMiddle) {
 		t.Fatal("primary+middle chord was not consumed")
 	}
-	if !e.chordActive {
-		t.Fatal("chord should be marked active after firing")
+	if !e.mouseChord.fired {
+		t.Fatal("chord should be marked fired after cutting")
 	}
 	if got, want := tv.buffer.GetText(), "alpha "; got != want {
 		t.Fatalf("body text after cut chord = %q, want %q", got, want)
@@ -45,9 +44,10 @@ func TestMouseChordPrimaryMiddleCutsSelectedBodyText(t *testing.T) {
 }
 
 func TestMouseChordPrimarySecondaryPastes(t *testing.T) {
-	if err := clipboard.WriteAll("XYZ"); err != nil {
-		t.Skipf("clipboard unavailable, cannot verify paste: %v", err)
-	}
+	oldRead := readClipboard
+	readClipboard = func() (string, error) { return "XYZ", nil }
+	defer func() { readClipboard = oldRead }()
+
 	e, _, tv := setupMouseChordWindow(t)
 
 	if e.handleMouseChord(tv.x, tv.y, tcell.ButtonPrimary) {
@@ -72,7 +72,7 @@ func TestMouseChordRequiresPrimaryHeld(t *testing.T) {
 			t.Fatalf("button %v alone must not be consumed by the chord handler", b)
 		}
 	}
-	if e.chordActive {
+	if e.mouseChord.armed || e.mouseChord.fired {
 		t.Fatal("chord must not arm without the primary button held")
 	}
 }
@@ -99,21 +99,87 @@ func TestMouseChordFiresOncePerGesture(t *testing.T) {
 	if e.handleMouseChord(tv.x, tv.y, tcell.ButtonNone) {
 		t.Fatal("release should not be consumed")
 	}
-	if e.chordActive {
+	if e.mouseChord.armed || e.mouseChord.fired {
 		t.Fatal("release should reset chord state")
 	}
 }
 
-func TestFindChordTargetRejectsDocumentedNonChordAreas(t *testing.T) {
+func TestMouseChordUsesInitialTargetAfterPointerMoves(t *testing.T) {
+	e, _, tv := setupMouseChordWindow(t)
+	tv.buffer.SetSelection(Cursor{6, 0}, Cursor{10, 0})
+
+	if e.handleMouseChord(tv.x, tv.y, tcell.ButtonPrimary) {
+		t.Fatal("primary press should arm without being consumed")
+	}
+	// Move before pressing the second button; the chord must still target the
+	// view where Button 1 was originally pressed, not the global tag.
+	e.handleMouseChord(e.tag.x, e.tag.y, tcell.ButtonPrimary)
+	if !e.handleMouseChord(e.tag.x, e.tag.y, tcell.ButtonPrimary|tcell.ButtonMiddle) {
+		t.Fatal("chord after moving pointer was not consumed")
+	}
+	if got, want := tv.buffer.GetText(), "alpha "; got != want {
+		t.Fatalf("body text after anchored cut chord = %q, want %q", got, want)
+	}
+}
+
+func TestMouseChordEndToEndExistingSelectionCuts(t *testing.T) {
+	e, _, tv := setupMouseChordWindow(t)
+	tv.buffer.SetSelection(Cursor{6, 0}, Cursor{10, 0})
+
+	e.HandleEvent(tcell.NewEventMouse(tv.x, tv.y, tcell.ButtonPrimary, 0))
+	e.HandleEvent(tcell.NewEventMouse(tv.x, tv.y, tcell.ButtonPrimary|tcell.ButtonMiddle, 0))
+
+	if got, want := tv.buffer.GetText(), "alpha "; got != want {
+		t.Fatalf("body text after end-to-end cut chord = %q, want %q", got, want)
+	}
+}
+
+func TestMouseChordEndToEndDragSelectionCuts(t *testing.T) {
+	e, _, tv := setupMouseChordWindow(t)
+
+	e.HandleEvent(tcell.NewEventMouse(tv.x, tv.y, tcell.ButtonPrimary, 0))
+	e.HandleEvent(tcell.NewEventMouse(tv.x+10, tv.y, tcell.ButtonPrimary, 0))
+	e.HandleEvent(tcell.NewEventMouse(tv.x+10, tv.y, tcell.ButtonPrimary|tcell.ButtonMiddle, 0))
+
+	if got := tv.buffer.GetText(); got != "" {
+		t.Fatalf("body text after drag-selection cut chord = %q, want empty", got)
+	}
+}
+
+func TestMouseChordGlobalTagCut(t *testing.T) {
+	e, _, _ := setupMouseChordWindow(t)
+	e.tag.buffer.SetSelection(Cursor{1, 0}, Cursor{8, 0})
+
+	e.HandleEvent(tcell.NewEventMouse(e.tag.x+1, e.tag.y, tcell.ButtonPrimary, 0))
+	e.HandleEvent(tcell.NewEventMouse(e.tag.x+1, e.tag.y, tcell.ButtonPrimary|tcell.ButtonMiddle, 0))
+
+	if got, want := e.tag.buffer.GetText(), " Help Exit "; got != want {
+		t.Fatalf("global tag text after cut chord = %q, want %q", got, want)
+	}
+}
+
+func TestMouseChordColumnTagCut(t *testing.T) {
+	e, win, _ := setupMouseChordWindow(t)
+	colTag := win.parent.tag
+	colTag.buffer.SetSelection(Cursor{1, 0}, Cursor{11, 0})
+
+	e.HandleEvent(tcell.NewEventMouse(colTag.x+1, colTag.y, tcell.ButtonPrimary, 0))
+	e.HandleEvent(tcell.NewEventMouse(colTag.x+1, colTag.y, tcell.ButtonPrimary|tcell.ButtonMiddle, 0))
+
+	if got, want := colTag.buffer.GetText(), " Win Delcol "; got != want {
+		t.Fatalf("column tag text after cut chord = %q, want %q", got, want)
+	}
+}
+
+func TestFindChordTargetRejectsNonTextAreas(t *testing.T) {
 	e, win, tv := setupMouseChordWindow(t)
 
 	tests := []struct {
 		name string
 		x, y int
 	}{
-		{name: "global tag", x: e.tag.x, y: e.tag.y},
-		{name: "column tag", x: win.parent.tag.x, y: win.parent.tag.y},
 		{name: "window handle", x: win.x, y: win.y},
+		{name: "column handle", x: win.parent.x, y: win.parent.y},
 		{name: "scroll gutter", x: win.bodyView.scroll.x, y: tv.y},
 	}
 

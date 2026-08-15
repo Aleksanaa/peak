@@ -51,16 +51,15 @@ Three mouse buttons do different things:
 
 ### Mouse Chording
 
-While holding Button 1 (Left) in a window body or window tag, pressing a
-second button triggers an editing chord:
+While holding Button 1 (Left) in a window body, window tag, column tag, or
+the global tag, pressing a second button triggers an editing chord:
 
 - Button 1 + Button 3 (Middle): Cut the active selection. If no non-empty
   selection is active, nothing happens.
 - Button 1 + Button 2 (Right): Paste from the clipboard at the cursor, or
   replace the active selection if one exists.
 
-Chords are not active in terminal windows, the global tag, column tags,
-scroll gutters, or resize handles.
+Chords are not active in terminal windows, scroll gutters, or resize handles.
 
 
 ### Scrollbar
