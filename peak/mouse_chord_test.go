@@ -26,18 +26,36 @@ func press(e *Editor, x, y int, buttons tcell.ButtonMask) {
 	e.HandleEvent(tcell.NewEventMouse(x, y, buttons, 0))
 }
 
-func TestMouseChordPrimaryMiddleCutsSelectedBodyText(t *testing.T) {
+func TestMouseChordSweepMiddleCutsBodyText(t *testing.T) {
 	e, _, tv := setupMouseChordWindow(t)
-	tv.buffer.SetSelection(Cursor{6, 0}, Cursor{10, 0})
 
-	press(e, tv.x, tv.y, tcell.ButtonPrimary)
-	press(e, tv.x, tv.y, tcell.ButtonPrimary|tcell.ButtonMiddle)
+	// Sweep-select "beta" (columns 6..10), then chord Button2 to cut it.
+	press(e, tv.x+6, tv.y, tcell.ButtonPrimary)
+	press(e, tv.x+10, tv.y, tcell.ButtonPrimary)
+	press(e, tv.x+10, tv.y, tcell.ButtonPrimary|tcell.ButtonMiddle)
 
 	if !e.gesture.chorded {
 		t.Fatal("chord should be marked fired after cutting")
 	}
 	if got, want := tv.buffer.GetText(), "alpha "; got != want {
 		t.Fatalf("body text after cut chord = %q, want %q", got, want)
+	}
+}
+
+func TestMouseChordClickOnSelectionDoesNothing(t *testing.T) {
+	e, _, tv := setupMouseChordWindow(t)
+	tv.buffer.SetSelection(Cursor{6, 0}, Cursor{10, 0})
+
+	// A plain click on a standing selection deselects it; a chord that follows
+	// finds nothing selected and must not cut.
+	press(e, tv.x+7, tv.y, tcell.ButtonPrimary)
+	press(e, tv.x+7, tv.y, tcell.ButtonPrimary|tcell.ButtonMiddle)
+
+	if got := tv.buffer.GetText(); got != "alpha beta" {
+		t.Fatalf("body text after click-then-chord = %q, want unchanged", got)
+	}
+	if tv.buffer.GetSelectedText() != "" {
+		t.Fatal("click on a selection should have deselected it")
 	}
 }
 
@@ -76,20 +94,21 @@ func TestMouseChordRequiresPrimaryHeld(t *testing.T) {
 
 func TestMouseChordFiresOncePerGesture(t *testing.T) {
 	e, _, tv := setupMouseChordWindow(t)
-	tv.buffer.SetSelection(Cursor{6, 0}, Cursor{10, 0})
 
-	press(e, tv.x, tv.y, tcell.ButtonPrimary)
-	press(e, tv.x, tv.y, tcell.ButtonPrimary|tcell.ButtonMiddle)
+	// Sweep-select "beta", then cut it with a chord.
+	press(e, tv.x+6, tv.y, tcell.ButtonPrimary)
+	press(e, tv.x+10, tv.y, tcell.ButtonPrimary)
+	press(e, tv.x+10, tv.y, tcell.ButtonPrimary|tcell.ButtonMiddle)
 	want := tv.buffer.GetText()
 
 	// Repeated combined-mask events while held must be swallowed, not re-cut.
-	press(e, tv.x, tv.y, tcell.ButtonPrimary|tcell.ButtonMiddle)
+	press(e, tv.x+10, tv.y, tcell.ButtonPrimary|tcell.ButtonMiddle)
 	if got := tv.buffer.GetText(); got != want {
 		t.Fatalf("chord fired more than once: text = %q, want %q", got, want)
 	}
 
 	// A full release resets the gesture so the next chord can fire.
-	press(e, tv.x, tv.y, tcell.ButtonNone)
+	press(e, tv.x+10, tv.y, tcell.ButtonNone)
 	if e.gesture.chorded || e.gesture.anchorTV != nil {
 		t.Fatal("release should reset chord state")
 	}
@@ -115,18 +134,6 @@ func TestMouseChordAnchorsToInitialView(t *testing.T) {
 	}
 }
 
-func TestMouseChordEndToEndExistingSelectionCuts(t *testing.T) {
-	e, _, tv := setupMouseChordWindow(t)
-	tv.buffer.SetSelection(Cursor{6, 0}, Cursor{10, 0})
-
-	press(e, tv.x, tv.y, tcell.ButtonPrimary)
-	press(e, tv.x, tv.y, tcell.ButtonPrimary|tcell.ButtonMiddle)
-
-	if got, want := tv.buffer.GetText(), "alpha "; got != want {
-		t.Fatalf("body text after end-to-end cut chord = %q, want %q", got, want)
-	}
-}
-
 func TestMouseChordEndToEndDragSelectionCuts(t *testing.T) {
 	e, _, tv := setupMouseChordWindow(t)
 
@@ -141,10 +148,11 @@ func TestMouseChordEndToEndDragSelectionCuts(t *testing.T) {
 
 func TestMouseChordGlobalTagCut(t *testing.T) {
 	e, _, _ := setupMouseChordWindow(t)
-	e.tag.buffer.SetSelection(Cursor{1, 0}, Cursor{8, 0})
 
+	// Sweep-select "NewCol " in the global tag, then chord-cut it.
 	press(e, e.tag.x+1, e.tag.y, tcell.ButtonPrimary)
-	press(e, e.tag.x+1, e.tag.y, tcell.ButtonPrimary|tcell.ButtonMiddle)
+	press(e, e.tag.x+8, e.tag.y, tcell.ButtonPrimary)
+	press(e, e.tag.x+8, e.tag.y, tcell.ButtonPrimary|tcell.ButtonMiddle)
 
 	if got, want := e.tag.buffer.GetText(), " Help Exit "; got != want {
 		t.Fatalf("global tag text after cut chord = %q, want %q", got, want)
@@ -154,10 +162,11 @@ func TestMouseChordGlobalTagCut(t *testing.T) {
 func TestMouseChordColumnTagCut(t *testing.T) {
 	e, win, _ := setupMouseChordWindow(t)
 	colTag := win.parent.tag
-	colTag.buffer.SetSelection(Cursor{1, 0}, Cursor{11, 0})
 
+	// Sweep-select "New Zerox " in the column tag, then chord-cut it.
 	press(e, colTag.x+1, colTag.y, tcell.ButtonPrimary)
-	press(e, colTag.x+1, colTag.y, tcell.ButtonPrimary|tcell.ButtonMiddle)
+	press(e, colTag.x+11, colTag.y, tcell.ButtonPrimary)
+	press(e, colTag.x+11, colTag.y, tcell.ButtonPrimary|tcell.ButtonMiddle)
 
 	if got, want := colTag.buffer.GetText(), " Win Delcol "; got != want {
 		t.Fatalf("column tag text after cut chord = %q, want %q", got, want)

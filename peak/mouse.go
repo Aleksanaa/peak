@@ -30,20 +30,13 @@ type mouseTarget struct {
 	view   View // the tag/body view for text regions; nil otherwise
 }
 
-// mouseGesture tracks the in-progress mouse gesture across events. It records
-// the previous button mask (to detect deltas) and the chord anchor captured at
-// the primary press.
+// mouseGesture tracks the in-progress mouse gesture across events: the previous
+// button mask (to detect deltas) and the view where the primary was pressed,
+// which anchors a chord even if the pointer later moves away.
 type mouseGesture struct {
-	buttons tcell.ButtonMask // buttons from the previous event
-
-	// Chord anchor, captured on the primary press over a text area.
+	buttons   tcell.ButtonMask // buttons from the previous event
 	anchorTV  *TextView
 	anchorWin *Window
-	anchorSel Selection
-	hadSel    bool
-	anchorX   int
-	anchorY   int
-	moved     bool
 	chorded   bool
 }
 
@@ -172,9 +165,6 @@ func (e *Editor) handleMouse(ev *tcell.EventMouse) bool {
 		if buttons == tcell.ButtonNone {
 			e.dragView = nil
 		} else if buttons&tcell.ButtonPrimary != 0 {
-			if mx != g.anchorX || my != g.anchorY {
-				g.moved = true
-			}
 			e.trackDragScroll(e.dragView, my)
 		}
 		return quit
@@ -188,15 +178,11 @@ func (e *Editor) handleMouse(ev *tcell.EventMouse) bool {
 func (e *Editor) dispatchPress(ev *tcell.EventMouse, mx, my int, buttons tcell.ButtonMask) bool {
 	t := e.resolveTarget(mx, my)
 
-	// Arm the chord before dispatch, which is about to clear the selection.
+	// Anchor a potential chord to the view under a primary-only press, so a
+	// later second button operates on it even if the pointer has moved.
 	if buttons&tcell.ButtonPrimary != 0 && buttons&(tcell.ButtonMiddle|tcell.ButtonSecondary) == 0 {
 		if tv, win := e.chordTargetOf(t); tv != nil {
-			g := &e.gesture
-			g.anchorTV, g.anchorWin = tv, win
-			g.anchorX, g.anchorY, g.moved = mx, my, false
-			if tv.buffer.selection.Active {
-				g.anchorSel, g.hadSel = tv.buffer.selection, true
-			}
+			e.gesture.anchorTV, e.gesture.anchorWin = tv, win
 		}
 	}
 
@@ -313,8 +299,9 @@ func (e *Editor) clickWindow(ev *tcell.EventMouse, t mouseTarget, mx, my int, bu
 }
 
 // fireChord executes an acme chord (Button1+Button2 = Cut, Button1+Button3 =
-// Paste) on the anchored view, restoring the pre-press selection for a chord on
-// a standing selection, and tears down the drag the primary press had started.
+// Paste) on the anchored view's live selection, then tears down the drag the
+// primary press had started. A plain click clears the selection on press, so a
+// chord that follows one finds nothing to cut and does nothing.
 func (e *Editor) fireChord(cut bool) {
 	g := &e.gesture
 	tv, win := g.anchorTV, g.anchorWin
@@ -323,9 +310,6 @@ func (e *Editor) fireChord(cut bool) {
 	if win != nil {
 		win.lk.Lock()
 		defer win.lk.Unlock()
-	}
-	if g.hadSel && !g.moved {
-		tv.buffer.SetSelection(g.anchorSel.Start, g.anchorSel.End)
 	}
 	if cut {
 		tv.typingStart = nil
