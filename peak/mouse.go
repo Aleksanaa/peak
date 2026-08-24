@@ -115,17 +115,20 @@ func (e *Editor) handleMouse(ev *tcell.EventMouse) bool {
 	if buttons&(tcell.WheelUp|tcell.WheelDown|tcell.WheelLeft|tcell.WheelRight) == 0 {
 		prev := g.buttons
 		g.buttons = buttons
-		if buttons == tcell.ButtonNone {
+		newMiddle := buttons&tcell.ButtonMiddle != 0 && prev&tcell.ButtonMiddle == 0
+		newSecondary := buttons&tcell.ButtonSecondary != 0 && prev&tcell.ButtonSecondary == 0
+		switch {
+		case buttons == tcell.ButtonNone:
 			*g = mouseGesture{}
-		} else if g.chorded {
-			// Swallow everything until the buttons release.
+		case g.anchorTV != nil && buttons&tcell.ButtonPrimary != 0 && (newMiddle || newSecondary):
+			// A second button joined the held primary: Button2 cuts, Button3
+			// pastes. Repeatable while primary stays down (e.g. cut then paste
+			// without releasing, and vice versa).
+			e.fireChord(newMiddle)
 			return false
-		} else if buttons&tcell.ButtonPrimary != 0 &&
-			buttons&(tcell.ButtonMiddle|tcell.ButtonSecondary) != 0 &&
-			prev&(tcell.ButtonMiddle|tcell.ButtonSecondary) == 0 &&
-			g.anchorTV != nil {
-			// A second button joined a held, armed primary: fire the chord.
-			e.fireChord(buttons&tcell.ButtonMiddle != 0)
+		case g.chorded:
+			// After a chord, swallow held-primary moves so they do not start a
+			// fresh drag; a further chord button still fires in the case above.
 			return false
 		}
 	}

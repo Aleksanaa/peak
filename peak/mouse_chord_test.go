@@ -74,6 +74,48 @@ func TestMouseChordPrimarySecondaryPastes(t *testing.T) {
 	}
 }
 
+func TestMouseChordCutThenPasteWithoutReleasing(t *testing.T) {
+	oldRead := readClipboard
+	readClipboard = func() (string, error) { return "XX", nil }
+	defer func() { readClipboard = oldRead }()
+
+	e, _, tv := setupMouseChordWindow(t)
+
+	// Sweep-select "beta", cut it, then — without releasing Button1 — release
+	// Button2 and press Button3 to paste in its place.
+	press(e, tv.x+6, tv.y, tcell.ButtonPrimary)
+	press(e, tv.x+10, tv.y, tcell.ButtonPrimary)
+	press(e, tv.x+10, tv.y, tcell.ButtonPrimary|tcell.ButtonMiddle)
+	press(e, tv.x+10, tv.y, tcell.ButtonPrimary)
+	press(e, tv.x+10, tv.y, tcell.ButtonPrimary|tcell.ButtonSecondary)
+
+	if got, want := tv.buffer.GetText(), "alpha XX"; got != want {
+		t.Fatalf("body text after cut-then-paste chord = %q, want %q", got, want)
+	}
+	if tv.buffer.GetSelectedText() != "XX" {
+		t.Fatalf("pasted text should be selected, got %q", tv.buffer.GetSelectedText())
+	}
+}
+
+func TestMouseChordPasteThenCutWithoutReleasing(t *testing.T) {
+	oldRead := readClipboard
+	readClipboard = func() (string, error) { return "XX", nil }
+	defer func() { readClipboard = oldRead }()
+
+	e, _, tv := setupMouseChordWindow(t)
+
+	// Click (no selection), paste "XX" — which selects it — then, without
+	// releasing Button1, release Button3 and press Button2 to cut it back out.
+	press(e, tv.x, tv.y, tcell.ButtonPrimary)
+	press(e, tv.x, tv.y, tcell.ButtonPrimary|tcell.ButtonSecondary)
+	press(e, tv.x, tv.y, tcell.ButtonPrimary)
+	press(e, tv.x, tv.y, tcell.ButtonPrimary|tcell.ButtonMiddle)
+
+	if got, want := tv.buffer.GetText(), "alpha beta"; got != want {
+		t.Fatalf("body text after paste-then-cut chord = %q, want %q", got, want)
+	}
+}
+
 func TestMouseChordRequiresPrimaryHeld(t *testing.T) {
 	e, _, tv := setupMouseChordWindow(t)
 	tv.buffer.SetSelection(Cursor{0, 0}, Cursor{5, 0})
