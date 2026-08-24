@@ -302,12 +302,12 @@ func (b *Buffer) Paste() {
 		return
 	}
 	b.mutate(func() {
+		start, end := b.cursor, b.cursor
 		if b.selection.Active {
-			start, end := b.selection.Ordered()
-			b.replace(start, end, text)
-		} else {
-			b.replace(b.cursor, b.cursor, text)
+			start, end = b.selection.Ordered()
 		}
+		pasteEnd := b.replace(start, end, text)
+		b.SetSelection(start, pasteEnd)
 	})
 }
 
