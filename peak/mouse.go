@@ -6,28 +6,16 @@ import (
 	"github.com/gdamore/tcell/v3"
 )
 
-// Region identifies the kind of surface under a mouse position. It is the
-// single vocabulary every mouse gesture is routed through.
-type Region int
-
-const (
-	RegionNone Region = iota
-	RegionGlobalTag
-	RegionColHandle // column separator/handle (starts a column drag)
-	RegionColTag
-	RegionWinHandle // window handle in the tag rows (starts a window drag)
-	RegionWinScroll // window scroll gutter in the body rows
-	RegionWinTag
-	RegionWinBody
-)
-
-// mouseTarget is the result of a single hit-test: which region was hit and the
-// owning column/window/view, so callers never re-derive geometry.
+// mouseTarget is the result of a single hit-test: the column, window and
+// content view under a position, mirroring the layout tree (col -> win ->
+// tag/body). A content hit (any tag or body) sets view; a chrome hit (column
+// handle, window handle, scroll gutter) sets col/win and leaves view nil, and
+// dispatch tells those apart by position. A zero mouseTarget means nothing
+// actionable was hit.
 type mouseTarget struct {
-	region Region
-	col    *Column
-	win    *Window
-	view   View // the tag/body view for text regions; nil otherwise
+	col  *Column
+	win  *Window
+	view View // the tag/body content view; nil for handles and the scroll gutter
 }
 
 // mouseGesture tracks the in-progress mouse gesture across events: the previous
@@ -45,7 +33,7 @@ type mouseGesture struct {
 // and chording decision consults it.
 func (e *Editor) resolveTarget(mx, my int) mouseTarget {
 	if my == 0 {
-		return mouseTarget{region: RegionGlobalTag, view: e.tag}
+		return mouseTarget{view: e.tag}
 	}
 	for _, col := range e.columns {
 		if !col.Contains(mx, my) {
@@ -53,41 +41,33 @@ func (e *Editor) resolveTarget(mx, my int) mouseTarget {
 		}
 		if my == col.tag.y {
 			if mx == col.x {
-				return mouseTarget{region: RegionColHandle, col: col}
+				return mouseTarget{col: col} // column handle
 			}
-			return mouseTarget{region: RegionColTag, col: col, view: col.tag}
+			return mouseTarget{col: col, view: col.tag}
 		}
 		for _, win := range col.windows {
 			if !win.Contains(mx, my) {
 				continue
 			}
 			win.tag.UpdateLayout()
-			th := win.tagHeight()
 			if mx == win.x {
-				if my < win.y+th {
-					return mouseTarget{region: RegionWinHandle, col: col, win: win}
-				}
-				return mouseTarget{region: RegionWinScroll, col: col, win: win}
+				return mouseTarget{col: col, win: win} // handle rows / scroll gutter
 			}
-			if my < win.y+th {
-				return mouseTarget{region: RegionWinTag, col: col, win: win, view: win.tag}
+			if my < win.y+win.tagHeight() {
+				return mouseTarget{col: col, win: win, view: win.tag}
 			}
-			return mouseTarget{region: RegionWinBody, col: col, win: win, view: win.body}
+			return mouseTarget{col: col, win: win, view: win.body}
 		}
-		return mouseTarget{region: RegionNone, col: col}
+		return mouseTarget{col: col} // inside the column, off every window
 	}
-	return mouseTarget{region: RegionNone}
+	return mouseTarget{}
 }
 
 // chordTargetOf reports the TextView eligible for chording at a resolved target
-// and its owning window, or (nil, nil) if the region is not a chordable text
-// area (handles, scroll gutters and terminal windows are excluded).
+// and its owning window, or (nil, nil) if the hit is not a chordable text area.
+// A chordable hit is simply a content view that is a TextView: handles and the
+// scroll gutter have no view, and terminal windows are excluded outright.
 func (e *Editor) chordTargetOf(t mouseTarget) (*TextView, *Window) {
-	switch t.region {
-	case RegionGlobalTag, RegionColTag, RegionWinTag, RegionWinBody:
-	default:
-		return nil, nil
-	}
 	if t.win != nil && t.win.kind == WinTerm {
 		return nil, nil
 	}
@@ -189,33 +169,38 @@ func (e *Editor) dispatchPress(ev *tcell.EventMouse, mx, my int, buttons tcell.B
 		}
 	}
 
-	switch t.region {
-	case RegionGlobalTag:
+	held := buttons&(tcell.ButtonPrimary|tcell.ButtonSecondary|tcell.ButtonMiddle) != 0
+
+	switch {
+	case t.view != nil: // a content region: global/column/window tag or window body
+		if t.win != nil {
+			return e.clickWindow(ev, t, mx, my, buttons)
+		}
+		if t.col != nil {
+			return e.clickTag(ev, t.col.tag, t.col, mx, my, buttons)
+		}
 		return e.clickTag(ev, e.tag, nil, mx, my, buttons)
-	case RegionColHandle:
-		if buttons&(tcell.ButtonPrimary|tcell.ButtonSecondary|tcell.ButtonMiddle) != 0 {
+
+	case t.win != nil: // window chrome: handle in the tag rows, scroll gutter below
+		win := t.win
+		if my < win.y+win.tagHeight() {
+			if held {
+				e.dragWin = win
+				e.dragWinOrigH = win.explicitHeight
+				e.dragWinButton = buttons
+				e.dragWinStartY = win.y
+				e.ActivateWindow(win)
+				e.focusedView = win.tag
+			}
+		} else {
+			e.scrollWindow(win, my, buttons)
+		}
+
+	case t.col != nil && my == t.col.tag.y && mx == t.col.x: // column handle
+		if held {
 			e.dragCol = t.col
 			e.dragColOrigW = t.col.explicitWidth
 		}
-		return false
-	case RegionColTag:
-		return e.clickTag(ev, t.col.tag, t.col, mx, my, buttons)
-	case RegionWinHandle:
-		if buttons&(tcell.ButtonPrimary|tcell.ButtonSecondary|tcell.ButtonMiddle) != 0 {
-			win := t.win
-			e.dragWin = win
-			e.dragWinOrigH = win.explicitHeight
-			e.dragWinButton = buttons
-			e.dragWinStartY = win.y
-			e.ActivateWindow(win)
-			e.focusedView = win.tag
-		}
-		return false
-	case RegionWinScroll:
-		e.scrollWindow(t.win, my, buttons)
-		return false
-	case RegionWinTag, RegionWinBody:
-		return e.clickWindow(ev, t, mx, my, buttons)
 	}
 	return false
 }
@@ -271,7 +256,7 @@ func (e *Editor) clickWindow(ev *tcell.EventMouse, t mouseTarget, mx, my int, bu
 	win, target := t.win, t.view
 	if buttons == tcell.ButtonPrimary {
 		e.ActivateWindow(win)
-		if t.region == RegionWinTag {
+		if t.view == win.tag {
 			e.focusedView = win.tag
 		}
 		e.dragView = e.focusedView
