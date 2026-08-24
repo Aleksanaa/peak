@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/gdamore/tcell/v3"
 )
@@ -26,8 +27,8 @@ func press(e *Editor, x, y int, buttons tcell.ButtonMask) {
 	e.HandleEvent(tcell.NewEventMouse(x, y, buttons, 0))
 }
 
-// chordTarget hit-tests (x, y) and reports the chordable TextView there.
-func chordTarget(e *Editor, x, y int) (*TextView, *Window) {
+// chordTarget hit-tests (x, y) and reports the chordable view there.
+func chordTarget(e *Editor, x, y int) (View, *Window) {
 	return e.chordTargetOf(e.resolveTarget(x, y))
 }
 
@@ -133,7 +134,7 @@ func TestMouseChordRequiresPrimaryHeld(t *testing.T) {
 		if e.gesture.chorded {
 			t.Fatalf("button %v alone must not fire a chord", b)
 		}
-		if e.gesture.anchorTV != nil {
+		if e.gesture.anchorView != nil {
 			t.Fatalf("button %v alone must not arm a chord", b)
 		}
 	}
@@ -156,7 +157,7 @@ func TestMouseChordFiresOncePerGesture(t *testing.T) {
 
 	// A full release resets the gesture so the next chord can fire.
 	press(e, tv.x+10, tv.y, tcell.ButtonNone)
-	if e.gesture.chorded || e.gesture.anchorTV != nil {
+	if e.gesture.chorded || e.gesture.anchorView != nil {
 		t.Fatal("release should reset chord state")
 	}
 }
@@ -242,24 +243,90 @@ func TestChordTargetRejectsNonTextAreas(t *testing.T) {
 	}
 }
 
-func TestChordTargetRejectsTerminalWindow(t *testing.T) {
-	e, win, tv := setupMouseChordWindow(t)
-	win.kind = WinTerm
+func TestChordTargetsTerminalWindow(t *testing.T) {
+	e, _, _ := setupMouseChordWindow(t)
+	col := e.columns[0]
 
-	tests := []struct {
-		name string
-		x, y int
-	}{
-		{name: "tag", x: win.tag.x, y: win.tag.y},
-		{name: "body", x: tv.x, y: tv.y},
+	termWin, err := col.AddTermWindow(" /tmp/-sh Zerox Del ", "sh", "/tmp")
+	if err != nil {
+		t.Skipf("cannot create term window: %v", err)
+	}
+	col.Resize(col.x, col.y, col.w, col.h)
+	termWin.tag.UpdateLayout()
+
+	term, ok := termWin.body.(*TermView)
+	if !ok {
+		t.Fatalf("terminal body is %T, want *TermView", termWin.body)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			gotTV, gotWin := chordTarget(e, tt.x, tt.y)
-			if gotTV != nil || gotWin != nil {
-				t.Fatalf("terminal %s target = (%p, %p), want (nil, nil)", tt.name, gotTV, gotWin)
-			}
-		})
+	// The terminal body is chordable and resolves to the TermView itself, so a
+	// middle chord there copies (Snarf) rather than cutting a text buffer.
+	if gotView, gotWin := chordTarget(e, term.x, term.y); gotView != term || gotWin != termWin {
+		t.Fatalf("terminal body chord target = (%v, %v), want (%v, %v)", gotView, gotWin, term, termWin)
+	}
+	// The terminal's tag is an ordinary text tag and chords as a TextView.
+	gotTag, _ := chordTarget(e, termWin.tag.x, termWin.tag.y)
+	if _, ok := gotTag.(*TextView); !ok {
+		t.Fatalf("terminal tag chord target = %T, want *TextView", gotTag)
+	}
+}
+
+func TestChordAllowedInTerminal(t *testing.T) {
+	e, _, tv := setupMouseChordWindow(t)
+	noMods := tcell.NewEventMouse(0, 0, tcell.ButtonPrimary, 0)
+
+	// A text view always chords.
+	if !e.chordAllowed(tv, noMods) {
+		t.Fatal("text view should always be chordable")
+	}
+
+	termWin, err := e.columns[0].AddTermWindow(" /tmp/-sh Zerox Del ", "sh", "/tmp")
+	if err != nil {
+		t.Skipf("cannot create term window: %v", err)
+	}
+	term := termWin.body.(*TermView)
+
+	// A plain shell isn't tracking the mouse, so the terminal chords locally,
+	// with or without Ctrl.
+	if !e.chordAllowed(term, noMods) {
+		t.Fatal("terminal without mouse tracking should chord locally")
+	}
+	ctrl := tcell.NewEventMouse(0, 0, tcell.ButtonPrimary, tcell.ModCtrl)
+	if !e.chordAllowed(term, ctrl) {
+		t.Fatal("Ctrl should force local chording in a terminal")
+	}
+}
+
+func TestChordSuppressedInFullScreenTerminal(t *testing.T) {
+	e, _ := setupTest(t, 80, 24)
+	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+	e.columns = append(e.columns, col)
+
+	// A child that switches to the alternate screen (DECSET 1049) and stays
+	// alive, i.e. a full-screen app that owns the mouse (e.g. a nested peak).
+	termWin, err := col.AddTermWindow(" /tmp/-sh Zerox Del ", "printf '\\033[?1049h'; sleep 30", "/tmp")
+	if err != nil {
+		t.Skipf("cannot create term window: %v", err)
+	}
+	col.Resize(col.x, col.y, col.w, col.h)
+	term := termWin.body.(*TermView)
+
+	deadline := time.Now().Add(3 * time.Second)
+	for !term.IsRaw() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !term.IsRaw() {
+		t.Skip("terminal did not enter full-screen mode in time")
+	}
+
+	// A bare press must not arm a chord — the buttons belong to the child app.
+	noMods := tcell.NewEventMouse(0, 0, tcell.ButtonPrimary, 0)
+	if e.chordAllowed(term, noMods) {
+		t.Fatal("chording should be suppressed in a full-screen terminal app")
+	}
+	// Ctrl forces a local action, so chording is allowed.
+	ctrl := tcell.NewEventMouse(0, 0, tcell.ButtonPrimary, tcell.ModCtrl)
+	if !e.chordAllowed(term, ctrl) {
+		t.Fatal("Ctrl should override and allow local chording")
 	}
 }

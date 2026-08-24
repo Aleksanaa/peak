@@ -26,10 +26,10 @@ type mouseTarget struct {
 // button mask (to detect deltas) and the view where the primary was pressed,
 // which anchors a chord even if the pointer later moves away.
 type mouseGesture struct {
-	buttons   tcell.ButtonMask // buttons from the previous event
-	anchorTV  *TextView
-	anchorWin *Window
-	chorded   bool
+	buttons    tcell.ButtonMask // buttons from the previous event
+	anchorView View             // the tag/body/terminal view the primary was pressed on
+	anchorWin  *Window
+	chorded    bool
 }
 
 // resolveTarget hit-tests (mx, my) against the editor layout and returns the
@@ -68,18 +68,26 @@ func (e *Editor) resolveTarget(mx, my int) mouseTarget {
 	return mouseTarget{}
 }
 
-// chordTargetOf reports the TextView eligible for chording at a resolved target
-// and its owning window, or (nil, nil) if the hit is not a chordable text area.
-// A chordable hit is simply a content view that is a TextView: handles and the
-// scroll gutter have no view, and terminal windows are excluded outright.
-func (e *Editor) chordTargetOf(t mouseTarget) (*TextView, *Window) {
-	if t.win != nil && t.win.kind == WinTerm {
-		return nil, nil
-	}
-	if tv, ok := t.view.(*TextView); ok {
-		return tv, t.win
+// chordTargetOf reports the view eligible for chording at a resolved target and
+// its owning window, or (nil, nil) if the hit is not a chordable content area.
+// Any content view chords: a text tag/body cuts and pastes its buffer, a
+// terminal body copies (Snarf) and pastes to the pty. Handles and the scroll
+// gutter have no view and are not chordable.
+func (e *Editor) chordTargetOf(t mouseTarget) (View, *Window) {
+	switch t.view.(type) {
+	case *TextView, *TermView:
+		return t.view, t.win
 	}
 	return nil, nil
+}
+
+// chordAllowed reports whether a chord may operate locally on the pressed view.
+// A full-screen terminal app forwards its buttons to the child program, so we
+// suppress local chording there — letting the child run its own chord — unless
+// the user holds Ctrl to force a local action. This mirrors the word-execution
+// gate in clickWindow; ordinary text views are never raw and always chord.
+func (e *Editor) chordAllowed(v View, ev *tcell.EventMouse) bool {
+	return ev.Modifiers()&tcell.ModCtrl != 0 || !v.IsRaw()
 }
 
 // handleMouse is the single entry point for EventMouse. It layers acme-style
@@ -100,7 +108,7 @@ func (e *Editor) handleMouse(ev *tcell.EventMouse) bool {
 		switch {
 		case buttons == tcell.ButtonNone:
 			*g = mouseGesture{}
-		case g.anchorTV != nil && buttons&tcell.ButtonPrimary != 0 && (newMiddle || newSecondary):
+		case g.anchorView != nil && buttons&tcell.ButtonPrimary != 0 && (newMiddle || newSecondary):
 			// A second button joined the held primary: Button2 cuts, Button3
 			// pastes. Repeatable while primary stays down (e.g. cut then paste
 			// without releasing, and vice versa).
@@ -164,8 +172,8 @@ func (e *Editor) dispatchPress(ev *tcell.EventMouse, mx, my int, buttons tcell.B
 	// Anchor a potential chord to the view under a primary-only press, so a
 	// later second button operates on it even if the pointer has moved.
 	if buttons&tcell.ButtonPrimary != 0 && buttons&(tcell.ButtonMiddle|tcell.ButtonSecondary) == 0 {
-		if tv, win := e.chordTargetOf(t); tv != nil {
-			e.gesture.anchorTV, e.gesture.anchorWin = tv, win
+		if v, win := e.chordTargetOf(t); v != nil && e.chordAllowed(v, ev) {
+			e.gesture.anchorView, e.gesture.anchorWin = v, win
 		}
 	}
 
@@ -286,26 +294,37 @@ func (e *Editor) clickWindow(ev *tcell.EventMouse, t mouseTarget, mx, my int, bu
 	return e.Plumb(win, word)
 }
 
-// fireChord executes an acme chord (Button1+Button2 = Cut, Button1+Button3 =
-// Paste) on the anchored view's live selection. A plain click clears the
-// selection on press, so a chord that follows one finds nothing to cut and does
-// nothing. The interrupted drag needs no teardown here: g.chorded swallows the
-// held-primary events that follow, and the release resets the drag state.
-func (e *Editor) fireChord(cut bool) {
+// fireChord executes an acme chord on the anchored view's live selection:
+// Button1+Button2 (middle) cuts, Button1+Button3 pastes. A terminal body can't
+// be edited, so there middle copies (Snarf) instead of cutting and paste feeds
+// the pty. A plain click clears the selection on press, so a chord that follows
+// one finds nothing selected and does nothing. The interrupted drag needs no
+// teardown here: g.chorded swallows the held-primary events that follow, and
+// the release resets the drag state.
+func (e *Editor) fireChord(middle bool) {
 	g := &e.gesture
-	tv, win := g.anchorTV, g.anchorWin
+	win := g.anchorWin
 	g.chorded = true
 
 	if win != nil {
 		win.lk.Lock()
 		defer win.lk.Unlock()
 	}
-	if cut {
-		tv.typingStart = nil
-		tv.buffer.Cut()
-	} else {
-		tv.prepareTyping()
-		tv.buffer.Paste()
+	switch v := g.anchorView.(type) {
+	case *TermView:
+		if middle {
+			v.Snarf()
+		} else {
+			v.Paste()
+		}
+	case *TextView:
+		if middle {
+			v.typingStart = nil
+			v.buffer.Cut()
+		} else {
+			v.prepareTyping()
+			v.buffer.Paste()
+		}
 	}
 
 	// A sweep that reached the view edge armed the auto-scroll timer; the chord
