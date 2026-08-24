@@ -26,6 +26,11 @@ func press(e *Editor, x, y int, buttons tcell.ButtonMask) {
 	e.HandleEvent(tcell.NewEventMouse(x, y, buttons, 0))
 }
 
+// chordTarget hit-tests (x, y) and reports the chordable TextView there.
+func chordTarget(e *Editor, x, y int) (*TextView, *Window) {
+	return e.chordTargetOf(e.resolveTarget(x, y))
+}
+
 func TestMouseChordSweepMiddleCutsBodyText(t *testing.T) {
 	e, _, tv := setupMouseChordWindow(t)
 
@@ -229,7 +234,7 @@ func TestChordTargetRejectsNonTextAreas(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotTV, gotWin := e.chordTarget(tt.x, tt.y)
+			gotTV, gotWin := chordTarget(e, tt.x, tt.y)
 			if gotTV != nil || gotWin != nil {
 				t.Fatalf("chordTarget(%d, %d) = (%p, %p), want (nil, nil)", tt.x, tt.y, gotTV, gotWin)
 			}
@@ -251,7 +256,7 @@ func TestChordTargetRejectsTerminalWindow(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotTV, gotWin := e.chordTarget(tt.x, tt.y)
+			gotTV, gotWin := chordTarget(e, tt.x, tt.y)
 			if gotTV != nil || gotWin != nil {
 				t.Fatalf("terminal %s target = (%p, %p), want (nil, nil)", tt.name, gotTV, gotWin)
 			}

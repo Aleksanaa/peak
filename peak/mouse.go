@@ -6,6 +6,10 @@ import (
 	"github.com/gdamore/tcell/v3"
 )
 
+// anyButton masks the three primary mouse buttons — every button except the
+// wheel — i.e. the buttons that begin and sustain a drag or chord.
+const anyButton = tcell.ButtonPrimary | tcell.ButtonSecondary | tcell.ButtonMiddle
+
 // mouseTarget is the result of a single hit-test: the column, window and
 // content view under a position, mirroring the layout tree (col -> win ->
 // tag/body). A content hit (any tag or body) sets view; a chrome hit (column
@@ -29,8 +33,9 @@ type mouseGesture struct {
 }
 
 // resolveTarget hit-tests (mx, my) against the editor layout and returns the
-// region under it. This is the one place mouse geometry lives; every routing
-// and chording decision consults it.
+// column/window/content view under it. Every routing and chording decision
+// starts here; dispatch makes the two chrome sub-distinctions (handle vs.
+// scroll gutter, column handle vs. miss) from the pointers it returns.
 func (e *Editor) resolveTarget(mx, my int) mouseTarget {
 	if my == 0 {
 		return mouseTarget{view: e.tag}
@@ -77,14 +82,9 @@ func (e *Editor) chordTargetOf(t mouseTarget) (*TextView, *Window) {
 	return nil, nil
 }
 
-// chordTarget hit-tests and reports the chordable TextView at (mx, my).
-func (e *Editor) chordTarget(mx, my int) (*TextView, *Window) {
-	return e.chordTargetOf(e.resolveTarget(mx, my))
-}
-
 // handleMouse is the single entry point for EventMouse. It layers acme-style
-// chording over the drag/scroll state machine and dispatches fresh presses by
-// region. Returns true to quit the editor.
+// chording over the drag/scroll state machine and dispatches fresh presses to
+// the surface under the pointer. Returns true to quit the editor.
 func (e *Editor) handleMouse(ev *tcell.EventMouse) bool {
 	mx, my := ev.Position()
 	buttons := ev.Buttons()
@@ -118,7 +118,7 @@ func (e *Editor) handleMouse(ev *tcell.EventMouse) bool {
 		e.scrollWin = nil
 	}
 	if e.dragCol != nil {
-		if buttons&(tcell.ButtonPrimary|tcell.ButtonSecondary|tcell.ButtonMiddle) != 0 {
+		if buttons&anyButton != 0 {
 			e.moveColumnTo(e.dragCol, mx)
 			return false
 		}
@@ -126,7 +126,7 @@ func (e *Editor) handleMouse(ev *tcell.EventMouse) bool {
 		return false
 	}
 	if e.dragWin != nil {
-		if buttons&(tcell.ButtonPrimary|tcell.ButtonSecondary|tcell.ButtonMiddle) != 0 {
+		if buttons&anyButton != 0 {
 			e.moveWindowTo(e.dragWin, mx, my)
 			return false
 		}
@@ -157,7 +157,7 @@ func (e *Editor) handleMouse(ev *tcell.EventMouse) bool {
 }
 
 // dispatchPress handles a fresh press: it arms chording on a primary-only press
-// over a text area, then routes the event to the region under it.
+// over a text area, then routes the event to the surface under it.
 func (e *Editor) dispatchPress(ev *tcell.EventMouse, mx, my int, buttons tcell.ButtonMask) bool {
 	t := e.resolveTarget(mx, my)
 
@@ -169,7 +169,7 @@ func (e *Editor) dispatchPress(ev *tcell.EventMouse, mx, my int, buttons tcell.B
 		}
 	}
 
-	held := buttons&(tcell.ButtonPrimary|tcell.ButtonSecondary|tcell.ButtonMiddle) != 0
+	held := buttons&anyButton != 0
 
 	switch {
 	case t.view != nil: // a content region: global/column/window tag or window body
