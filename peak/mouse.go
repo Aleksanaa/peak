@@ -302,9 +302,10 @@ func (e *Editor) clickWindow(ev *tcell.EventMouse, t mouseTarget, mx, my int, bu
 }
 
 // fireChord executes an acme chord (Button1+Button2 = Cut, Button1+Button3 =
-// Paste) on the anchored view's live selection, then tears down the drag the
-// primary press had started. A plain click clears the selection on press, so a
-// chord that follows one finds nothing to cut and does nothing.
+// Paste) on the anchored view's live selection. A plain click clears the
+// selection on press, so a chord that follows one finds nothing to cut and does
+// nothing. The interrupted drag needs no teardown here: g.chorded swallows the
+// held-primary events that follow, and the release resets the drag state.
 func (e *Editor) fireChord(cut bool) {
 	g := &e.gesture
 	tv, win := g.anchorTV, g.anchorWin
@@ -322,10 +323,8 @@ func (e *Editor) fireChord(cut bool) {
 		tv.buffer.Paste()
 	}
 
-	tv.drag = false
-	if e.dragView == tv {
-		e.dragView = nil
-	}
+	// A sweep that reached the view edge armed the auto-scroll timer; the chord
+	// ends the sweep, so stop it (the timer keys off scrollWin, not gesture).
 	if e.scrollWin == win {
 		e.scrollWin = nil
 	}
