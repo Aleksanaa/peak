@@ -431,19 +431,23 @@ func (tv *TermView) HandleEvent(ev tcell.Event) bool {
 		mod := e.Modifiers()
 		if mod&(tcell.ModAlt|tcell.ModMeta) != 0 {
 			key := e.Key()
-			if key == tcell.KeyCtrlC || key == tcell.KeyCtrlX {
-				tv.Snarf()
-				return false
-			}
-			if key == tcell.KeyCtrlV {
-				tv.Paste()
-				return false
-			}
-			if key == tcell.KeyCtrlF {
-				if tv.GetSelectedText() != "" {
-					tv.editor.Execute(nil, nil, "Look")
+			// tcell v3 reports Ctrl+<letter> as KeyRune plus ModCtrl (the
+			// legacy KeyCtrlX constants are only emitted when Ctrl is the
+			// sole modifier), so match the letter here instead.
+			if mod&tcell.ModCtrl != 0 && key == tcell.KeyRune {
+				switch e.Str() {
+				case "c", "C", "x", "X":
+					tv.Snarf()
+					return false
+				case "v", "V":
+					tv.Paste()
+					return false
+				case "f", "F":
+					if tv.GetSelectedText() != "" {
+						tv.editor.Execute(nil, nil, "Look")
+					}
+					return false
 				}
-				return false
 			}
 
 			switch key {
