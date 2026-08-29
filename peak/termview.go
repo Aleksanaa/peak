@@ -375,14 +375,6 @@ func (tv *TermView) GetBuffer() *Buffer {
 	return tv.buffer
 }
 
-// externalPTY returns the ExternalPTY backing this view, or nil for local sessions.
-func (tv *TermView) externalPTY() *ExternalPTY {
-	if pty, ok := tv.session.(*ExternalPTY); ok {
-		return pty
-	}
-	return nil
-}
-
 // GetScrollback returns the terminal scrollback buffer as plain text.
 // Each line has trailing space stripped; lines are newline-separated.
 func (tv *TermView) GetScrollback() string {

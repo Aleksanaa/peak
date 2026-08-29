@@ -24,7 +24,8 @@ func main() {
 	flag.Parse()
 
 	// Connect to peak when: virtual socket mode (-s omitted), auto-mount
-	// requested (default unless -M), or user explicitly supplied -p (enables bridging).
+	// requested (default unless -M), or user explicitly supplied -p. The
+	// connection is used to post the server (/srv/ssh) and auto-mount (/mount).
 	var peakFs afero.Fs
 	if *socketPath == "" || (!*noMount && *mountPath != "") || *peakSocket != "" {
 		sock := *peakSocket
@@ -38,14 +39,14 @@ func main() {
 			if *socketPath == "" {
 				log.Fatalf("connect to peak at %s: %v", sock, err)
 			}
-			log.Printf("warning: connect to peak: %v (bridging and auto-mount disabled)", err)
+			log.Printf("warning: connect to peak: %v (auto-mount disabled)", err)
 			peakFs = nil
 		} else {
 			log.Printf("connected to peak at %s", sock)
 		}
 	}
 
-	srv := vfs.NewNinePSrv(newHostFs(NewSftpFs(), peakFs))
+	srv := vfs.NewNinePSrv(newHostFs(NewSftpFs()))
 
 	if *socketPath != "" {
 		// Real Unix socket mode: listen first so the socket exists before

@@ -25,39 +25,8 @@ func newWindowFs(win *Window) *windowFs {
 			{Name: "wrsel", Mode: 0200, Open: func(_ int) (afero.File, error) { return newWinWrselFile(win), nil }},
 			{Name: "errors", Mode: 0200, Open: func(_ int) (afero.File, error) { return &winErrorsFile{win: win}, nil }},
 			{Name: "color", Mode: 0200, Open: func(_ int) (afero.File, error) { return &winColorFile{win: win}, nil }},
-			{Name: "io", Mode: 0600,
-				Active: func() bool { return win.kind == WinTerm && win.body.(*TermView).externalPTY() != nil },
-				Open:   func(_ int) (afero.File, error) { return newWinIoFile(win) },
-			},
 		},
 	}}
-}
-
-// ---- io file (ExternalPTY windows only) ----
-
-func newWinIoFile(win *Window) (afero.File, error) {
-	if pty := win.body.(*TermView).externalPTY(); pty != nil {
-		return &winIoFile{pty: pty}, nil
-	}
-	return nil, os.ErrNotExist
-}
-
-type winIoFile struct {
-	vfs.FileStub
-	pty *ExternalPTY
-}
-
-func (f *winIoFile) ReadAt(p []byte, off int64) (int, error) {
-	return f.pty.ReadInput(p, off)
-}
-func (f *winIoFile) WriteAt(p []byte, _ int64) (int, error) {
-	return f.pty.WriteOutput(p)
-}
-func (f *winIoFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
-func (f *winIoFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(s), 0) }
-func (f *winIoFile) Close() error {
-	f.pty.Close()
-	return nil
 }
 
 // ---- body ----

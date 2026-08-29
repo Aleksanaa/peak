@@ -36,7 +36,6 @@ func TestNamespaceFsStatVirtualFiles(t *testing.T) {
 		isDir bool
 		mode  os.FileMode
 	}{
-		{"exec", false, 0600},
 		{"event", false, 0444},
 		{"mount", false, 0600},
 		{"unmount", false, 0200},
@@ -100,16 +99,13 @@ func TestNamespaceFsRootDirListing(t *testing.T) {
 		isDir[fi.Name()] = fi.IsDir()
 	}
 
-	for _, want := range []string{"exec", "event", "mount", "unmount", "bind", "new"} {
+	for _, want := range []string{"event", "mount", "unmount", "bind", "new"} {
 		if counts[want] == 0 {
 			t.Errorf("missing %q in root dir listing", want)
 		}
 		if counts[want] > 1 {
 			t.Errorf("%q appears %d times (duplicate)", want, counts[want])
 		}
-	}
-	if modes["exec"] != 0600 {
-		t.Errorf("exec mode = %v, want 0600", modes["exec"])
 	}
 	if modes["event"] != 0444 {
 		t.Errorf("event mode = %v, want 0444", modes["event"])
@@ -488,118 +484,6 @@ func TestMountAndBindListsSeparate(t *testing.T) {
 	}
 }
 
-// ---- execFile ----
-
-func TestExecFileReadBeforeWrite(t *testing.T) {
-	_, _, nsFs, _ := setupExecFsTest(t)
-	f, err := nsFs.OpenFile("exec", os.O_RDWR, 0)
-	if err != nil {
-		t.Fatalf("Open(exec): %v", err)
-	}
-	defer f.Close()
-	buf := make([]byte, 32)
-	n, err := f.ReadAt(buf, 0)
-	if n != 0 || err != io.EOF {
-		t.Errorf("ReadAt before write: n=%d err=%v, want 0/EOF", n, err)
-	}
-}
-
-func TestExecFileCreatesTerminalWindow(t *testing.T) {
-	e, _, nsFs, s := setupExecFsTest(t)
-	f, err := nsFs.OpenFile("exec", os.O_RDWR, 0)
-	if err != nil {
-		t.Fatalf("Open(exec): %v", err)
-	}
-	defer f.Close()
-	errCh := make(chan error, 1)
-	go func() {
-		_, err := f.WriteString("my-test-window\n")
-		errCh <- err
-		select {
-		case e.screen.EventQ() <- tcell.NewEventInterrupt(nil):
-		default:
-		}
-	}()
-
-	// Drive the tcell event loop so the callback runs.
-	var writeErr error
-	waitFor(t, e, s, func() bool {
-		select {
-		case writeErr = <-errCh:
-			return true
-		default:
-			return false
-		}
-	})
-
-	if writeErr != nil {
-		t.Skipf("exec: %v (PTY unavailable in this environment)", writeErr)
-	}
-
-	// Read back the window ID.
-	buf := make([]byte, 32)
-	n, _ := f.ReadAt(buf, 0)
-	idStr := strings.TrimSpace(string(buf[:n]))
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		t.Fatalf("exec resp %q is not a valid int: %v", idStr, err)
-	}
-	if id < 0 {
-		t.Errorf("exec returned ID %d, want >=0", id)
-	}
-
-	var found bool
-	e.Call(func() {
-		for _, col := range e.columns {
-			for _, w := range col.windows {
-				if w.ID == id {
-					found = true
-				}
-			}
-		}
-	})
-	if !found {
-		t.Errorf("window with ID %d not found in editor after exec", id)
-	}
-}
-
-func TestExecFileDoubleWriteFails(t *testing.T) {
-	e, _, nsFs, s := setupExecFsTest(t)
-	f, err := nsFs.OpenFile("exec", os.O_RDWR, 0)
-	if err != nil {
-		t.Fatalf("Open(exec): %v", err)
-	}
-	defer f.Close()
-	errCh := make(chan error, 1)
-	go func() {
-		_, err := f.WriteString("first-window\n")
-		errCh <- err
-		select {
-		case e.screen.EventQ() <- tcell.NewEventInterrupt(nil):
-		default:
-		}
-	}()
-
-	var firstErr error
-	waitFor(t, e, s, func() bool {
-		select {
-		case firstErr = <-errCh:
-			return true
-		default:
-			return false
-		}
-	})
-	if firstErr != nil {
-		t.Skipf("exec: %v (PTY unavailable)", firstErr)
-	}
-
-	// Second write must fail.
-	_, err = f.WriteString("second-window\n")
-	if err != os.ErrPermission {
-		t.Errorf("second write = %v, want ErrPermission", err)
-	}
-}
-
 // ---- WalkRedirect ----
 
 func TestWalkRedirectNewCreatesWindow(t *testing.T) {
@@ -647,7 +531,7 @@ func TestWalkRedirectNonRootIgnored(t *testing.T) {
 
 func TestWalkRedirectNonNewNameIgnored(t *testing.T) {
 	_, _, nsFs, _ := setupExecFsTest(t)
-	for _, name := range []string{"exec", "event", "body", "new2", ""} {
+	for _, name := range []string{"mount", "event", "body", "new2", ""} {
 		_, _, ok := nsFs.WalkRedirect("/", name)
 		if ok {
 			t.Errorf("WalkRedirect('/','%s') returned ok=true, want false", name)

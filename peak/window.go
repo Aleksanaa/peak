@@ -826,11 +826,6 @@ func newTermWindowFromSession(tag string, sess session.Session, parent *Column, 
 	win.kind = WinTerm
 	win.body = term
 	win.bodyView.content = term
-	if pty, ok := sess.(*ExternalPTY); ok {
-		pty.onResize = func(rows, cols int) {
-			win.broadcastEvent('P', 'Z', rows, cols, 0, "")
-		}
-	}
 	filename := win.GetFilename()
 	suffix := ""
 	if base := filepath.Base(filename); strings.HasPrefix(base, "-") {

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -13,7 +12,6 @@ import (
 
 	"al.essio.dev/pkg/shellescape"
 	"github.com/aleksana/peak/internal/vfs/afero"
-	"github.com/aleksana/peak/internal/wevent"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -80,18 +78,16 @@ func (s *sshSession) close()                { s.session.Close() }
 //
 // Stat never triggers a connection except for SFTP file paths under /fs/.
 type hostFs struct {
-	sftp   *SftpFs
-	peakFs afero.Fs // nil when not bridging to a peak editor
+	sftp *SftpFs
 
 	mu     sync.Mutex
 	hosts  map[string]map[int]*sshSession // host → id → session
 	nextID map[string]int
 }
 
-func newHostFs(sftp *SftpFs, peakFs afero.Fs) *hostFs {
+func newHostFs(sftp *SftpFs) *hostFs {
 	return &hostFs{
 		sftp:   sftp,
-		peakFs: peakFs,
 		hosts:  make(map[string]map[int]*sshSession),
 		nextID: make(map[string]int),
 	}
@@ -322,9 +318,6 @@ func (fs *hostFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File,
 		sh, _, err := fs.newPTYSession(p.host, "", "")
 		if err != nil {
 			return nil, err
-		}
-		if fs.peakFs != nil {
-			go fs.bridgePeakWindow(sh, p.host+"/+Errors")
 		}
 		return &ioFile{session: sh}, nil
 	case kindFsRoot:
@@ -617,92 +610,3 @@ func (f *runFile) WriteAt(p []byte, _ int64) (int, error) {
 }
 func (f *runFile) Write(p []byte) (int, error)             { return f.WriteAt(p, 0) }
 func (f *runFile) ReadAt(p []byte, off int64) (int, error) { return snapReadAt(f.resp, p, off) }
-
-// ---- bridgePeakWindow ----
-
-// bridgePeakWindow creates a terminal window in the connected peak editor and
-// pipes the SSH session's PTY through it. Runs in a background goroutine.
-func (fs *hostFs) bridgePeakWindow(sh *sshSession, title string) {
-	execF, err := fs.peakFs.OpenFile("/exec", os.O_RDWR, 0)
-	if err != nil {
-		return
-	}
-	if _, err := execF.WriteAt([]byte(title), 0); err != nil {
-		execF.Close()
-		return
-	}
-	buf := make([]byte, 32)
-	n, err := execF.ReadAt(buf, 0)
-	execF.Close()
-	if err != nil && err != io.EOF {
-		return
-	}
-	winID := strings.TrimSpace(string(buf[:n]))
-
-	// Open io twice: independent offsets for read (user input) and write (output).
-	ioRead, err := fs.peakFs.OpenFile("/"+winID+"/io", os.O_RDONLY, 0)
-	if err != nil {
-		return
-	}
-	ioWrite, err := fs.peakFs.OpenFile("/"+winID+"/io", os.O_WRONLY, 0)
-	if err != nil {
-		ioRead.Close()
-		return
-	}
-	eventF, err := fs.peakFs.OpenFile("/"+winID+"/event", os.O_RDONLY, 0)
-	if err != nil {
-		ioRead.Close()
-		ioWrite.Close()
-		return
-	}
-
-	// SSH stdout → peak window display
-	go func() {
-		tmp := make([]byte, 4096)
-		var off int64
-		for {
-			n, err := sh.readAt(tmp, off)
-			if n > 0 {
-				ioWrite.Write(tmp[:n])
-				off += int64(n)
-			}
-			if err != nil {
-				break
-			}
-		}
-		ioWrite.Close()
-	}()
-
-	// peak window keystrokes → SSH stdin
-	go func() {
-		tmp := make([]byte, 4096)
-		for {
-			n, err := ioRead.Read(tmp)
-			if n > 0 {
-				sh.stdin.Write(tmp[:n])
-			}
-			if err != nil {
-				break
-			}
-		}
-		ioRead.Close()
-	}()
-
-	// peak resize events → remote PTY
-	go func() {
-		br := bufio.NewReader(eventF)
-		for {
-			ev, err := wevent.Read(br)
-			if err != nil {
-				if err == io.EOF {
-					break
-				}
-				break
-			}
-			if ev.Origin == 'P' && ev.Type == 'Z' && ev.Q0 > 0 && ev.Q1 > 0 {
-				sh.resize(ev.Q0, ev.Q1)
-			}
-		}
-		eventF.Close()
-	}()
-}

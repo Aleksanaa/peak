@@ -31,9 +31,6 @@ func newPeakNamespaceFs(editor *Editor, bus *globalEventBus) *peakNamespaceFs {
 		NamespaceFs: &vfs.NamespaceFs{
 			RootName: "peak",
 			Entries: []vfs.FileEntry{
-				{Name: "exec", Mode: 0600, Open: func(_ int) (afero.File, error) {
-					return &execFile{editor: editor}, nil
-				}},
 				{Name: "event", Mode: 0444, Open: func(_ int) (afero.File, error) {
 					sub := bus.subscribe()
 					return &globalEventFile{bus: bus, sub: sub}, nil
@@ -231,58 +228,6 @@ func indexSnap(editor *Editor) []byte {
 type indexFile struct {
 	vfs.ReadonlyFile
 }
-
-// execFile implements /exec: write a window title to create an externally-driven
-// terminal window; read back the numeric window ID followed by a newline.
-type execFile struct {
-	vfs.FileStub
-	editor  *Editor
-	written bool
-	resp    []byte
-}
-
-func (f *execFile) WriteAt(p []byte, _ int64) (int, error) {
-	if f.written {
-		return 0, os.ErrPermission
-	}
-	title := strings.TrimSpace(string(p))
-
-	id := -1
-	f.editor.Call(func() {
-		pty := newExternalPTY()
-		col := f.editor.getTargetColumn(nil, nil)
-		if col == nil {
-			return
-		}
-		newWin, err := col.AddSessionTermWindow(title, pty)
-		if err != nil {
-			return
-		}
-		f.editor.ActivateWindow(newWin)
-		col.Resize(col.x, col.y, col.w, col.h)
-		id = newWin.ID
-	})
-	if id < 0 {
-		return 0, fmt.Errorf("exec: failed to create terminal window")
-	}
-	f.written = true
-	f.resp = fmt.Appendf(nil, "%d\n", id)
-	return len(p), nil
-}
-
-func (f *execFile) ReadAt(p []byte, off int64) (int, error) {
-	if off >= int64(len(f.resp)) {
-		return 0, io.EOF
-	}
-	n := copy(p, f.resp[off:])
-	if off+int64(n) >= int64(len(f.resp)) {
-		return n, io.EOF
-	}
-	return n, nil
-}
-
-func (f *execFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
-func (f *execFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(s), 0) }
 
 // ---- /srv virtual socket registry ----
 
