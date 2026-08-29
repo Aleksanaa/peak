@@ -63,6 +63,7 @@ type Editor struct {
 	theme           Theme
 	nextWinID       int
 	ninep           *NineP
+	gesture         mouseGesture
 }
 
 func (e *Editor) syncChildren() {
@@ -259,7 +260,7 @@ func (e *Editor) HandleEvent(ev tcell.Event) (bool, bool) {
 		if me.Buttons() != tcell.ButtonNone {
 			_, my := me.Position()
 			e.lastClickY = my
-		} else if e.dragCol == nil && e.dragWin == nil && e.dragView == nil && e.scrollWin == nil {
+		} else if e.dragCol == nil && e.dragWin == nil && e.dragView == nil && e.scrollWin == nil && !e.gesture.chorded {
 			// Skip redraw on mouse moves with no buttons/drag/scroll
 			return false, false
 		}
@@ -282,71 +283,7 @@ func (e *Editor) HandleEvent(ev tcell.Event) (bool, bool) {
 		}
 		return quit, true
 	case *tcell.EventMouse:
-		mx, my := ev.Position()
-		buttons := ev.Buttons()
-
-		if buttons == tcell.ButtonNone {
-			e.scrollWin = nil
-		}
-
-		if e.dragCol != nil {
-			if buttons&(tcell.ButtonPrimary|tcell.ButtonSecondary|tcell.ButtonMiddle) != 0 {
-				e.moveColumnTo(e.dragCol, mx)
-				return false, true
-			}
-			e.dragCol = nil
-			return false, true
-		}
-		if e.dragWin != nil {
-			if buttons&(tcell.ButtonPrimary|tcell.ButtonSecondary|tcell.ButtonMiddle) != 0 {
-				e.moveWindowTo(e.dragWin, mx, my)
-				return false, true
-			}
-			if e.dragWin.y == e.dragWinStartY {
-				switch e.dragWinButton {
-				case tcell.ButtonPrimary:
-					e.dragWin.parent.GrowModerate(e.dragWin)
-				case tcell.ButtonSecondary:
-					e.dragWin.parent.Maximize(e.dragWin)
-				case tcell.ButtonMiddle:
-					e.dragWin.parent.GrowFull(e.dragWin)
-				}
-			}
-			e.dragWin = nil
-			return false, true
-		}
-		if e.dragView != nil {
-			quit := e.dragView.HandleEvent(ev)
-			if buttons == tcell.ButtonNone {
-				e.dragView = nil
-			} else if buttons&tcell.ButtonPrimary != 0 {
-				e.trackDragScroll(e.dragView, my)
-			}
-			return quit, true
-		}
-
-		// Global Tag clicks
-		if my == 0 {
-			word := e.tag.GetClickWord(mx, my)
-			if word != "" {
-				if buttons == tcell.ButtonMiddle {
-					return e.Execute(nil, nil, word), true
-				}
-				if buttons == tcell.ButtonSecondary {
-					return e.Plumb(nil, word), true
-				}
-			}
-			if buttons == tcell.ButtonPrimary {
-				e.dragView, e.focusedView = e.tag, e.tag
-			}
-			return e.tag.HandleEvent(ev), true
-		}
-
-		for _, col := range e.columns {
-			if col.Contains(mx, my) {
-				return col.HandleEvent(ev), true
-			}
-		}
+		return e.handleMouse(ev), true
 	case *tcell.EventResize:
 		e.w, e.h = e.screen.Size()
 		e.resize()

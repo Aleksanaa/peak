@@ -32,6 +32,10 @@ type Buffer struct {
 	lsrunsVer int
 }
 
+// readClipboard is indirection so paste tests do not race with async
+// clipboard writes from earlier cut tests.
+var readClipboard = clipboard.ReadAll
+
 // NewBuffer initializes a buffer with the given string content.
 func NewBuffer(content string) *Buffer {
 	b := &Buffer{
@@ -293,17 +297,17 @@ func (b *Buffer) Cut() {
 }
 
 func (b *Buffer) Paste() {
-	text, _ := clipboard.ReadAll()
+	text, _ := readClipboard()
 	if text == "" {
 		return
 	}
 	b.mutate(func() {
+		start, end := b.cursor, b.cursor
 		if b.selection.Active {
-			start, end := b.selection.Ordered()
-			b.replace(start, end, text)
-		} else {
-			b.replace(b.cursor, b.cursor, text)
+			start, end = b.selection.Ordered()
 		}
+		pasteEnd := b.replace(start, end, text)
+		b.SetSelection(start, pasteEnd)
 	})
 }
 

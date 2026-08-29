@@ -4,7 +4,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"unicode"
 
@@ -986,73 +985,4 @@ func (win *Window) reflow() {
 func (win *Window) Resize(x, y, w, h int) {
 	win.x, win.y, win.w, win.h = x, y, w, h
 	win.reflow()
-}
-
-func (win *Window) HandleEvent(ev tcell.Event) bool {
-	me, ok := ev.(*tcell.EventMouse)
-	if !ok {
-		return false
-	}
-
-	mx, my := me.Position()
-	win.tag.UpdateLayout()
-	th := win.tagHeight()
-
-	if mx == win.x {
-		if my < win.y+th {
-			return false
-		}
-		amount := my - (win.y + th) + 1
-		btns := me.Buttons()
-		if btns&tcell.ButtonPrimary != 0 {
-			if win.editor.scrollWin == nil {
-				win.body.Scroll(-amount)
-				win.editor.scrollStartTime = time.Now()
-			}
-			win.editor.scrollWin, win.editor.scrollAmount, win.editor.scrollDir = win, amount, -1
-		} else if btns&tcell.ButtonSecondary != 0 {
-			if win.editor.scrollWin == nil {
-				win.body.Scroll(amount)
-				win.editor.scrollStartTime = time.Now()
-			}
-			win.editor.scrollWin, win.editor.scrollAmount, win.editor.scrollDir = win, amount, 1
-		} else if btns&tcell.ButtonMiddle != 0 {
-			if scroll, total, visible := win.body.GetScroll(); visible > 0 && total > 0 {
-				newScroll := ((my - (win.y + th)) * total) / visible
-				win.body.Scroll(newScroll - scroll)
-			}
-		}
-		return false
-	}
-
-	target := win.body
-	if my < win.y+th {
-		target = win.tag
-	}
-
-	win.lk.Lock()
-	target.HandleEvent(ev)
-	btns := me.Buttons()
-	var word string
-	var q0, q1 int
-	if btns&(tcell.ButtonMiddle|tcell.ButtonSecondary) != 0 && (!target.IsRaw() || me.Modifiers()&tcell.ModCtrl != 0) {
-		word = target.GetClickWord(mx, my)
-		if word != "" {
-			q0, q1 = win.clickWordOffsets(target, mx, my, word)
-			if btns&tcell.ButtonMiddle != 0 {
-				win.broadcastEvent('M', 'x', q0, q1, 0, word)
-			} else {
-				win.broadcastEvent('M', 'l', q0, q1, 0, word)
-			}
-		}
-	}
-	win.lk.Unlock()
-
-	if word == "" {
-		return false
-	}
-	if btns&tcell.ButtonMiddle != 0 {
-		return win.onExec(win.parent, win, word)
-	}
-	return win.editor.Plumb(win, word)
 }

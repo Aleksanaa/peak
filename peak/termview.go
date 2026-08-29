@@ -508,28 +508,9 @@ func (tv *TermView) HandleEvent(ev tcell.Event) bool {
 			isMotion, isRelease := false, false
 			btnReport := 0
 
-			if buttons != tv.lastButtons {
+			if code, release, changed := mouseButtonChange(tv.lastButtons, buttons); changed {
 				handled = true
-				if buttons == tcell.ButtonNone {
-					isRelease = true
-					switch {
-					case tv.lastButtons&tcell.ButtonPrimary != 0:
-						btnReport = 0
-					case tv.lastButtons&tcell.ButtonMiddle != 0:
-						btnReport = 1
-					case tv.lastButtons&tcell.ButtonSecondary != 0:
-						btnReport = 2
-					}
-				} else {
-					switch {
-					case buttons&tcell.ButtonPrimary != 0:
-						btnReport = 0
-					case buttons&tcell.ButtonMiddle != 0:
-						btnReport = 1
-					case buttons&tcell.ButtonSecondary != 0:
-						btnReport = 2
-					}
-				}
+				btnReport, isRelease = code, release
 			} else if motion {
 				tv.state.Lock()
 				motionMode := tv.state.Mode(terminal.ModeMouseMotion | terminal.ModeMouseMany)
@@ -537,14 +518,7 @@ func (tv *TermView) HandleEvent(ev tcell.Event) bool {
 				tv.state.Unlock()
 
 				if buttons != tcell.ButtonNone && motionMode {
-					switch {
-					case buttons&tcell.ButtonPrimary != 0:
-						btnReport = 0
-					case buttons&tcell.ButtonMiddle != 0:
-						btnReport = 1
-					case buttons&tcell.ButtonSecondary != 0:
-						btnReport = 2
-					}
+					btnReport = sgrButton(buttons)
 					isMotion, handled = true, true
 				} else if manyMode {
 					btnReport, isMotion, handled = 3, true, true
@@ -577,6 +551,35 @@ func (tv *TermView) HandleEvent(ev tcell.Event) bool {
 		tv.lastMX, tv.lastMY, tv.lastButtons = mx, my, buttons
 	}
 	return false
+}
+
+// sgrButton maps a mouse-button mask to its SGR/X10 report code (primary 0,
+// middle 1, secondary 2). When several bits are set, middle and secondary win
+// over primary, so a chord's second button is the one reported.
+func sgrButton(mask tcell.ButtonMask) int {
+	switch {
+	case mask&tcell.ButtonMiddle != 0:
+		return 1
+	case mask&tcell.ButtonSecondary != 0:
+		return 2
+	default:
+		return 0
+	}
+}
+
+// mouseButtonChange reports how a button-mask transition should be forwarded to
+// a child program: the SGR code of the button that changed, whether it was a
+// release, and whether anything changed at all. It reports the newly pressed or
+// released button rather than the highest-priority one still held, so a chord's
+// second button (and its later release) is encoded correctly.
+func mouseButtonChange(prev, cur tcell.ButtonMask) (code int, release, changed bool) {
+	if prev == cur {
+		return 0, false, false
+	}
+	if pressed := cur &^ prev; pressed != 0 {
+		return sgrButton(pressed), false, true
+	}
+	return sgrButton(prev &^ cur), true, true
 }
 
 func (tv *TermView) encodeSGR(btn, x, y int, motion, release bool, mod tcell.ModMask) string {

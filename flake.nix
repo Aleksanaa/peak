@@ -31,7 +31,6 @@
 
                 ldflags = [
                   "-s"
-                  "-w"
                 ];
               };
             default = peak;
