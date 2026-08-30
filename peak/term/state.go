@@ -95,6 +95,7 @@ type State struct {
 	cols, rows    int
 	lines         []line
 	altLines      []line
+	head, altHead int    // ring offset: logical row 0 lives at lines[head]
 	dirty         []bool // line dirtiness
 	anydirty      bool
 	cur, curSaved cursor
@@ -173,10 +174,27 @@ func (t *State) runeWidth(r rune) int {
 	return 1
 }
 
+// rowIdx maps a logical row y (0 == top of the buffer) to its physical index
+// in the ring-backed lines slice. Valid for 0 <= y < t.rows.
+func (t *State) rowIdx(y int) int {
+	i := t.head + y
+	if i >= t.rows {
+		i -= t.rows
+	}
+	return i
+}
+
+// row returns the backing line for logical row y. Mutating elements of the
+// returned slice mutates the buffer in place.
+func (t *State) row(y int) line {
+	return t.lines[t.rowIdx(y)]
+}
+
 // Cell returns the character code, foreground color, background
 // color and mode at position (x, y) relative to the top left of the terminal.
 func (t *State) Cell(x, y int) (ch rune, fg Color, bg Color, mode int16) {
-	return t.lines[y][x].c, Color(t.lines[y][x].fg), Color(t.lines[y][x].bg), t.lines[y][x].mode
+	ln := t.row(y)
+	return ln[x].c, Color(ln[x].fg), Color(ln[x].bg), ln[x].mode
 }
 
 // Cursor returns the current position of the cursor.
@@ -288,15 +306,16 @@ func (t *State) setChar(c rune, attr *glyph, x, y int) {
 	}
 	t.changed |= ChangedScreen
 	t.dirty[y] = true
-	t.lines[y][x] = *attr
-	t.lines[y][x].c = c
+	ln := t.row(y)
+	ln[x] = *attr
+	ln[x].c = c
 	//if t.options.BrightBold && attr.mode&AttrBold != 0 && attr.fg < 8 {
 	if attr.mode&AttrBold != 0 && attr.fg < 8 {
-		t.lines[y][x].fg = attr.fg + 8
+		ln[x].fg = attr.fg + 8
 	}
 	if attr.mode&AttrReverse != 0 {
-		t.lines[y][x].fg = attr.bg
-		t.lines[y][x].bg = attr.fg
+		ln[x].fg = attr.bg
+		ln[x].bg = attr.fg
 	}
 }
 
@@ -331,6 +350,11 @@ func (t *State) resize(cols, rows int) bool {
 	if cols < 1 || rows < 1 {
 		return false
 	}
+	// Normalise the ring so physical order matches logical order; the resize
+	// logic below (slide/copy) assumes lines[i] is logical row i.
+	rotateLines(t.lines, t.head)
+	rotateLines(t.altLines, t.altHead)
+	t.head, t.altHead = 0, 0
 	slide := t.cur.y - rows + 1
 	if slide > 0 {
 		copy(t.lines, t.lines[slide:slide+rows])
@@ -382,6 +406,23 @@ func (t *State) resize(cols, rows int) bool {
 	return slide > 0
 }
 
+// rotateLines reorders s in place so that the element at index head becomes
+// index 0, undoing a ring offset. O(len(s)); only used on resize.
+func rotateLines(s []line, head int) {
+	if head <= 0 || head >= len(s) {
+		return
+	}
+	tmp := make([]line, len(s))
+	for i := range s {
+		j := head + i
+		if j >= len(s) {
+			j -= len(s)
+		}
+		tmp[i] = s[j]
+	}
+	copy(s, tmp)
+}
+
 func (t *State) clear(x0, y0, x1, y1 int) {
 	if x0 > x1 {
 		x0, x1 = x1, x0
@@ -396,11 +437,12 @@ func (t *State) clear(x0, y0, x1, y1 int) {
 	t.changed |= ChangedScreen
 	for y := y0; y <= y1; y++ {
 		t.dirty[y] = true
+		ln := t.row(y)
 		for x := x0; x <= x1; x++ {
-			t.lines[y][x].c = ' '
-			t.lines[y][x].mode = 0
-			t.lines[y][x].fg = t.cur.attr.fg
-			t.lines[y][x].bg = t.cur.attr.bg
+			ln[x].c = ' '
+			ln[x].mode = 0
+			ln[x].fg = t.cur.attr.fg
+			ln[x].bg = t.cur.attr.bg
 		}
 	}
 }
@@ -435,6 +477,7 @@ func (t *State) moveTo(x, y int) {
 
 func (t *State) swapScreen() {
 	t.lines, t.altLines = t.altLines, t.lines
+	t.head, t.altHead = t.altHead, t.head
 	t.mode ^= ModeAltScreen
 	t.dirtyAll()
 }
@@ -488,10 +531,23 @@ func between(val, min, max int) bool {
 
 func (t *State) ScrollDown(orig, n int) {
 	n = clamp(n, 0, t.bottom-orig+1)
-	t.clear(0, t.bottom-n+1, t.cols-1, t.bottom)
+	if n <= 0 {
+		return
+	}
 	t.changed |= ChangedScreen
+	if orig == 0 && t.bottom == t.rows-1 {
+		// Full-buffer scroll: rotate the ring instead of shifting every row.
+		// The n rows recycled from the bottom become blank rows at the top.
+		if t.head -= n; t.head < 0 {
+			t.head += t.rows
+		}
+		t.clear(0, 0, t.cols-1, n-1)
+		return
+	}
+	t.clear(0, t.bottom-n+1, t.cols-1, t.bottom)
 	for i := t.bottom; i >= orig+n; i-- {
-		t.lines[i], t.lines[i-n] = t.lines[i-n], t.lines[i]
+		a, b := t.rowIdx(i), t.rowIdx(i-n)
+		t.lines[a], t.lines[b] = t.lines[b], t.lines[a]
 		t.dirty[i] = true
 		t.dirty[i-n] = true
 	}
@@ -501,10 +557,21 @@ func (t *State) ScrollDown(orig, n int) {
 
 func (t *State) ScrollUp(orig, n int) {
 	n = clamp(n, 0, t.bottom-orig+1)
-	t.clear(0, orig, t.cols-1, orig+n-1)
+	if n <= 0 {
+		return
+	}
 	t.changed |= ChangedScreen
+	if orig == 0 && t.bottom == t.rows-1 {
+		// Full-buffer scroll: rotate the ring instead of shifting every row.
+		// The n rows recycled from the top become blank rows at the bottom.
+		t.head = t.rowIdx(n)
+		t.clear(0, t.rows-n, t.cols-1, t.rows-1)
+		return
+	}
+	t.clear(0, orig, t.cols-1, orig+n-1)
 	for i := orig; i <= t.bottom-n; i++ {
-		t.lines[i], t.lines[i+n] = t.lines[i+n], t.lines[i]
+		a, b := t.rowIdx(i), t.rowIdx(i+n)
+		t.lines[a], t.lines[b] = t.lines[b], t.lines[a]
 		t.dirty[i] = true
 		t.dirty[i+n] = true
 	}
@@ -725,7 +792,8 @@ func (t *State) insertBlanks(n int) {
 	if dst >= t.cols {
 		t.clear(t.cur.x, t.cur.y, t.cols-1, t.cur.y)
 	} else {
-		copy(t.lines[t.cur.y][dst:dst+size], t.lines[t.cur.y][src:src+size])
+		ln := t.row(t.cur.y)
+		copy(ln[dst:dst+size], ln[src:src+size])
 		t.clear(src, t.cur.y, dst-1, t.cur.y)
 	}
 }
@@ -754,7 +822,8 @@ func (t *State) deleteChars(n int) {
 	if src >= t.cols {
 		t.clear(t.cur.x, t.cur.y, t.cols-1, t.cur.y)
 	} else {
-		copy(t.lines[t.cur.y][dst:dst+size], t.lines[t.cur.y][src:src+size])
+		ln := t.row(t.cur.y)
+		copy(ln[dst:dst+size], ln[src:src+size])
 		t.clear(t.cols-n, t.cur.y, t.cols-1, t.cur.y)
 	}
 }

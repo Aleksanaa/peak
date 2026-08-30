@@ -14,7 +14,7 @@ func (t *State) parse(c rune) {
 
 	w := t.runeWidth(c)
 	if t.mode&ModeWrap != 0 && (t.cur.state&cursorWrapNext != 0 || t.cur.x+w > t.cols) {
-		t.lines[t.cur.y][t.cur.x].mode |= AttrWrap
+		t.row(t.cur.y)[t.cur.x].mode |= AttrWrap
 		t.newline(true)
 	}
 
