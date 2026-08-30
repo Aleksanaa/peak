@@ -38,6 +38,19 @@ type TermView struct {
 	cmd          string       // command used to start the terminal, for session save
 	OnCWD        func(string) // called on main goroutine with decoded absolute path; set by owner
 	onCWDStarted bool         // true once OnCWD has been called at least once
+
+	drawSnap []snapCell // scratch buffer reused across Draw calls
+}
+
+// snapCell is a copy of one grid cell, taken under the state lock so the rest of
+// Draw (style building + s.Put) can run unlocked. Keeping the locked region to a
+// plain memory copy is what lets us drive redraws off Show()'s blocking flush
+// (natural backpressure) without starving the parse goroutine.
+type snapCell struct {
+	c    rune
+	fg   terminal.Color
+	bg   terminal.Color
+	mode int16
 }
 
 func (tv *TermView) IsRaw() bool {
@@ -142,20 +155,39 @@ func NewTermView(editor *Editor, sess session.Session, x, y, w, h int, onClose f
 }
 
 func (tv *TermView) Draw(s tcell.Screen) {
-	tv.state.Lock()
-	defer tv.state.Unlock()
+	w, h := tv.w, tv.h
+	if w <= 0 || h <= 0 {
+		return
+	}
+	if cap(tv.drawSnap) < w*h {
+		tv.drawSnap = make([]snapCell, w*h)
+	}
+	snap := tv.drawSnap[:w*h]
 
-	limit := max(maxHistory, tv.h)
-	for y := 0; y < tv.h; y++ {
+	// Snapshot the visible grid under the lock, then release it before painting
+	// so the parse goroutine can keep running while we build styles and flush.
+	tv.state.Lock()
+	limit := max(maxHistory, h)
+	for y := 0; y < h; y++ {
 		screenY := tv.scroll.Pos + y
-		for x := 0; x < tv.w; x++ {
-			char, fg, bg, mode := ' ', terminal.DefaultFG, terminal.DefaultBG, int16(0)
+		for x := 0; x < w; x++ {
+			cell := snapCell{c: ' ', fg: terminal.DefaultFG, bg: terminal.DefaultBG}
 			if screenY >= 0 && screenY < limit {
 				c, f, b, m := tv.state.Cell(x, screenY)
-				if c == 0 {
-					continue
-				}
-				char, fg, bg, mode = c, f, b, m
+				cell = snapCell{c: c, fg: f, bg: b, mode: m}
+			}
+			snap[y*w+x] = cell
+		}
+	}
+	tv.state.Unlock()
+
+	for y := 0; y < h; y++ {
+		screenY := tv.scroll.Pos + y
+		for x := 0; x < w; x++ {
+			sc := snap[y*w+x]
+			char, fg, bg, mode := sc.c, sc.fg, sc.bg, sc.mode
+			if char == 0 {
+				continue
 			}
 
 			style := tcell.StyleDefault.
