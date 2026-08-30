@@ -13,6 +13,7 @@ type csiEscape struct {
 	priv bool
 	gt   bool
 	eq   bool
+	lt   bool
 }
 
 func (c *csiEscape) reset() {
@@ -22,6 +23,7 @@ func (c *csiEscape) reset() {
 	c.priv = false
 	c.gt = false
 	c.eq = false
+	c.lt = false
 }
 
 func (c *csiEscape) put(b byte) bool {
@@ -51,6 +53,9 @@ func (c *csiEscape) parse() {
 		i = 1
 	case '=':
 		c.eq = true
+		i = 1
+	case '<':
+		c.lt = true
 		i = 1
 	}
 	// Decode ';'-separated decimal parameters directly from the bytes. This
@@ -208,11 +213,12 @@ func (t *State) handleCSI() {
 	case 's': // DECSC - save cursor position (ANSI.SYS)
 		t.saveCursor()
 	case 'u':
-		if c.priv || c.gt || c.eq { // CSI ? u / CSI > u / CSI = N u - kitty keyboard protocol
+		if c.priv || c.gt || c.eq || c.lt { // kitty keyboard protocol (CSI ?/>/</= ... u)
 			if c.gt || c.priv {
 				t.respond("\033[?0u")
 			}
-			// CSI = N u: push+set flags — accepted silently (no kitty keyboard impl)
+			// CSI < u (pop) / CSI = N u (push+set): accepted silently (no kitty
+			// keyboard impl); must NOT be treated as DECRC.
 		} else {
 			t.restoreCursor() // DECRC - restore cursor position (ANSI.SYS)
 		}
