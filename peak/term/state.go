@@ -164,6 +164,11 @@ func (t *State) runeWidth(r rune) int {
 	if r < 32 {
 		return 0
 	}
+	// Printable ASCII is always width 1; skip the Unicode table lookups for the
+	// overwhelmingly common case (no combining marks or wide chars below U+0080).
+	if r < 0x80 {
+		return 1
+	}
 	if unicode.IsMark(r) || unicode.Is(unicode.Cf, r) {
 		return 1
 	}
