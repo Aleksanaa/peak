@@ -40,12 +40,12 @@ func (t *State) parseEsc(c rune) {
 	if t.handleControlCodes(c) {
 		return
 	}
-	next := t.parse
+	next := stParse
 	switch c {
 	case '[':
-		next = t.parseEscCSI
+		next = stEscCSI
 	case '#':
-		next = t.parseEscTest
+		next = stEscTest
 	case 'P', // DCS - Device Control String
 		'_', // APC - Application Program Command
 		'^', // PM - Privacy Message
@@ -53,9 +53,9 @@ func (t *State) parseEsc(c rune) {
 		'k': // old title set compatibility
 		t.str.reset()
 		t.str.typ = c
-		next = t.parseEscStr
+		next = stEscStr
 	case '(': // set primary charset G0
-		next = t.parseEscAltCharset
+		next = stEscAltCharset
 	case ')', // set secondary charset G1 (ignored)
 		'*', // set tertiary charset G2 (ignored)
 		'+': // set quaternary charset G3 (ignored)
@@ -99,7 +99,7 @@ func (t *State) parseEscCSI(c rune) {
 		return
 	}
 	if t.csi.put(byte(c)) {
-		t.state = t.parse
+		t.state = stParse
 		t.handleCSI()
 	}
 }
@@ -107,9 +107,9 @@ func (t *State) parseEscCSI(c rune) {
 func (t *State) parseEscStr(c rune) {
 	switch c {
 	case '\033':
-		t.state = t.parseEscStrEnd
+		t.state = stEscStrEnd
 	case '\a': // backwards compatiblity to xterm
-		t.state = t.parse
+		t.state = stParse
 		t.handleSTR()
 	default:
 		t.str.put(c)
@@ -120,7 +120,7 @@ func (t *State) parseEscStrEnd(c rune) {
 	if t.handleControlCodes(c) {
 		return
 	}
-	t.state = t.parse
+	t.state = stParse
 	if c == '\\' {
 		t.handleSTR()
 	}
@@ -143,7 +143,7 @@ func (t *State) parseEscAltCharset(c rune) {
 	default:
 		t.logf("unknown alt. charset '%c'\n", c)
 	}
-	t.state = t.parse
+	t.state = stParse
 }
 
 func (t *State) parseEscTest(c rune) {
@@ -158,7 +158,7 @@ func (t *State) parseEscTest(c rune) {
 			}
 		}
 	}
-	t.state = t.parse
+	t.state = stParse
 }
 
 func (t *State) handleControlCodes(c rune) bool {
@@ -186,7 +186,7 @@ func (t *State) handleControlCodes(c rune) bool {
 	// ESC
 	case 033:
 		t.csi.reset()
-		t.state = t.parseEsc
+		t.state = stEsc
 	// SO, SI
 	case 016, 017:
 		// different charsets not supported. apps should use the correct

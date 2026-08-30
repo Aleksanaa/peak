@@ -79,7 +79,21 @@ type cursor struct {
 	state uint8
 }
 
-type parseState func(c rune)
+// parseState selects which byte-parsing routine put dispatches to. It was
+// previously a stored method value (func(rune)), but assigning a method value
+// on every state transition heap-allocates a closure; an enum + switch avoids
+// that per-byte allocation entirely.
+type parseState uint8
+
+const (
+	stParse parseState = iota
+	stEsc
+	stEscCSI
+	stEscStr
+	stEscStrEnd
+	stEscAltCharset
+	stEscTest
+)
 
 // State represents the terminal emulation state. Use Lock/Unlock
 // methods to synchronize data access with VT.
@@ -253,7 +267,22 @@ func (t *State) restoreCursor() {
 }
 
 func (t *State) put(c rune) {
-	t.state(c)
+	switch t.state {
+	case stParse:
+		t.parse(c)
+	case stEsc:
+		t.parseEsc(c)
+	case stEscCSI:
+		t.parseEscCSI(c)
+	case stEscStr:
+		t.parseEscStr(c)
+	case stEscStrEnd:
+		t.parseEscStrEnd(c)
+	case stEscAltCharset:
+		t.parseEscAltCharset(c)
+	case stEscTest:
+		t.parseEscTest(c)
+	}
 }
 
 func (t *State) putTab(forward bool) {

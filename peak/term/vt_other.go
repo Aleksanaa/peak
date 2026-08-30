@@ -42,7 +42,7 @@ func Create(state *State, rc io.ReadCloser) (*VT, error) {
 func (t *VT) init() {
 	t.br = bufio.NewReader(t.rc)
 	t.dest.numlock = true
-	t.dest.state = t.dest.parse
+	t.dest.state = stParse
 	t.dest.cur.attr.fg = DefaultFG
 	t.dest.cur.attr.bg = DefaultBG
 	t.Resize(80, 24)

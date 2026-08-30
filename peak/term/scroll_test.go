@@ -78,6 +78,44 @@ func trimStr(s string) string {
 	return string(bytes.TrimRight([]byte(s), " \x00"))
 }
 
+// BenchmarkCursorMotion is CSI-heavy: absolute cursor positioning with no cell
+// writes, mirroring vtebench's cursor_motion.
+func BenchmarkCursorMotion(b *testing.B) {
+	var buf bytes.Buffer
+	for r := 1; r <= 24; r++ {
+		for c := 1; c <= 80; c++ {
+			fmt.Fprintf(&buf, "\033[%d;%dH", r, c)
+		}
+	}
+	payload := buf.Bytes()
+	var st State
+	vt, _ := Create(&st, nil)
+	vt.Resize(80, 1000)
+	b.SetBytes(int64(len(payload)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		vt.Write(payload)
+	}
+}
+
+// BenchmarkDenseCells writes cells wrapped in SGR color changes, mirroring
+// vtebench's dense_cells (CSI 'm' parsing plus cell writes).
+func BenchmarkDenseCells(b *testing.B) {
+	var buf bytes.Buffer
+	for i := 0; i < 2000; i++ {
+		fmt.Fprintf(&buf, "\033[%d;%dmX", 30+(i%8), 40+((i+1)%8))
+	}
+	payload := buf.Bytes()
+	var st State
+	vt, _ := Create(&st, nil)
+	vt.Resize(80, 1000)
+	b.SetBytes(int64(len(payload)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		vt.Write(payload)
+	}
+}
+
 func scrollPayload(lines int) []byte {
 	var buf bytes.Buffer
 	for i := 0; i < lines; i++ {

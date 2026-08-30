@@ -2,8 +2,6 @@ package terminal
 
 import (
 	"fmt"
-	"strconv"
-	"strings"
 )
 
 // CSI (Control Sequence Introducer)
@@ -40,27 +38,43 @@ func (c *csiEscape) parse() {
 	if len(c.buf) == 1 {
 		return
 	}
-	s := string(c.buf)
 	c.args = c.args[:0]
-	if s[0] == '?' {
+	// b is the parameter bytes, minus the trailing final (mode) byte.
+	b := c.buf[:len(c.buf)-1]
+	i := 0
+	switch b[0] {
+	case '?':
 		c.priv = true
-		s = s[1:]
-	} else if s[0] == '>' {
+		i = 1
+	case '>':
 		c.gt = true
-		s = s[1:]
-	} else if s[0] == '=' {
+		i = 1
+	case '=':
 		c.eq = true
-		s = s[1:]
+		i = 1
 	}
-	s = s[:len(s)-1]
-	ss := strings.Split(s, ";")
-	for _, p := range ss {
-		i, err := strconv.Atoi(p)
-		if err != nil {
-			//t.logf("invalid CSI arg '%s'\n", p)
-			break
+	// Decode ';'-separated decimal parameters directly from the bytes. This
+	// mirrors the old strings.Split + strconv.Atoi (including its behaviour of
+	// stopping at the first empty or non-numeric field) but allocates nothing.
+	num, has := 0, false
+	for ; i < len(b); i++ {
+		ch := b[i]
+		switch {
+		case ch >= '0' && ch <= '9':
+			num = num*10 + int(ch-'0')
+			has = true
+		case ch == ';':
+			if !has {
+				return
+			}
+			c.args = append(c.args, num)
+			num, has = 0, false
+		default:
+			return
 		}
-		c.args = append(c.args, i)
+	}
+	if has {
+		c.args = append(c.args, num)
 	}
 }
 
