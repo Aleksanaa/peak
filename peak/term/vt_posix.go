@@ -127,6 +127,14 @@ func (t *VT) parse(data []byte) int {
 	for i < len(data) {
 		c := data[i]
 		if c < utf8.RuneSelf { // ASCII: no decode needed
+			// While collecting CSI parameters, bulk-copy the digit/';' run
+			// instead of dispatching each byte through put().
+			if t.dest.state == stEscCSI {
+				if n := t.dest.feedCSIParams(data[i:]); n > 0 {
+					i += n
+					continue
+				}
+			}
 			t.dest.put(rune(c))
 			i++
 			continue

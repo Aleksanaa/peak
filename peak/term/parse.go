@@ -104,6 +104,27 @@ func (t *State) parseEscCSI(c rune) {
 	}
 }
 
+// feedCSIParams bulk-appends a run of CSI parameter bytes (ASCII digits, ':'
+// and ';') to the pending CSI buffer while in the stEscCSI state, so a long
+// numeric parameter list — e.g. a truecolor SGR like "38;2;255;128;0" — is
+// copied in one shot instead of dispatched byte-by-byte through put(). It
+// returns the number of bytes consumed; 0 means the caller should fall back to
+// the per-byte path (which handles the terminator, control codes, and overflow).
+func (t *State) feedCSIParams(data []byte) int {
+	j := 0
+	for j < len(data) {
+		if b := data[j]; b < 0x30 || b > 0x3b { // outside '0'..';'
+			break
+		}
+		j++
+	}
+	if j == 0 || len(t.csi.buf)+j >= 256 {
+		return 0
+	}
+	t.csi.buf = append(t.csi.buf, data[:j]...)
+	return j
+}
+
 func (t *State) parseEscStr(c rune) {
 	switch c {
 	case '\033':
