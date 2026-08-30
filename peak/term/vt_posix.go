@@ -3,7 +3,6 @@
 package terminal
 
 import (
-	"bufio"
 	"bytes"
 	"io"
 	"os"
@@ -18,8 +17,9 @@ import (
 type VT struct {
 	dest *State
 	rc   io.ReadCloser
-	br   *bufio.Reader
 	pty  *os.File
+	buf  []byte // read buffer; the first `rem` bytes are a carried partial rune
+	rem  int
 }
 
 // Start initializes a virtual terminal emulator with the target state
@@ -52,7 +52,7 @@ func Create(state *State, rc io.ReadCloser) (*VT, error) {
 }
 
 func (t *VT) init() {
-	t.br = bufio.NewReader(t.rc)
+	t.buf = make([]byte, 4096)
 	t.dest.numlock = true
 	t.dest.state = t.dest.parse
 	t.dest.cur.attr.fg = DefaultFG
@@ -99,51 +99,50 @@ func (t *VT) Close() error {
 	return t.rc.Close()
 }
 
-// Parse blocks on read on pty or io.ReadCloser, then parses sequences until
-// buffer empties. State is locked as soon as first rune is read, and unlocked
-// when buffer is empty.
-// TODO: add tests for expected blocking behavior
+// Parse blocks on a single read from the pty or io.ReadCloser, then decodes and
+// parses the whole chunk under one lock. A trailing incomplete rune is carried
+// over to the next call. Returns the read error (e.g. io.EOF) after processing
+// any bytes that came with it.
 func (t *VT) Parse() error {
-	var locked bool
-	defer func() {
-		if locked {
-			t.dest.unlock()
-		}
-	}()
-	for {
-		c, sz, err := t.br.ReadRune()
-		if err != nil {
-			return err
-		}
-		if c == unicode.ReplacementChar && sz == 1 {
-			t.dest.logln("invalid utf8 sequence")
-			break
-		}
-		if !locked {
-			t.dest.lock()
-			locked = true
-		}
-
-		// put rune for parsing and update state
-		t.dest.put(c)
-
-		// break if our buffer is empty, or if buffer contains an
-		// incomplete rune.
-		n := t.br.Buffered()
-		if n == 0 || (n < 4 && !fullRuneBuffered(t.br)) {
-			break
+	n, err := t.rc.Read(t.buf[t.rem:])
+	if n > 0 {
+		data := t.buf[:t.rem+n]
+		t.dest.lock()
+		consumed := t.parse(data)
+		t.dest.unlock()
+		t.rem = len(data) - consumed
+		if t.rem > 0 {
+			copy(t.buf, data[consumed:])
 		}
 	}
-	return nil
+	return err
 }
 
-func fullRuneBuffered(br *bufio.Reader) bool {
-	n := br.Buffered()
-	buf, err := br.Peek(n)
-	if err != nil {
-		return false
+// parse decodes UTF-8 directly over data, feeding each rune to the state
+// machine, and returns the number of bytes consumed. It stops before a trailing
+// incomplete rune so the caller can carry those bytes over. The state mutex
+// must be held.
+func (t *VT) parse(data []byte) int {
+	i := 0
+	for i < len(data) {
+		c := data[i]
+		if c < utf8.RuneSelf { // ASCII: no decode needed
+			t.dest.put(rune(c))
+			i++
+			continue
+		}
+		if !utf8.FullRune(data[i:]) {
+			break // incomplete trailing rune; carry over
+		}
+		r, sz := utf8.DecodeRune(data[i:])
+		if r == utf8.RuneError && sz == 1 {
+			t.dest.logln("invalid utf8 sequence")
+		} else {
+			t.dest.put(r)
+		}
+		i += sz
 	}
-	return utf8.FullRune(buf)
+	return i
 }
 
 // Resize reports new size to pty and updates state.

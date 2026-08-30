@@ -100,6 +100,39 @@ func BenchmarkScrollTall(b *testing.B) {
 	}
 }
 
+// repeatReader endlessly re-serves data, for benchmarking the Parse path.
+type repeatReader struct {
+	data []byte
+	off  int
+}
+
+func (r *repeatReader) Read(p []byte) (int, error) {
+	if r.off >= len(r.data) {
+		r.off = 0
+	}
+	n := copy(p, r.data[r.off:])
+	r.off += n
+	return n, nil
+}
+
+func (r *repeatReader) Close() error { return nil }
+
+// BenchmarkParse measures the production path: VT.Parse reading chunks from a
+// stream (as termview does), against peak's tall history buffer.
+func BenchmarkParse(b *testing.B) {
+	payload := scrollPayload(2000)
+	var st State
+	vt, _ := Create(&st, &repeatReader{data: payload})
+	vt.Resize(80, 1000)
+	b.SetBytes(4096) // approx bytes consumed per Parse call
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := vt.Parse(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 // BenchmarkScrollScreen is the same stream against a normal 80x24 screen.
 func BenchmarkScrollScreen(b *testing.B) {
 	payload := scrollPayload(2000)
