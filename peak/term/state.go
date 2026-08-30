@@ -174,12 +174,22 @@ func (t *State) Unlock() {
 	t.mu.Unlock()
 }
 
-func (t *State) runeWidth(r rune) int {
+// bmpWidth caches the display width (0, 1 or 2) of every Basic Multilingual
+// Plane rune, so the common case is a single array lookup instead of three
+// Unicode table searches. Built once at init from the same data as widthSlow.
+var bmpWidth [0x10000]uint8
+
+func init() {
+	for r := rune(0); r < 0x10000; r++ {
+		bmpWidth[r] = uint8(widthSlow(r))
+	}
+}
+
+// widthSlow computes a rune's display width via the Unicode tables.
+func widthSlow(r rune) int {
 	if r < 32 {
 		return 0
 	}
-	// Printable ASCII is always width 1; skip the Unicode table lookups for the
-	// overwhelmingly common case (no combining marks or wide chars below U+0080).
 	if r < 0x80 {
 		return 1
 	}
@@ -191,6 +201,19 @@ func (t *State) runeWidth(r rune) int {
 		return 2
 	}
 	return 1
+}
+
+func (t *State) runeWidth(r rune) int {
+	if r < 0x80 { // printable ASCII fast path (also covers control chars)
+		if r < 32 {
+			return 0
+		}
+		return 1
+	}
+	if r < rune(len(bmpWidth)) {
+		return int(bmpWidth[r])
+	}
+	return widthSlow(r) // astral planes: rare, compute on demand
 }
 
 // rowIdx maps a logical row y (0 == top of the buffer) to its physical index
