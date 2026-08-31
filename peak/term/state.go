@@ -453,10 +453,10 @@ func (t *State) resize(cols, rows int) bool {
 	t.moveTo(t.cur.x, t.cur.y)
 	for i := 0; i < 2; i++ {
 		if mincols < cols && minrows > 0 {
-			t.clear(mincols, 0, cols-1, minrows-1)
+			t.clearRegion(mincols, 0, cols-1, minrows-1, DefaultFG, DefaultBG)
 		}
 		if cols > 0 && minrows < rows {
-			t.clear(0, minrows, cols-1, rows-1)
+			t.clearRegion(0, minrows, cols-1, rows-1, DefaultFG, DefaultBG)
 		}
 		t.swapScreen()
 	}
@@ -481,6 +481,17 @@ func rotateLines(s []line, head int) {
 }
 
 func (t *State) clear(x0, y0, x1, y1 int) {
+	t.clearRegion(x0, y0, x1, y1, t.cur.attr.fg, t.cur.attr.bg)
+}
+
+// clearRegion blanks a rectangle, filling each cell with a space and the given
+// colors. Erase operations (ED/EL/ECH) pass the active pen so background-color
+// erase works; resize passes the defaults, because cells newly exposed by a
+// resize were never written by the application and must not inherit whatever
+// background happened to be set — otherwise a full-screen app that colors its
+// background (e.g. a TUI on the alternate screen) leaves a colored band behind
+// on the primary screen after it exits.
+func (t *State) clearRegion(x0, y0, x1, y1 int, fg, bg Color) {
 	if x0 > x1 {
 		x0, x1 = x1, x0
 	}
@@ -498,8 +509,8 @@ func (t *State) clear(x0, y0, x1, y1 int) {
 		for x := x0; x <= x1; x++ {
 			ln[x].c = ' '
 			ln[x].mode = 0
-			ln[x].fg = t.cur.attr.fg
-			ln[x].bg = t.cur.attr.bg
+			ln[x].fg = fg
+			ln[x].bg = bg
 		}
 	}
 }
