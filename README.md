@@ -18,6 +18,8 @@ CGO_ENABLED=0 go build .
 ./peak
 ```
 
+Note that macOS doesn't support middle-click. You may want to install and run [MiddleClick](https://github.com/artginzburg/MiddleClick).
+
 ## Usage
 
 Simimar to [Acme's](https://9p.io/wiki/plan9/Using_acme/index.html) but sometimes may be different.
