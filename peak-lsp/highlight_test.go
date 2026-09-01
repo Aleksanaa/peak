@@ -572,22 +572,6 @@ func TestCommitHighlightTreeRejectsSnapshotAfterLaterEdit(t *testing.T) {
 	}
 }
 
-func TestCommitHighlightTreeRejectsBodyChange(t *testing.T) {
-	cur := &highlightState{body: []byte("abcXYZ"), gen: 5}
-	snap := highlightSnapshot{body: []byte("abc"), gen: 5}
-	newTree := testTreeForRelease()
-
-	if commitHighlightTree(cur, newTree, snap) {
-		t.Fatal("commitHighlightTree returned true on body change, want false")
-	}
-	if cur.tree != nil {
-		t.Fatal("cur.tree should be nil after rejected commit")
-	}
-	if newTree.RootNode() != nil {
-		t.Fatal("rejected tree should have been released")
-	}
-}
-
 func TestCommitHighlightTreeWithNilTree(t *testing.T) {
 	cur := &highlightState{body: []byte("abc"), gen: 5}
 	snap := highlightSnapshot{body: []byte("abc"), gen: 5}

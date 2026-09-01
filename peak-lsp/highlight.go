@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bytes"
-
 	"github.com/aleksana/peak/internal/coords"
 	"github.com/aleksana/peak/internal/wevent"
 	"github.com/odvcencio/gotreesitter"
@@ -44,8 +42,11 @@ func snapshotHighlightState(cur *highlightState) highlightSnapshot {
 	return snap
 }
 
+// commitHighlightTree installs the freshly parsed tree only if no edit landed
+// while the parse ran without the lock. cur.gen is bumped on every body change
+// (under the same mutex that snapshots it), so comparing gen alone is sufficient.
 func commitHighlightTree(cur *highlightState, tree *gotreesitter.Tree, snap highlightSnapshot) bool {
-	if cur.gen != snap.gen || !bytes.Equal(cur.body, snap.body) {
+	if cur.gen != snap.gen {
 		if tree != nil {
 			tree.Release()
 		}
