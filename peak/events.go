@@ -294,9 +294,9 @@ func (f *winDataFile) Close() error {
 // ---- winColorFile ----
 
 // winColorFile accumulates all written bytes in buf and atomically replaces
-// the window's color spans on Close. This avoids both partial-state visibility
-// during chunked 9P writes and the white-flash caused by clearing spans on
-// every mutation.
+// the window's color spans on Close. Buffering until Close avoids partial-state
+// visibility during chunked 9P writes; adjustSpans keeps existing spans aligned
+// with edits in the meantime, so late-arriving spans just overwrite cleanly.
 type winColorFile struct {
 	vfs.FileStub
 	win *Window
@@ -330,9 +330,7 @@ func (f *winColorFile) Close() error {
 	}
 	sort.SliceStable(newSpans, func(i, j int) bool { return newSpans[i].q0 < newSpans[j].q0 })
 	f.win.lk.Lock()
-	if f.win.mutSeq == f.win.bodySnapSeq {
-		f.win.spans = newSpans
-	}
+	f.win.spans = newSpans
 	f.win.lk.Unlock()
 	f.win.editor.Redraw()
 	return nil

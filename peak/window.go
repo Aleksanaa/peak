@@ -631,8 +631,6 @@ type Window struct {
 	addrQ0, addrQ1 int
 
 	spans []colorSpan
-
-	mutSeq, bodySnapSeq uint64
 }
 
 func (w *Window) Layout()            {}
@@ -879,7 +877,6 @@ func NewWindow(tag, body string, parent *Column, editor *Editor, x, y, w, h int,
 	win.body = tv
 	win.bodyView.content = tv
 	tv.buffer.onMutate = func(q0, q1Old, q1New int, text string) {
-		win.mutSeq++
 		win.adjustSpans(q0, q1Old, q1New)
 		win.addrQ0 = adjustPoint(win.addrQ0, q0, q1Old, q1New)
 		win.addrQ1 = adjustPoint(win.addrQ1, q0, q1Old, q1New)

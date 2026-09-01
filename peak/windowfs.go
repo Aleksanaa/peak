@@ -36,7 +36,6 @@ func newWinBodyFile(win *Window, flag int) *winBodyFile {
 	if flag&os.O_WRONLY == 0 {
 		win.lk.Lock()
 		f.Data = []byte(win.body.GetBuffer().GetText())
-		win.bodySnapSeq = win.mutSeq
 		win.lk.Unlock()
 	}
 	return f
