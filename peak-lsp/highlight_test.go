@@ -491,17 +491,22 @@ func TestSnapshotHighlightStateWithNilTree(t *testing.T) {
 	}
 }
 
-func TestSnapshotBodyIsIndependentCopy(t *testing.T) {
-	cur := &highlightState{
-		body: []byte("abc"),
-		tree: nil,
-		gen:  1,
-	}
-	snap := snapshotHighlightState(cur)
-	cur.body[0] = 'X'
+// TestEditsPublishFreshBody guards the invariant that lets a snapshot share the
+// body slice with the off-lock parser: an edit must publish a new slice and
+// never mutate the previously published one in place.
+func TestEditsPublishFreshBody(t *testing.T) {
+	cur := &highlightState{body: []byte("abc")}
+	prior := cur.body
+	priorCopy := append([]byte(nil), prior...)
 
-	if snap.body[0] != 'a' {
-		t.Fatal("modifying cur.body affected snap.body; body was not copied")
+	if !applyEventToIncrementalState(cur, wevent.Event{Origin: 'K', Type: 'I', Q0: 1, Q1: 1, Text: "X"}) {
+		t.Fatal("applyEventToIncrementalState returned false")
+	}
+	if !bytes.Equal(prior, priorCopy) {
+		t.Fatalf("edit mutated prior body in place: got %q, want %q", prior, priorCopy)
+	}
+	if string(cur.body) != "aXbc" {
+		t.Fatalf("cur.body = %q, want %q", cur.body, "aXbc")
 	}
 }
 

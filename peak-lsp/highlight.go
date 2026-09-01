@@ -17,6 +17,9 @@ type highlightState struct {
 	lang string
 	tree *gotreesitter.Tree
 	snap []byte
+	// body is immutable once published: every edit allocates a fresh slice
+	// rather than writing in place, so a snapshot can share it with the parser
+	// running off-lock. TestEditsPublishFreshBody guards this invariant.
 	body []byte
 	gen  uint64
 }
@@ -31,15 +34,17 @@ type highlightSnapshot struct {
 func snapshotHighlightState(cur *highlightState) highlightSnapshot {
 	var treeCopy *gotreesitter.Tree
 	if cur.tree != nil {
+		// The tree is edited in place by the event reader, so the parser needs
+		// its own copy. The body is never mutated in place (see highlightState),
+		// so it can be shared instead of copied.
 		treeCopy = cur.tree.Copy()
 	}
-	snap := highlightSnapshot{
-		body: append([]byte(nil), cur.body...),
+	return highlightSnapshot{
+		body: cur.body,
 		tree: treeCopy,
 		hl:   cur.hl,
 		gen:  cur.gen,
 	}
-	return snap
 }
 
 // commitHighlightTree installs the freshly parsed tree only if no edit landed
