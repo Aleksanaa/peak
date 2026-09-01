@@ -354,22 +354,6 @@ func TestResetIncrementalStateNilTreeNoop(t *testing.T) {
 	}
 }
 
-func TestResetAfterUnknownBodyChangeClearsBodyTreeAndSnap(t *testing.T) {
-	cur := &highlightState{
-		body: []byte("old"),
-		tree: testTreeForRelease(),
-		snap: []byte("old"),
-		lang: "Go",
-	}
-	resetAfterUnknownBodyChange(cur)
-	if cur.body != nil || cur.tree != nil || cur.snap != nil {
-		t.Fatalf("state after reset = %#v, want nil body/tree/snap", cur)
-	}
-	if cur.lang != "Go" {
-		t.Fatalf("lang = %q, want Go", cur.lang)
-	}
-}
-
 func TestOrdinaryInsertKeepsMirrorAndAdvancesGen(t *testing.T) {
 	cur := &highlightState{body: []byte("abc"), tree: testTreeForRelease(), gen: 5}
 	if !applyEventToIncrementalState(cur, wevent.Event{Origin: 'K', Type: 'I', Q0: 1, Q1: 1, Text: "X"}) {

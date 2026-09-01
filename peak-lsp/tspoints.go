@@ -1,7 +1,6 @@
 package main
 
 import (
-	"github.com/aleksana/peak/internal/coords"
 	"github.com/odvcencio/gotreesitter"
 )
 
@@ -32,15 +31,4 @@ func advancePoint(start gotreesitter.Point, text []byte) gotreesitter.Point {
 		point.Column++
 	}
 	return point
-}
-
-func tsRangesToByteRanges(ranges []gotreesitter.Range) []coords.ByteRange {
-	if len(ranges) == 0 {
-		return nil
-	}
-	out := make([]coords.ByteRange, len(ranges))
-	for i, r := range ranges {
-		out[i] = coords.ByteRange{Lo: int(r.StartByte), Hi: int(r.EndByte)}
-	}
-	return out
 }

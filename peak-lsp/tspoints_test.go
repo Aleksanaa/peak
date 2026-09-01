@@ -3,7 +3,6 @@ package main
 import (
 	"testing"
 
-	"github.com/aleksana/peak/internal/coords"
 	"github.com/odvcencio/gotreesitter"
 )
 
@@ -53,17 +52,5 @@ func TestAdvancePointEmpty(t *testing.T) {
 	got := advancePoint(start, []byte{})
 	if got != start {
 		t.Fatalf("advancePoint(empty) = %#v, want %#v", got, start)
-	}
-}
-
-func TestTsRangesToByteRanges(t *testing.T) {
-	if got := tsRangesToByteRanges(nil); got != nil {
-		t.Fatalf("tsRangesToByteRanges(nil) = %v, want nil", got)
-	}
-	in := []gotreesitter.Range{{StartByte: 1, EndByte: 5}, {StartByte: 10, EndByte: 20}}
-	got := tsRangesToByteRanges(in)
-	want := []coords.ByteRange{{Lo: 1, Hi: 5}, {Lo: 10, Hi: 20}}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Fatalf("tsRangesToByteRanges = %v, want %v", got, want)
 	}
 }

@@ -82,11 +82,6 @@ func resetIncrementalTree(cur *highlightState) {
 	cur.tree = nil
 }
 
-func resetAfterUnknownBodyChange(cur *highlightState) {
-	resetIncrementalState(cur)
-	cur.snap = nil
-}
-
 func applyContentEdit(body []byte, ev wevent.Event) (contentEdit, bool) {
 	if ev.Origin != 'K' {
 		return contentEdit{}, false
