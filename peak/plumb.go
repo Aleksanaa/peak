@@ -2,6 +2,10 @@ package main
 
 import (
 	"os/exec"
+
+	"github.com/aleksana/peak/internal/quote"
+
+	
 	"regexp"
 	"runtime"
 	"strconv"
@@ -39,6 +43,10 @@ func (e *Editor) Plumb(win *Window, word string) bool {
 	word = strings.TrimSpace(word)
 	if word == "" {
 		return false
+	}
+	// Unwrap a single backtick-quoted token (e.g. `foo bar` → foo bar).
+	if parts := quote.Fields(word); len(parts) == 1 {
+		word = parts[0]
 	}
 
 	// Try protocol handlers first

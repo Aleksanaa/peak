@@ -7,6 +7,8 @@ import (
 
 	"unicode"
 
+	
+	"github.com/aleksana/peak/internal/quote"
 	"github.com/aleksana/peak/internal/session"
 	"github.com/aleksana/peak/internal/wevent"
 	"github.com/gdamore/tcell/v3"
@@ -281,6 +283,10 @@ func (tv *TextView) GetClickWord(mx, my int) string {
 	// double click on blank area is same as double click on selection
 	// complement that we cannot set mouse cursor position like acme
 	word := strings.TrimSpace(tv.buffer.GetWordAt(bx, by))
+	// Unwrap a backtick-quoted word returned by GetWordBoundaries.
+	if parts := quote.Fields(word); len(parts) == 1 {
+		word = parts[0]
+	}
 	if word == "" && tv.buffer.selection.Active {
 		return strings.TrimSpace(tv.buffer.GetSelectedText())
 	}
@@ -913,7 +919,7 @@ func (win *Window) Warn() {
 }
 
 func (win *Window) GetFilename() string {
-	fields := strings.Fields(string(win.tag.buffer.lines[0]))
+	fields := quote.Fields(string(win.tag.buffer.lines[0]))
 	if len(fields) > 0 {
 		return fields[0]
 	}
@@ -926,12 +932,15 @@ func (win *Window) GetDir() string {
 
 func (win *Window) SetName(name string) {
 	tag := win.tag.buffer.GetText()
-	fields := strings.Fields(tag)
+	fields := quote.Fields(tag)
 	if len(fields) > 0 {
-		fields[0] = name
+		fields[0] = quote.Quote(name)
+		for i := 1; i < len(fields); i++ {
+			fields[i] = quote.Quote(fields[i])
+		}
 		win.tag.buffer.SetText(" " + strings.Join(fields, " ") + " ")
 	} else {
-		win.tag.buffer.SetText(" " + name + " Get Put Del ")
+		win.tag.buffer.SetText(" " + quote.Quote(name) + " Get Put Del ")
 	}
 }
 

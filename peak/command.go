@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/aleksana/peak/internal/quote"
 	"github.com/aleksana/peak/internal/session"
 	"github.com/gdamore/tcell/v3"
 	"github.com/gdamore/tcell/v3/color"
@@ -21,7 +22,7 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 		return false
 	}
 
-	fields := strings.Fields(cmd)
+	fields := quote.Fields(cmd)
 	root := fields[0]
 
 	switch root {
@@ -130,7 +131,7 @@ func (e *Editor) cmdUmount(win *Window, cmd string) {
 }
 
 func (e *Editor) getArgs(win *Window, cmd string) []string {
-	fields := strings.Fields(cmd)
+	fields := quote.Fields(cmd)
 	if len(fields) > 1 {
 		return fields[1:]
 	}
@@ -151,7 +152,7 @@ func (e *Editor) getArgs(win *Window, cmd string) []string {
 	}
 
 	if sel != "" {
-		return strings.Fields(sel)
+		return quote.Fields(sel)
 	}
 	return nil
 }
@@ -221,7 +222,7 @@ func (e *Editor) OpenLine(win *Window, path string, line, col int, binaryFallbac
 }
 
 func (e *Editor) createWindow(target *Column, full string, content string, isDir bool, writable bool, line, col int) *Window {
-	newWin := target.AddWindow(" "+full+" Get Put Undo Redo Snarf Zerox Del ", content)
+	newWin := target.AddWindow(" "+quote.Quote(full)+" Get Put Undo Redo Snarf Zerox Del ", content)
 	e.ActivateWindow(newWin)
 	if isDir {
 		newWin.kind = WinDir
@@ -695,7 +696,7 @@ func (e *Editor) findOrCreateErrorWindow(col *Column, win *Window, dir string) *
 	}
 
 	targetCol := e.getTargetColumn(col, win)
-	newWin := targetCol.AddWindow(" "+errName+" Get Del ", "")
+	newWin := targetCol.AddWindow(" "+quote.Quote(errName)+" Get Del ", "")
 	newWin.kind = WinOut
 	e.ActivateWindow(newWin)
 	targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)

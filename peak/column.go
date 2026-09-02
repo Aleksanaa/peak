@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 
+	
+	"github.com/aleksana/peak/internal/quote"
 	"github.com/aleksana/peak/internal/session"
 	"github.com/gdamore/tcell/v3"
 	"github.com/gdamore/tcell/v3/color"
@@ -149,7 +151,7 @@ func (c *Column) AddTermWindow(tagText, cmd, dir string, preset ...*WindowSessio
 		} else {
 			name = filepath.Base(strings.Fields(cmd)[0])
 		}
-		tagText = " " + filepath.Join(dir, "-"+name) + " Zerox Del "
+		tagText = " " + quote.Quote(filepath.Join(dir, "-"+name)) + " Zerox Del "
 	}
 
 	c.maximized = nil
@@ -169,7 +171,7 @@ func (c *Column) AddTermWindow(tagText, cmd, dir string, preset ...*WindowSessio
 
 func (c *Column) AddSessionTermWindow(title string, sess session.Session) (*Window, error) {
 	c.maximized = nil
-	newWin, err := newTermWindowFromSession(" "+title+" Zerox Del ", sess, c, c.editor, c.x, c.y, c.w, 0, c.onExec)
+	newWin, err := newTermWindowFromSession(" "+quote.Quote(title)+" Zerox Del ", sess, c, c.editor, c.x, c.y, c.w, 0, c.onExec)
 	if err != nil {
 		return nil, err
 	}

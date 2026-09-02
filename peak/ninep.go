@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 
+	
+	"github.com/aleksana/peak/internal/quote"
 	"github.com/aleksana/peak/internal/vfs"
 	"github.com/aleksana/peak/internal/vfs/afero"
 )
@@ -78,25 +80,25 @@ func (p *NineP) Listen() {
 // MountWindow exposes a window's namespace at /peak/<id>/.
 func (p *NineP) MountWindow(win *Window) {
 	p.vfs.Mount("/peak/"+strconv.Itoa(win.ID), newWindowFs(win))
-	p.bus.broadcast(fmt.Sprintf("new %d %s\n", win.ID, win.GetFilename()))
+	p.bus.broadcast(fmt.Sprintf("new %d %s\n", win.ID, quote.Quote(win.GetFilename())))
 }
 
 // UmountWindow removes a window's namespace.
 func (p *NineP) UmountWindow(win *Window) {
 	p.vfs.Umount("/peak/" + strconv.Itoa(win.ID))
-	p.bus.broadcast(fmt.Sprintf("close %d %s\n", win.ID, win.GetFilename()))
+	p.bus.broadcast(fmt.Sprintf("close %d %s\n", win.ID, quote.Quote(win.GetFilename())))
 }
 
 func (p *NineP) BroadcastFocus(win *Window) {
-	p.bus.broadcast(fmt.Sprintf("focus %d %s\n", win.ID, win.GetFilename()))
+	p.bus.broadcast(fmt.Sprintf("focus %d %s\n", win.ID, quote.Quote(win.GetFilename())))
 }
 
 func (p *NineP) BroadcastGet(win *Window) {
-	p.bus.broadcast(fmt.Sprintf("get %d %s\n", win.ID, win.GetFilename()))
+	p.bus.broadcast(fmt.Sprintf("get %d %s\n", win.ID, quote.Quote(win.GetFilename())))
 }
 
 func (p *NineP) BroadcastPut(win *Window) {
-	p.bus.broadcast(fmt.Sprintf("put %d %s\n", win.ID, win.GetFilename()))
+	p.bus.broadcast(fmt.Sprintf("put %d %s\n", win.ID, quote.Quote(win.GetFilename())))
 }
 
 // Mount attaches a 9P server to path in the VFS. Returns the resolved source
@@ -179,9 +181,9 @@ func (p *NineP) ListBinds() string {
 func formatEntries(entries []mountEntry) string {
 	var sb strings.Builder
 	for _, e := range entries {
-		sb.WriteString(e.src)
+		sb.WriteString(quote.Quote(e.src))
 		sb.WriteByte(' ')
-		sb.WriteString(e.dst)
+		sb.WriteString(quote.Quote(e.dst))
 		sb.WriteByte('\n')
 	}
 	return sb.String()
