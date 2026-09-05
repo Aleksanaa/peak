@@ -800,7 +800,7 @@ func newWindow(tag string, parent *Column, editor *Editor, x, y, w, h int, onExe
 }
 
 func NewTermWindow(tag string, parent *Column, editor *Editor, x, y, w, h int, cmd, dir string, onExec func(*Column, *Window, string) bool) (*Window, error) {
-	sess, err := session.NewLocal(cmd, dir)
+	sess, err := session.NewLocal(cmd, dir, editor.env.Environ())
 	if err != nil {
 		return nil, err
 	}

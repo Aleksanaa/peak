@@ -261,6 +261,9 @@ func runLocalCommand(cmd, path, dir, input string, winid int) (string, error) {
 
 	c := exec.Command("sh", "-c", wrappedCmd)
 	c.Dir = dir
+	if appEditor != nil {
+		c.Env = appEditor.env.Environ()
+	}
 	if input != "" {
 		c.Stdin = strings.NewReader(input)
 	}

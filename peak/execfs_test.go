@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -37,6 +39,7 @@ func TestNamespaceFsStatVirtualFiles(t *testing.T) {
 		mode  os.FileMode
 	}{
 		{"event", false, 0444},
+		{"env", false, 0600},
 		{"mount", false, 0600},
 		{"unmount", false, 0200},
 		{"bind", false, 0600},
@@ -99,7 +102,7 @@ func TestNamespaceFsRootDirListing(t *testing.T) {
 		isDir[fi.Name()] = fi.IsDir()
 	}
 
-	for _, want := range []string{"event", "mount", "unmount", "bind", "new"} {
+	for _, want := range []string{"event", "env", "mount", "unmount", "bind", "new"} {
 		if counts[want] == 0 {
 			t.Errorf("missing %q in root dir listing", want)
 		}
@@ -1036,4 +1039,88 @@ func TestSrvServeConnVia9P(t *testing.T) {
 	e.ninep.Umount(mountPath)
 	f.Close()
 	<-serveDone
+}
+
+// ---- envFile ----
+
+func envRead(t *testing.T, nsFs *peakNamespaceFs) string {
+	t.Helper()
+	f, err := nsFs.Open("env")
+	if err != nil {
+		t.Fatalf("open env: %v", err)
+	}
+	defer f.Close()
+	buf := new(bytes.Buffer)
+	tmp := make([]byte, 256)
+	var off int64
+	for {
+		n, err := f.ReadAt(tmp, off)
+		if n > 0 {
+			buf.Write(tmp[:n])
+			off += int64(n)
+		}
+		if err != nil {
+			break
+		}
+	}
+	return buf.String()
+}
+
+func envWrite(t *testing.T, nsFs *peakNamespaceFs, text string) {
+	t.Helper()
+	f, err := nsFs.OpenFile("env", os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open env for write: %v", err)
+	}
+	if text != "" {
+		if _, err := f.WriteString(text); err != nil {
+			t.Fatalf("write env: %v", err)
+		}
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close env: %v", err)
+	}
+}
+
+func TestEnvFileMergesSortsAndUnsets(t *testing.T) {
+	_, _, nsFs, _ := setupExecFsTest(t)
+
+	if got := envRead(t, nsFs); got != "" {
+		t.Errorf("empty overlay reads %q, want empty", got)
+	}
+
+	envWrite(t, nsFs, "FOO=bar\nBAZ=qux\n")
+	if got, want := envRead(t, nsFs), "BAZ=qux\nFOO=bar\n"; got != want {
+		t.Errorf("after write = %q, want %q (sorted)", got, want)
+	}
+
+	// A second write merges rather than replacing, and "=" is only split once.
+	envWrite(t, nsFs, "FOO=a=b\n")
+	if got, want := envRead(t, nsFs), "BAZ=qux\nFOO=a=b\n"; got != want {
+		t.Errorf("after merge = %q, want %q", got, want)
+	}
+
+	// A line with no "=" removes the key; a write with no data changes nothing.
+	envWrite(t, nsFs, "BAZ\n")
+	envWrite(t, nsFs, "")
+	if got, want := envRead(t, nsFs), "FOO=a=b\n"; got != want {
+		t.Errorf("after unset = %q, want %q", got, want)
+	}
+}
+
+func TestEnvStoreEnvironOverridesParent(t *testing.T) {
+	var s envStore
+	if s.Environ() != nil {
+		t.Error("empty overlay: Environ() should be nil so children inherit unchanged")
+	}
+
+	t.Setenv("PEAK_ENV_TEST", "parent")
+	s.Apply("PEAK_ENV_TEST=overlay\n")
+	env := s.Environ()
+	if len(env) == 0 || env[len(env)-1] != "PEAK_ENV_TEST=overlay" {
+		t.Fatalf("overlay entry should come last so exec.Cmd keeps it, got tail %v", env[max(0, len(env)-1):])
+	}
+	if !slices.Contains(env, "PEAK_ENV_TEST=parent") {
+		t.Error("parent environment should still be present")
+	}
 }

@@ -63,6 +63,7 @@ type Editor struct {
 	theme           Theme
 	nextWinID       int
 	ninep           *NineP
+	env             envStore
 	gesture         mouseGesture
 }
 

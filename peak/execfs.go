@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,6 +38,11 @@ func newPeakNamespaceFs(editor *Editor, bus *globalEventBus) *peakNamespaceFs {
 				}},
 				{Name: "index", Mode: 0444, Open: func(_ int) (afero.File, error) {
 					return &indexFile{ReadonlyFile: vfs.ReadonlyFile{Data: indexSnap(editor)}}, nil
+				}},
+				{Name: "env", Mode: 0600, Open: func(_ int) (afero.File, error) {
+					f := &envFile{editor: editor}
+					f.Data = envSnap(editor)
+					return f, nil
 				}},
 				{Name: "mount", Mode: 0600, Open: func(_ int) (afero.File, error) {
 					return &mountFile{editor: editor, ReadonlyFile: vfs.ReadonlyFile{Data: []byte(editor.ninep.ListMounts())}}, nil
@@ -117,6 +123,81 @@ func (f *globalEventFile) Close() error {
 	return nil
 }
 
+// ---- env ----
+
+// envStore is the global environment overlay served at /env. Entries are
+// applied to every local command and terminal peak starts after they are set,
+// letting external programs export variables (a helper's socket, an agent's
+// port) without peak knowing what they mean.
+type envStore struct {
+	mu   sync.Mutex
+	vars map[string]string
+}
+
+// Apply merges "KEY=VALUE" lines into the overlay. A line without "=" removes
+// that key; blank lines are ignored.
+func (s *envStore) Apply(text string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for line := range strings.SplitSeq(text, "\n") {
+		key, val, hasVal := strings.Cut(strings.TrimSpace(line), "=")
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if !hasVal {
+			delete(s.vars, key)
+			continue
+		}
+		if s.vars == nil {
+			s.vars = make(map[string]string)
+		}
+		s.vars[key] = val
+	}
+}
+
+// Snapshot returns the overlay as sorted "KEY=VALUE" lines, nil when empty.
+func (s *envStore) Snapshot() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.vars) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(s.vars))
+	for k, v := range s.vars {
+		out = append(out, k+"="+v)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// Environ returns os.Environ() with the overlay appended, or nil when the
+// overlay is empty. exec.Cmd keeps the last of duplicate keys, so overlay
+// entries win; nil means "inherit peak's environment unchanged".
+func (s *envStore) Environ() []string {
+	overlay := s.Snapshot()
+	if overlay == nil {
+		return nil
+	}
+	return append(os.Environ(), overlay...)
+}
+
+// envFile implements /env: the global environment overlay handed to commands
+// and terminals peak starts. Reading returns sorted "KEY=VALUE" lines; writing
+// merges lines on close, where a line without "=" removes that key.
+type envFile struct {
+	vfs.ReadWriteFile
+	editor *Editor
+}
+
+func (f *envFile) Close() error {
+	if f.Writes == nil {
+		return nil
+	}
+	f.editor.env.Apply(string(f.Writes))
+	return nil
+}
+
 // ---- mountFile ----
 
 // mountFile implements /mount: write "<socket-path> <mount-path>\n" to mount a
@@ -191,6 +272,15 @@ func (f *bindFile) WriteAt(p []byte, _ int64) (int, error) {
 
 func (f *bindFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
 func (f *bindFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(s), 0) }
+
+// envSnap builds the /peak/env payload: one sorted "KEY=VALUE" line per entry.
+func envSnap(editor *Editor) []byte {
+	lines := editor.env.Snapshot()
+	if len(lines) == 0 {
+		return nil
+	}
+	return []byte(strings.Join(lines, "\n") + "\n")
+}
 
 // indexSnap builds the /peak/index payload. Each open window produces one line:
 //

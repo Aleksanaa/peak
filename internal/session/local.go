@@ -14,7 +14,8 @@ type localSession struct {
 }
 
 // NewLocal starts cmdStr (or $SHELL if empty) in dir under a new PTY.
-func NewLocal(cmdStr, dir string) (Session, error) {
+// A nil env inherits peak's environment unchanged.
+func NewLocal(cmdStr, dir string, env []string) (Session, error) {
 	var cmd *exec.Cmd
 	if cmdStr == "" {
 		shell := os.Getenv("SHELL")
@@ -26,6 +27,7 @@ func NewLocal(cmdStr, dir string) (Session, error) {
 		cmd = exec.Command("/bin/sh", "-c", cmdStr)
 	}
 	cmd.Dir = dir
+	cmd.Env = env
 
 	ptyFile, err := pty.Start(cmd)
 	if err != nil {

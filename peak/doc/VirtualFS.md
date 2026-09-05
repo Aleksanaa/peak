@@ -35,6 +35,11 @@ These files live directly under /peak:
                     <id> <taglen> <bodylen> <isdir> <isdirty> <tag>
                     Fields are right-aligned in 11-character columns, matching
                     acme's /acme/index format.
+- env               Global environment overlay handed to commands and
+                    terminals peak starts after it is set. Read returns
+                    sorted "KEY=VALUE" lines. Writing merges lines on
+                    close; a line with no "=" removes that key. Entries
+                    override peak's own environment.
 - exec              Write a window title to create an externally-driven
                     terminal window; read back the window ID.
 - mount             Write "<socket> <path>" to mount a 9P server at
