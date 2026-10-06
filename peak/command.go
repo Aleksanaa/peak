@@ -642,9 +642,6 @@ func (e *Editor) cmdEdit(col *Column, win *Window, cmd string) {
 	if res.Cmd.cmdc == '\n' {
 		buf.cursor = start
 		target.body.ShowLineAt(start.y)
-		if target.kind == WinTerm {
-			target.body.(*TermView).scroll.AutoScroll = false
-		}
 	} else {
 		buf.cursor = end
 	}
@@ -726,7 +723,7 @@ func (e *Editor) showError(col *Column, win *Window, dir, msg string) {
 func (e *Editor) runExternal(col *Column, win *Window, cmd string) {
 	if win != nil && win.kind == WinTerm {
 		tv := win.body.(*TermView)
-		tv.scroll.AutoScroll = true
+		tv.autoScroll = true
 		tv.session.Write([]byte(cmd + "\r"))
 		return
 	}

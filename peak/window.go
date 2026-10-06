@@ -2,17 +2,13 @@ package main
 
 import (
 	"path/filepath"
-	"slices"
-	"sort"
 	"strings"
-	"unicode"
 
 	"github.com/aleksana/peak/internal/quote"
 	"github.com/aleksana/peak/internal/session"
 	"github.com/aleksana/peak/internal/wevent"
 	"github.com/gdamore/tcell/v3"
 	"github.com/gdamore/tcell/v3/color"
-	uwidth "golang.org/x/text/width"
 )
 
 type WinKind int
@@ -23,11 +19,6 @@ const (
 	WinOut                 // output/error sink
 	WinTerm                // terminal emulator
 )
-
-type VisualLine struct {
-	BufferLine int
-	Start, End int
-}
 
 // A View is a tag or body. It knows only its own size: positions it is given,
 // in mouse events and PosAt, are in its own coordinates, and it draws
@@ -52,28 +43,12 @@ type View interface {
 	IsRaw() bool
 }
 
+// A TextView is a frame whose text is typed and edited: a tag or a body.
 type TextView struct {
-	w, h int
-	// org is the rune offset of the first character shown. Edits move it
-	// with the text (see NewWindow), so the view stays where it was.
-	org           int
-	autoScroll    bool
-	buffer        *Buffer
-	drag          bool
-	singleLine    bool
-	scrollable    bool
-	underlineLast bool
-	// layout is the buffer's lines wrapped at the view's width, laid out for
-	// laidOut; read it through lines.
-	layout      []VisualLine
-	laidOut     layoutKey
-	theme       *Theme
-	colors      *colorPair // points into theme, so theme changes apply
-	tabWidth    int
+	frame
+	singleLine  bool
 	typingStart *Cursor
 	typingEnd   *Cursor
-	// colorAt, when non-nil, returns a foreground color override for a rune offset.
-	colorAt func(runeOff int) (tcell.Color, bool)
 }
 
 func (tv *TextView) IsRaw() bool {
@@ -82,76 +57,9 @@ func (tv *TextView) IsRaw() bool {
 
 func NewTextView(text string, w, h int, theme *Theme, colors *colorPair, singleLine, scrollable bool) *TextView {
 	return &TextView{
-		w: w, h: h,
-		buffer:     NewBuffer(text),
-		theme:      theme,
-		colors:     colors,
+		frame:      newFrame(NewBuffer(text), w, h, theme, colors, scrollable),
 		singleLine: singleLine,
-		scrollable: scrollable,
-		tabWidth:   4,
 	}
-}
-
-func (tv *TextView) runeWidth(r rune, visualPos int) int {
-	if r == '\t' {
-		return tv.tabWidth - (visualPos % tv.tabWidth)
-	}
-	if unicode.IsMark(r) || unicode.Is(unicode.Cf, r) || unicode.IsControl(r) {
-		return 1
-	}
-	k := uwidth.LookupRune(r).Kind()
-	if k == uwidth.EastAsianWide || k == uwidth.EastAsianFullwidth {
-		return 2
-	}
-	return 1
-}
-
-// layoutKey is what a layout depends on.
-type layoutKey struct{ w, tabWidth, version int }
-
-// lines returns the buffer's lines wrapped at the view's width, laying them
-// out again if the text, the width or the tab width has changed.
-func (tv *TextView) lines() []VisualLine {
-	key := layoutKey{tv.w, tv.tabWidth, tv.buffer.version}
-	if tv.w <= 0 || key == tv.laidOut {
-		return tv.layout
-	}
-	tv.laidOut = key
-	tv.layout = nil
-	for i, line := range tv.buffer.lines {
-		if len(line) == 0 {
-			tv.layout = append(tv.layout, VisualLine{i, 0, 0})
-			continue
-		}
-		visualPos, start := 0, 0
-		for idx, r := range line {
-			width := tv.runeWidth(r, visualPos)
-			if visualPos+width > tv.w && visualPos > 0 {
-				tv.layout = append(tv.layout, VisualLine{i, start, idx})
-				start, visualPos = idx, 0
-				width = tv.runeWidth(r, visualPos)
-			}
-			visualPos += width
-		}
-		tv.layout = append(tv.layout, VisualLine{i, start, len(line)})
-	}
-	return tv.layout
-}
-
-// top returns the index of the visual line shown first: the one org is on.
-func (tv *TextView) top() int {
-	lines := tv.lines()
-	i := sort.Search(len(lines), func(i int) bool {
-		return tv.buffer.RuneOffsetOfPos(lines[i].BufferLine, lines[i].Start) > tv.org
-	})
-	return max(0, i-1)
-}
-
-// setTop scrolls the view to show visual line i first.
-func (tv *TextView) setTop(i int) {
-	lines := tv.lines()
-	vl := lines[max(0, min(i, len(lines)-1))]
-	tv.org = tv.buffer.RuneOffsetOfPos(vl.BufferLine, vl.Start)
 }
 
 func (tv *TextView) Layout() {
@@ -159,21 +67,6 @@ func (tv *TextView) Layout() {
 		tv.org = 0
 	}
 	tv.SyncScroll()
-}
-
-func (tv *TextView) GetScroll() (scroll, total, visible int) {
-	return tv.top(), len(tv.lines()), tv.h
-}
-
-// Scroll scrolls n lines. Scrolling to the end makes the view follow the
-// cursor again; scrolling back up stops it.
-func (tv *TextView) Scroll(n int) {
-	tv.setTop(tv.top() + n)
-	if tv.top() >= len(tv.lines())-tv.h {
-		tv.autoScroll = true
-	} else if n < 0 {
-		tv.autoScroll = false
-	}
 }
 
 func (tv *TextView) GotoLineCol(lineNum, colNum int) {
@@ -190,103 +83,8 @@ func (tv *TextView) GotoLineCol(lineNum, colNum int) {
 	tv.ShowLineAt(lineNum)
 }
 
-// bufferToVisual translates a buffer position to visual coordinates (vx, vrow).
-func (tv *TextView) bufferToVisual(bx, by int) (int, int) {
-	lines := tv.lines()
-	for lidx, vl := range lines {
-		if vl.BufferLine == by && bx >= vl.Start && bx <= vl.End {
-			vx := 0
-			line := tv.buffer.lines[by]
-			for i := vl.Start; i < bx; i++ {
-				vx += tv.runeWidth(line[i], vx)
-			}
-			// Wrap edge case: if cursor is exactly at width, move to next visual line
-			if vx >= tv.w && lidx+1 < len(lines) && lines[lidx+1].BufferLine == by {
-				continue
-			}
-			return vx, lidx
-		}
-	}
-	return 0, -1
-}
-
-// visualToBuffer translates visual coordinates (vx, vidx) to buffer position (bx, by).
-func (tv *TextView) visualToBuffer(vx, vidx int) (int, int) {
-	lines := tv.lines()
-	vl := lines[max(0, min(vidx, len(lines)-1))]
-	line := tv.buffer.lines[vl.BufferLine]
-	bx, currVX := vl.Start, 0
-	for i := vl.Start; i < vl.End; i++ {
-		w := tv.runeWidth(line[i], currVX)
-		if currVX+w > vx {
-			break
-		}
-		currVX += w
-		bx = i + 1
-	}
-	return bx, vl.BufferLine
-}
-
-func (tv *TextView) Draw(cv canvas) {
-	selStyle := tv.theme.Selection.style()
-	lines, vrow := tv.lines(), 0
-	for lidx := tv.top(); lidx < len(lines) && vrow < tv.h; lidx++ {
-		vl, vcol := lines[lidx], 0
-		line := tv.buffer.lines[vl.BufferLine]
-		lineStyle := tv.colors.style()
-		if tv.underlineLast && lidx == len(lines)-1 {
-			lineStyle = lineStyle.Underline(true)
-		}
-		var lineRuneBase int
-		if tv.colorAt != nil {
-			lineRuneBase = tv.buffer.RuneOffsetOfPos(vl.BufferLine, vl.Start)
-		}
-		for idx := vl.Start; idx < vl.End; idx++ {
-			r, style := line[idx], lineStyle
-			if tv.buffer.selection.Contains(idx, vl.BufferLine, false) {
-				style = selStyle
-			} else if tv.colorAt != nil {
-				if c, ok := tv.colorAt(lineRuneBase + idx - vl.Start); ok {
-					style = style.Foreground(c)
-				}
-			}
-
-			width := tv.runeWidth(r, vcol)
-			if r == '\t' {
-				cv.fill(rect{vcol, vrow, width, 1}, style)
-			} else {
-				str := string(r)
-				if unicode.IsMark(r) || unicode.Is(unicode.Cf, r) || unicode.IsControl(r) {
-					str = "□"
-				}
-				cv.put(vcol, vrow, str, style)
-			}
-			vcol += width
-		}
-		eolStyle := lineStyle
-		if tv.buffer.selection.Contains(vl.End, vl.BufferLine, false) {
-			eolStyle = selStyle
-		}
-		cv.fill(rect{vcol, vrow, tv.w - vcol, 1}, eolStyle)
-		vrow++
-	}
-	cv.fill(rect{0, vrow, tv.w, tv.h - vrow}, tv.colors.style())
-}
-
-func (tv *TextView) PosAt(x, y int) Cursor {
-	bx, by := tv.visualToBuffer(x, y+tv.top())
-	return Cursor{bx, by}
-}
-
-func (tv *TextView) ShowCursor(cv canvas) {
-	vx, vrow := tv.bufferToVisual(tv.buffer.cursor.x, tv.buffer.cursor.y)
-	cv.showCursor(max(0, min(vx, tv.w-1)), vrow-tv.top())
-}
-
-// fit gives tv width w and the height its text needs at that width.
-func (tv *TextView) fit(w int) {
-	tv.w = w
-	tv.h = max(1, len(tv.lines()))
+func (tv *TextView) ShowLineAt(n int) {
+	tv.showLine(n)
 }
 
 func (tv *TextView) Resize(w, h int) {
@@ -448,55 +246,11 @@ func (tv *TextView) HandleEvent(ev tcell.Event) {
 			tv.setTop(vrow - tv.h + 1)
 		}
 	case *tcell.EventMouse:
-		buttons := ev.Buttons()
-		if buttons != tcell.ButtonNone {
+		if ev.Buttons() != tcell.ButtonNone {
 			tv.typingStart = nil
 		}
-		if tv.scrollable {
-			if buttons&tcell.WheelUp != 0 {
-				tv.Scroll(-1)
-				return
-			}
-			if buttons&tcell.WheelDown != 0 {
-				tv.Scroll(1)
-				return
-			}
-		}
-		mx, my := ev.Position()
-		if buttons != tcell.ButtonNone {
-			p := tv.PosAt(mx, my)
-			if buttons == tcell.ButtonPrimary && !tv.drag {
-				tv.buffer.ClearSelection()
-			}
-			if buttons == tcell.ButtonPrimary {
-				if !tv.drag {
-					tv.drag, tv.buffer.cursor = true, p
-					tv.buffer.SetSelection(p, p)
-				} else {
-					tv.buffer.cursor, tv.buffer.selection.End = p, p
-				}
-			} else if !tv.buffer.selection.Active {
-				tv.buffer.cursor = p
-			}
-		} else {
-			tv.drag = false
-			if tv.buffer.selection.Active && tv.buffer.selection.Start == tv.buffer.selection.End {
-				tv.buffer.ClearSelection()
-			}
-		}
+		tv.mouse(ev)
 	}
-}
-
-func (tv *TextView) AdvanceDragCursor(dir int) {
-	if !tv.drag {
-		return
-	}
-	if dir > 0 {
-		tv.buffer.MoveDown()
-	} else {
-		tv.buffer.MoveUp()
-	}
-	tv.buffer.selection.End = tv.buffer.cursor
 }
 
 func (tv *TextView) SyncScroll() {
@@ -507,26 +261,6 @@ func (tv *TextView) SyncScroll() {
 	if vrow >= tv.top()+tv.h {
 		tv.setTop(vrow - tv.h + 1)
 	}
-}
-
-func (tv *TextView) Search(word string) int {
-	line, sel, ok := Search(tv.buffer, word, tv.buffer.cursor)
-	if ok {
-		tv.buffer.cursor = sel.End
-		tv.buffer.selection = sel
-		return line
-	}
-	return -1
-}
-
-func (tv *TextView) ShowLineAt(lineNum int) {
-	vidx := slices.IndexFunc(tv.lines(), func(vl VisualLine) bool { return vl.BufferLine == lineNum })
-	if top := tv.top(); vidx == -1 || (vidx >= top && vidx < top+tv.h) {
-		return
-	}
-	tv.setTop(vidx - tv.h/4)
-	tv.autoScroll = true
-	tv.SyncScroll()
 }
 
 type Window struct {
@@ -579,9 +313,9 @@ func (w *Window) Draw(cv canvas) {
 	w.editor.drawView(w.tag, cv.sub(w.tagRect()))
 
 	if tv, ok := w.body.(*TextView); ok {
-		tv.colorAt = nil
+		tv.styleAt = nil
 		if len(w.spans) > 0 {
-			tv.colorAt = w.colorAtFunc()
+			tv.styleAt = w.spanStyle(tv)
 		}
 	}
 	w.editor.drawView(w.body, cv.sub(w.bodyRect()))
@@ -642,13 +376,15 @@ func (win *Window) adjustSpans(q0, q1Old, q1New int) {
 	win.spans = spans[:j]
 }
 
-// colorAtFunc returns a closure that looks up a rune offset in the window's spans.
-func (win *Window) colorAtFunc() func(int) (tcell.Color, bool) {
+// spanStyle returns a styleAt for tv, the window's body, that colors the
+// window's spans.
+func (win *Window) spanStyle(tv *TextView) func(line, col int, s tcell.Style) tcell.Style {
 	spans := win.spans
 	theme := win.editor.theme
 	i := 0
 	lastOff := -1
-	return func(runeOff int) (tcell.Color, bool) {
+	return func(line, col int, s tcell.Style) tcell.Style {
+		runeOff := tv.buffer.RuneOffsetOfPos(line, col)
 		if runeOff < lastOff {
 			i = 0
 		}
@@ -658,9 +394,9 @@ func (win *Window) colorAtFunc() func(int) (tcell.Color, bool) {
 			i++
 		}
 		if i < len(spans) && spans[i].q0 <= runeOff && runeOff < spans[i].q1 {
-			return theme.colorForAttr(spans[i].attr), true
+			return s.Foreground(theme.colorForAttr(spans[i].attr))
 		}
-		return 0, false
+		return s
 	}
 }
 

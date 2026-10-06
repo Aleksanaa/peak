@@ -104,6 +104,11 @@ type State struct {
 	FGColor        Color            // actual RGB for DefaultFG (used for OSC 10 queries)
 	BGColor        Color            // actual RGB for DefaultBG (used for OSC 11 queries)
 
+	// OnScrollOut, if non-nil, is called under mu with each row y about to
+	// leave the top of the primary screen, to be kept as history; read it
+	// with Cell. It must not block.
+	OnScrollOut func(y int)
+
 	mu            sync.Mutex
 	changed       ChangeFlag
 	cols, rows    int
@@ -237,6 +242,11 @@ func (t *State) row(y int) line {
 func (t *State) Cell(x, y int) (ch rune, fg Color, bg Color, mode int16) {
 	ln := t.row(y)
 	return ln[x].c, Color(ln[x].fg), Color(ln[x].bg), ln[x].mode
+}
+
+// Size returns the size of the screen, in cells.
+func (t *State) Size() (cols, rows int) {
+	return t.cols, t.rows
 }
 
 // Cursor returns the current position of the cursor.
@@ -414,6 +424,7 @@ func (t *State) resize(cols, rows int) bool {
 	t.head, t.altHead = 0, 0
 	slide := t.cur.y - rows + 1
 	if slide > 0 {
+		t.scrollOut(slide)
 		copy(t.lines, t.lines[slide:slide+rows])
 		copy(t.altLines, t.altLines[slide:slide+rows])
 	}
@@ -461,6 +472,16 @@ func (t *State) resize(cols, rows int) bool {
 		t.swapScreen()
 	}
 	return slide > 0
+}
+
+// scrollOut hands the top n rows of the primary screen to OnScrollOut.
+func (t *State) scrollOut(n int) {
+	if t.OnScrollOut == nil || t.mode&ModeAltScreen != 0 {
+		return
+	}
+	for y := 0; y < n; y++ {
+		t.OnScrollOut(y)
+	}
 }
 
 // rotateLines reorders s in place so that the element at index head becomes
@@ -627,6 +648,9 @@ func (t *State) ScrollUp(orig, n int) {
 	n = clamp(n, 0, t.bottom-orig+1)
 	if n <= 0 {
 		return
+	}
+	if orig == 0 {
+		t.scrollOut(n)
 	}
 	t.changed |= ChangedScreen
 	if orig == 0 && t.bottom == t.rows-1 {

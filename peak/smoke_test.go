@@ -1236,37 +1236,19 @@ func TestPassiveCommands(t *testing.T) {
 	})
 }
 
-func TestScrollStateClampDoesNotFreezeShortContent(t *testing.T) {
-	// Clamp must not force limit=0 when total <= visible.
-	var s ScrollState
-	s.Pos = 7
-	s.Clamp(10, 30)
-	if s.Pos != 7 {
-		t.Fatalf("Clamp(10,30) with Pos=7: got %d, want 7", s.Pos)
+// Scrolling up stops the view following the cursor; scrolling down to the
+// bottom starts it again.
+func TestScrollTogglesFollowing(t *testing.T) {
+	tv := NewTextView(strings.Repeat("x\n", 99), 40, 30, nil, nil, false, true)
+	tv.setTop(70) // 100 lines, 30 shown: 70 is the bottom
+	tv.autoScroll = true
+	tv.Scroll(-1)
+	if tv.autoScroll {
+		t.Fatal("scrolling up must stop following")
 	}
-	s.Pos = 15
-	s.Clamp(10, 30)
-	if s.Pos != 10 {
-		t.Fatalf("Clamp(10,30) with Pos=15: got %d, want 10 (clamp upper bound to total)", s.Pos)
-	}
-}
-
-func TestScrollStateScrollUpDisablesAutoScroll(t *testing.T) {
-	var s ScrollState
-	s.AutoScroll = true
-	s.Scroll(-1, 100, 30)
-	if s.AutoScroll {
-		t.Fatal("wheel-up must disable AutoScroll")
-	}
-}
-
-func TestScrollStateScrollDownAtBottomEnablesAutoScroll(t *testing.T) {
-	var s ScrollState
-	s.Pos = 69 // total=100, visible=30, bottom starts at 70
-	s.AutoScroll = false
-	s.Scroll(1, 100, 30)
-	if !s.AutoScroll {
-		t.Fatal("wheel-down at bottom must enable AutoScroll")
+	tv.Scroll(1)
+	if !tv.autoScroll {
+		t.Fatal("scrolling down to the bottom must follow again")
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"sync/atomic"
 
@@ -14,11 +15,19 @@ import (
 	"github.com/gdamore/tcell/v3/color"
 )
 
-const maxHistory = 1000
+// historyLines is how many lines of history a terminal keeps.
+const historyLines = 1000
 
+// termColors are a terminal's own colors: the host terminal's defaults.
+var termColors = colorPair{BG: color.Default, FG: color.Default}
+
+// A TermView is a terminal: a frame showing what a program writes. Its last
+// lines are the screen, which the emulator keeps and the program rewrites at
+// will; the lines above are history, rows that have scrolled off the screen,
+// which only grows. Showing, scrolling, selecting and searching it are the
+// frame's.
 type TermView struct {
-	w, h        int
-	scroll      ScrollState
+	frame
 	state       terminal.State
 	vt          *terminal.VT
 	session     session.Session
@@ -30,28 +39,23 @@ type TermView struct {
 	lastMY      int
 	lastButtons tcell.ButtonMask
 
-	selecting bool
-
-	contentHeight int
-	buffer        *Buffer
-	bufferDirty   atomic.Bool // set by the parse goroutine
+	hist      []termLine      // the history: lines that left the screen
+	screenTop Cursor          // where the screen starts in the text
+	styles    [][]tcell.Style // the style of each rune of each line
+	scrolled  []termLine      // rows that left the screen since sync; under the state lock
+	changed   atomic.Bool     // the emulator changed since sync; set by the parse goroutine
 
 	cmd          string       // command used to start the terminal, for session save
 	OnCWD        func(string) // called on main goroutine with decoded absolute path; set by owner
 	onCWDStarted bool         // true once OnCWD has been called at least once
-
-	drawSnap []snapCell // scratch buffer reused across Draw calls
 }
 
-// snapCell is a copy of one grid cell, taken under the state lock so the rest of
-// Draw (style building + s.Put) can run unlocked. Keeping the locked region to a
-// plain memory copy is what lets us drive redraws off Show()'s blocking flush
-// (natural backpressure) without starving the parse goroutine.
-type snapCell struct {
-	c    rune
-	fg   terminal.Color
-	bg   terminal.Color
-	mode int16
+// termLine is a row of the screen, or a line of history, as text: a rune for
+// each character, with its style.
+type termLine struct {
+	text    []rune
+	styles  []tcell.Style
+	wrapped bool // it goes on in the next row
 }
 
 func (tv *TermView) IsRaw() bool {
@@ -60,24 +64,19 @@ func (tv *TermView) IsRaw() bool {
 	return tv.state.Mode(terminal.ModeAltScreen)
 }
 
-func (tv *TermView) Layout() {
-	tv.state.Lock()
-	tv.updateContentHeight()
-	tv.state.Unlock()
-	tv.SyncScroll()
-}
-
 // NewTermView returns a terminal running sess, sized by its first Resize.
 func NewTermView(editor *Editor, sess session.Session, onClose func()) (*TermView, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	tv := &TermView{
+		frame:   newFrame(NewBuffer(""), 0, 0, &editor.theme, &termColors, true),
 		session: sess,
 		onClose: onClose,
 		editor:  editor,
 		cancel:  cancel,
-		buffer:  NewBuffer(""),
 	}
-	tv.scroll.AutoScroll = true
+	tv.autoScroll = true
+	tv.styleAt = func(line, col int, _ tcell.Style) tcell.Style { return tv.styles[line][col] }
+	tv.changed.Store(true)
 
 	vt, err := terminal.Create(&tv.state, sess)
 	if err != nil {
@@ -92,6 +91,10 @@ func NewTermView(editor *Editor, sess session.Session, onClose func()) (*TermVie
 		tv.state.BGColor = terminal.RGB(uint8(h>>16), uint8(h>>8), uint8(h))
 	}
 	tv.vt = vt
+	tv.state.OnScrollOut = func(y int) {
+		l, _ := tv.readRow(y, -1)
+		tv.scrolled = append(tv.scrolled, l)
+	}
 	tv.state.OnCWD = func(uri string) {
 		var path string
 		switch {
@@ -139,9 +142,7 @@ func NewTermView(editor *Editor, sess session.Session, onClose func()) (*TermVie
 				tv.editor.Call(tv.onClose)
 				return
 			}
-			tv.bufferDirty.Store(true)
-			// Layout() (called from Window.Draw on the next frame) handles
-			// contentHeight and scroll sync. Just signal a redraw.
+			tv.changed.Store(true)
 			tv.editor.Redraw()
 		}
 	}()
@@ -149,69 +150,66 @@ func NewTermView(editor *Editor, sess session.Session, onClose func()) (*TermVie
 	return tv, nil
 }
 
-func (tv *TermView) Draw(cv canvas) {
-	w, h := tv.w, tv.h
-	if w <= 0 || h <= 0 {
-		return
-	}
-	if cap(tv.drawSnap) < w*h {
-		tv.drawSnap = make([]snapCell, w*h)
-	}
-	snap := tv.drawSnap[:w*h]
-
-	// Snapshot the visible grid under the lock, then release it before painting
-	// so the parse goroutine can keep running while we build styles and flush.
-	tv.state.Lock()
-	limit := max(maxHistory, h)
-	for y := 0; y < h; y++ {
-		screenY := tv.scroll.Pos + y
-		for x := 0; x < w; x++ {
-			cell := snapCell{c: ' ', fg: terminal.DefaultFG, bg: terminal.DefaultBG}
-			if screenY >= 0 && screenY < limit {
-				c, f, b, m := tv.state.Cell(x, screenY)
-				cell = snapCell{c: c, fg: f, bg: b, mode: m}
-			}
-			snap[y*w+x] = cell
+// readRow returns screen row y as text, and the column in it of cell x. A
+// row that wraps onto the next is text up to its last cell written; any
+// other loses the blank cells that end it. Either keeps the cells before x.
+// Called with the state locked.
+func (tv *TermView) readRow(y, x int) (l termLine, col int) {
+	cols, _ := tv.state.Size()
+	written, shown, cont := 0, 0, false
+	for i := range cols {
+		c, fg, bg, mode := tv.state.Cell(i, y)
+		if i == x {
+			col = len(l.text)
+		}
+		if c == 0 && cont { // the second cell of a wide character
+			cont = false
+			continue
+		}
+		cont = wide(c)
+		l.wrapped = mode&terminal.AttrWrap != 0 // the row's last cell says
+		r := c
+		if r == 0 { // never written
+			r = ' '
+		}
+		l.text = append(l.text, r)
+		l.styles = append(l.styles, cellStyle(fg, bg, mode))
+		if c != 0 || i < x {
+			written = len(l.text)
+		}
+		if (c != 0 && c != ' ') || bg != terminal.DefaultBG || i < x {
+			shown = len(l.text)
 		}
 	}
-	tv.state.Unlock()
-
-	for y := 0; y < h; y++ {
-		screenY := tv.scroll.Pos + y
-		for x := 0; x < w; x++ {
-			sc := snap[y*w+x]
-			char, fg, bg, mode := sc.c, sc.fg, sc.bg, sc.mode
-			if char == 0 {
-				continue
-			}
-
-			style := tcell.StyleDefault.
-				Foreground(tv.toTcellColor(fg)).
-				Background(tv.toTcellColor(bg))
-
-			if mode&terminal.AttrUnderline != 0 {
-				style = style.Underline(true)
-			}
-			if mode&terminal.AttrBold != 0 {
-				style = style.Bold(true)
-			}
-			if mode&terminal.AttrItalic != 0 {
-				style = style.Italic(true)
-			}
-			if mode&terminal.AttrBlink != 0 {
-				style = style.Blink(true)
-			}
-
-			if tv.buffer.selection.Contains(x, screenY, false) {
-				style = style.Background(tv.editor.theme.Selection.BG).
-					Foreground(tv.editor.theme.Selection.FG)
-			}
-			cv.put(x, y, string(char), style)
-		}
+	if x >= cols {
+		col = len(l.text)
 	}
+	keep := shown
+	if l.wrapped {
+		keep = written
+	}
+	l.text, l.styles = l.text[:keep], l.styles[:keep]
+	return l, col
 }
 
-func (tv *TermView) toTcellColor(c terminal.Color) tcell.Color {
+func cellStyle(fg, bg terminal.Color, mode int16) tcell.Style {
+	style := tcell.StyleDefault.Foreground(termColor(fg)).Background(termColor(bg))
+	if mode&terminal.AttrUnderline != 0 {
+		style = style.Underline(true)
+	}
+	if mode&terminal.AttrBold != 0 {
+		style = style.Bold(true)
+	}
+	if mode&terminal.AttrItalic != 0 {
+		style = style.Italic(true)
+	}
+	if mode&terminal.AttrBlink != 0 {
+		style = style.Blink(true)
+	}
+	return style
+}
+
+func termColor(c terminal.Color) tcell.Color {
 	if c == terminal.DefaultFG || c == terminal.DefaultBG {
 		return color.Default
 	}
@@ -222,48 +220,113 @@ func (tv *TermView) toTcellColor(c terminal.Color) tcell.Color {
 	return color.PaletteColor(int(c))
 }
 
-func (tv *TermView) ShowCursor(cv canvas) {
+// sync brings the text up to date with the emulator: rows that left the
+// screen join the history, the screen's rows follow it, and the cursor is
+// the terminal's. A line keeps its number as it scrolls into history, so
+// what refers to it stays put.
+func (tv *TermView) sync() {
+	if !tv.changed.Swap(false) {
+		return
+	}
 	tv.state.Lock()
-	defer tv.state.Unlock()
-	if tv.state.CursorVisible() {
-		cx, cy := tv.state.Cursor()
-		cv.showCursor(cx, cy-tv.scroll.Pos)
+	scrolled := tv.scrolled
+	tv.scrolled = nil
+	_, rows := tv.state.Size()
+	cx, cy := tv.state.Cursor()
+	screen := make([]termLine, rows)
+	col := 0
+	for y := range screen {
+		x := -1
+		if y == cy {
+			x = cx
+		}
+		var c int
+		if screen[y], c = tv.readRow(y, x); y == cy {
+			col = c
+		}
+	}
+	tv.cursorHidden = !tv.state.CursorVisible()
+	tv.state.Unlock()
+
+	// A row that wraps goes on in the next: a line is all of its rows.
+	for _, r := range scrolled {
+		if n := len(tv.hist); n > 0 && tv.hist[n-1].wrapped {
+			last := &tv.hist[n-1]
+			last.text = append(last.text, r.text...)
+			last.styles = append(last.styles, r.styles...)
+			last.wrapped = r.wrapped
+		} else {
+			tv.hist = append(tv.hist, r)
+		}
+	}
+	if n := len(tv.hist) - historyLines; n > 0 {
+		tv.forget(n)
+	}
+
+	b := tv.buffer
+	lines, styles := b.lines[:0], tv.styles[:0]
+	for _, l := range tv.hist {
+		lines, styles = append(lines, l.text), append(styles, l.styles)
+	}
+	join := len(tv.hist) > 0 && tv.hist[len(tv.hist)-1].wrapped
+	starts := make([]Cursor, len(screen)) // where each row starts in the text
+	for y, l := range screen {
+		if join {
+			i := len(lines) - 1
+			starts[y] = Cursor{len(lines[i]), i}
+			lines[i] = slices.Concat(lines[i], l.text)
+			styles[i] = slices.Concat(styles[i], l.styles)
+		} else {
+			starts[y] = Cursor{0, len(lines)}
+			lines, styles = append(lines, l.text), append(styles, l.styles)
+		}
+		join = l.wrapped
+	}
+	b.lines, tv.styles = lines, styles
+	tv.screenTop = starts[0]
+	b.cursor = Cursor{starts[cy].x + col, starts[cy].y}
+	b.bumpVersion()
+}
+
+// forget drops the oldest n lines of history. What refers to the lines left
+// moves with them.
+func (tv *TermView) forget(n int) {
+	b := tv.buffer
+	off := 0
+	for _, l := range tv.hist[:n] {
+		off += len(l.text) + 1
+	}
+	tv.hist = slices.Delete(tv.hist, 0, n)
+	tv.org = max(0, tv.org-off)
+	for _, c := range []*Cursor{&b.selection.Start, &b.selection.End} {
+		c.y -= n
+		if c.y < 0 {
+			*c = Cursor{}
+		}
 	}
 }
 
-func (tv *TermView) updateContentHeight() {
-	// Must be called with lock
-	if tv.state.Mode(terminal.ModeAltScreen) {
-		tv.contentHeight = tv.h
-		return
+// Layout follows the screen, unless the view was scrolled away or a sweep
+// is under way.
+func (tv *TermView) Layout() {
+	tv.sync()
+	if tv.autoScroll && !tv.drag {
+		_, top := tv.bufferToVisual(tv.screenTop.x, tv.screenTop.y)
+		tv.setTop(top)
 	}
+}
 
-	_, cy := tv.state.Cursor()
-	lastLine := cy + 1
-	if lastLine < tv.h {
-		lastLine = tv.h
+// ShowLineAt shows line n, and stops following the screen if that moved the
+// view, so that it stays on n.
+func (tv *TermView) ShowLineAt(n int) {
+	if tv.showLine(n) {
+		tv.autoScroll = false
 	}
+}
 
-	limit := maxHistory
-	if tv.h > limit {
-		limit = tv.h
-	}
-
-	for y := limit - 1; y >= lastLine; y-- {
-		empty := true
-		for x := 0; x < tv.w; x++ {
-			c, _, _, _ := tv.state.Cell(x, y)
-			if c != 0 && c != ' ' {
-				empty = false
-				break
-			}
-		}
-		if !empty {
-			tv.contentHeight = y + 1
-			return
-		}
-	}
-	tv.contentHeight = lastLine
+func (tv *TermView) GetBuffer() *Buffer {
+	tv.sync()
+	return tv.buffer
 }
 
 func (tv *TermView) Resize(w, h int) {
@@ -271,132 +334,10 @@ func (tv *TermView) Resize(w, h int) {
 		return
 	}
 	tv.w, tv.h = w, h
-	// Always keep emulator at maxHistory to avoid losing Primary buffer data
-	// when switching screens or resizing.
-	tv.vt.Resize(w, max(maxHistory, h))
-
-	// Tell the process the visible size. This must be called AFTER tv.vt.Resize
-	// to override any PTY size changes the emulator might have made.
+	tv.vt.Resize(w, h)
+	// Tell the process the visible size.
 	tv.session.Resize(h, w)
-	// contentHeight and scroll are recomputed by Layout() on the next draw frame.
-}
-
-func (tv *TermView) SyncScroll() {
-	tv.state.Lock()
-	if tv.selecting || tv.state.Mode(terminal.ModeAltScreen) {
-		if tv.state.Mode(terminal.ModeAltScreen) {
-			tv.scroll.Pos = 0
-		}
-		tv.state.Unlock()
-		return
-	}
-
-	if !tv.scroll.AutoScroll {
-		tv.state.Unlock()
-		return
-	}
-
-	eh := tv.contentHeight
-	_, cy := tv.state.Cursor()
-	tv.state.Unlock()
-
-	if cy < tv.scroll.Pos {
-		tv.scroll.Pos = cy
-	} else if cy >= tv.scroll.Pos+tv.h {
-		tv.scroll.Pos = cy - tv.h + 1
-	}
-	tv.scroll.Clamp(eh, tv.h)
-}
-
-func (tv *TermView) Scroll(n int) {
-	_, total, visible := tv.GetScroll()
-	tv.scroll.Scroll(n, total, visible)
-}
-
-func (tv *TermView) AdvanceDragCursor(dir int) {
-	if !tv.selecting {
-		return
-	}
-	tv.buffer.selection.End.y += dir
-}
-
-func (tv *TermView) GetScroll() (scroll, total, visible int) {
-	tv.state.Lock()
-	defer tv.state.Unlock()
-
-	totalH := tv.h
-	if !tv.state.Mode(terminal.ModeAltScreen) {
-		totalH = tv.contentHeight
-	}
-	return tv.scroll.Pos, max(0, totalH), tv.h
-}
-
-func (tv *TermView) Search(word string) int {
-	start := Cursor{0, 0}
-	if tv.buffer.selection.Active {
-		start = tv.buffer.selection.End
-	}
-	line, sel, ok := Search(tv.GetBuffer(), word, start)
-	if ok {
-		tv.buffer.selection = sel
-		return line
-	}
-	return -1
-}
-
-func (tv *TermView) ShowLineAt(lineNum int) {
-	if lineNum >= tv.scroll.Pos && lineNum < tv.scroll.Pos+tv.h {
-		return
-	}
-	tv.scroll.Pos = lineNum - tv.h/4
-	_, total, visible := tv.GetScroll()
-	tv.scroll.Clamp(total, visible)
-}
-
-// PosAt returns the position of the cell at (x, y) in the scrollback buffer,
-// where a line has a rune for each cell.
-func (tv *TermView) PosAt(x, y int) Cursor {
-	return Cursor{x, y + tv.scroll.Pos}
-}
-
-func (tv *TermView) GetBuffer() *Buffer {
-	// Clear before reading, so output parsed meanwhile marks it dirty again.
-	if tv.bufferDirty.Swap(false) {
-		cursor := tv.buffer.cursor
-		sel := tv.buffer.selection
-		tv.buffer.SetText(tv.GetScrollback())
-		tv.buffer.cursor = cursor
-		tv.buffer.selection = sel
-		tv.buffer.history = nil
-		tv.buffer.redoStack = nil
-	}
-	return tv.buffer
-}
-
-// GetScrollback returns the terminal scrollback buffer as plain text.
-// Each line has trailing space stripped; lines are newline-separated.
-func (tv *TermView) GetScrollback() string {
-	tv.state.Lock()
-	defer tv.state.Unlock()
-	n := tv.contentHeight
-	var sb strings.Builder
-	buf := make([]rune, tv.w)
-	for y := 0; y < n; y++ {
-		for x := 0; x < tv.w; x++ {
-			r, _, _, _ := tv.state.Cell(x, y)
-			if r == 0 {
-				r = ' '
-			}
-			buf[x] = r
-		}
-		end := len(buf)
-		for end > 0 && buf[end-1] == ' ' {
-			end--
-		}
-		sb.WriteString(string(buf[:end]))
-		sb.WriteByte('\n')
-	}
-	return sb.String()
+	tv.changed.Store(true)
 }
 
 func (tv *TermView) HandleEvent(ev tcell.Event) {
@@ -413,7 +354,7 @@ func (tv *TermView) HandleEvent(ev tcell.Event) {
 
 	switch e := ev.(type) {
 	case *tcell.EventKey:
-		tv.scroll.AutoScroll = true
+		tv.autoScroll = true
 		mod := e.Modifiers()
 		if mod&(tcell.ModAlt|tcell.ModMeta) != 0 {
 			key := e.Key()
@@ -454,87 +395,68 @@ func (tv *TermView) HandleEvent(ev tcell.Event) {
 		tv.session.Write([]byte(keyToEscSeq(e)))
 	case *tcell.EventMouse:
 		rx, ry := e.Position()
-		realRY := ry + tv.scroll.Pos
-
 		buttons := e.Buttons()
 		mod := e.Modifiers()
-		ctrlPressed := mod&tcell.ModCtrl != 0
+		defer func() { tv.lastMX, tv.lastMY, tv.lastButtons = rx, ry, buttons }()
 
-		// Wheel handling
 		if buttons&(tcell.WheelUp|tcell.WheelDown) != 0 {
-			if isAlt {
-				seq := "\x1b[A"
-				if buttons&tcell.WheelDown != 0 {
-					seq = "\x1b[B"
-				}
-				if isMouseMode && sgrMode {
-					btn := 64
-					if buttons&tcell.WheelDown != 0 {
-						btn = 65
-					}
-					seq = tv.encodeSGR(btn, rx, ry, false, false, mod)
-				} else {
-					seq = seq + seq + seq
-				}
-				tv.session.Write([]byte(seq))
-			} else {
-				dir := -1
-				if buttons&tcell.WheelDown != 0 {
-					dir = 1
-				}
-				tv.Scroll(dir)
+			if !isAlt {
+				tv.mouse(e)
+				return
 			}
-			tv.lastMX, tv.lastMY, tv.lastButtons = rx, ry, buttons
+			seq := "\x1b[A"
+			if buttons&tcell.WheelDown != 0 {
+				seq = "\x1b[B"
+			}
+			if isMouseMode && sgrMode {
+				btn := 64
+				if buttons&tcell.WheelDown != 0 {
+					btn = 65
+				}
+				seq = tv.encodeSGR(btn, rx, ry, false, false, mod)
+			} else {
+				seq = seq + seq + seq
+			}
+			tv.session.Write([]byte(seq))
 			return
 		}
 
-		if isMouseMode && !ctrlPressed && !tv.selecting {
-			motion := rx != tv.lastMX || ry != tv.lastMY
-			handled := false
-			isMotion, isRelease := false, false
-			btnReport := 0
+		// A program tracking the mouse gets it, unless Ctrl is held or a
+		// selection is under way; otherwise the mouse selects text.
+		if !isMouseMode || mod&tcell.ModCtrl != 0 || tv.drag {
+			tv.mouse(e)
+			return
+		}
+		motion := rx != tv.lastMX || ry != tv.lastMY
+		handled := false
+		isMotion, isRelease := false, false
+		btnReport := 0
 
-			if code, release, changed := mouseButtonChange(tv.lastButtons, buttons); changed {
-				handled = true
-				btnReport, isRelease = code, release
-			} else if motion {
-				tv.state.Lock()
-				motionMode := tv.state.Mode(terminal.ModeMouseMotion | terminal.ModeMouseMany)
-				manyMode := tv.state.Mode(terminal.ModeMouseMany)
-				tv.state.Unlock()
+		if code, release, changed := mouseButtonChange(tv.lastButtons, buttons); changed {
+			handled = true
+			btnReport, isRelease = code, release
+		} else if motion {
+			tv.state.Lock()
+			motionMode := tv.state.Mode(terminal.ModeMouseMotion | terminal.ModeMouseMany)
+			manyMode := tv.state.Mode(terminal.ModeMouseMany)
+			tv.state.Unlock()
 
-				if buttons != tcell.ButtonNone && motionMode {
-					btnReport = sgrButton(buttons)
-					isMotion, handled = true, true
-				} else if manyMode {
-					btnReport, isMotion, handled = 3, true, true
-				}
-			}
-
-			if handled && sgrMode && rx >= 0 && rx < tv.w && ry >= 0 && ry < tv.h {
-				esc := tv.encodeSGR(btnReport, rx, ry, isMotion, isRelease, mod)
-				tv.session.Write([]byte(esc))
-			}
-
-			if buttons&tcell.ButtonPrimary != 0 {
-				tv.buffer.selection.Active = false
-			}
-		} else {
-			if buttons&tcell.ButtonPrimary != 0 {
-				if !tv.selecting {
-					tv.selecting = true
-					tv.buffer.selection = Selection{Start: Cursor{rx, realRY}, End: Cursor{rx + 1, realRY}, Active: true}
-				}
-				tv.buffer.selection.End = Cursor{rx + 1, realRY}
-			} else if tv.selecting {
-				tv.selecting = false
-				if tv.buffer.selection.Start.y == tv.buffer.selection.End.y && tv.buffer.selection.End.x-tv.buffer.selection.Start.x <= 1 {
-					tv.buffer.selection.Active = false
-				}
+			if buttons != tcell.ButtonNone && motionMode {
+				btnReport = sgrButton(buttons)
+				isMotion, handled = true, true
+			} else if manyMode {
+				btnReport, isMotion, handled = 3, true, true
 			}
 		}
 
-		tv.lastMX, tv.lastMY, tv.lastButtons = rx, ry, buttons
+		if handled && sgrMode && rx >= 0 && rx < tv.w && ry >= 0 && ry < tv.h {
+			esc := tv.encodeSGR(btnReport, rx, ry, isMotion, isRelease, mod)
+			tv.session.Write([]byte(esc))
+		}
+
+		if buttons&tcell.ButtonPrimary != 0 {
+			tv.buffer.selection.Active = false
+		}
 	}
 }
 

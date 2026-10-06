@@ -1,10 +1,14 @@
 package main
 
 import (
+	"slices"
+	"sort"
 	"strings"
 	"unicode"
 
 	"github.com/aleksana/peak/internal/quote"
+	"github.com/gdamore/tcell/v3"
+	uwidth "golang.org/x/text/width"
 )
 
 // Cursor represents a 2D position.
@@ -50,26 +54,6 @@ func (s Selection) Contains(x, y int, inclusive bool) bool {
 		return x < end.x
 	}
 	return true
-}
-
-// ScrollState handles scrolling logic.
-type ScrollState struct {
-	Pos        int
-	AutoScroll bool
-}
-
-func (s *ScrollState) Clamp(total, visible int) {
-	s.Pos = max(0, min(total, s.Pos))
-}
-
-func (s *ScrollState) Scroll(n int, total, visible int) {
-	s.Pos += n
-	s.Clamp(total, visible)
-	if s.Pos >= max(0, total-visible) {
-		s.AutoScroll = true
-	} else if n < 0 {
-		s.AutoScroll = false
-	}
 }
 
 func IsWordChar(r rune) bool {
@@ -202,4 +186,298 @@ func GetTextInSelection(buf *Buffer, s Selection) string {
 		}
 	}
 	return sb.String()
+}
+
+// A frame shows a Buffer in an area w wide and h high: it wraps the
+// buffer's lines to its width, scrolls through them, draws them with the
+// cursor, and selects text with the mouse. A view is a frame and what it
+// does with the text: TextView edits it, TermView runs a program that
+// writes it.
+type frame struct {
+	w, h   int
+	buffer *Buffer
+	// org is the rune offset of the first character shown. Whatever changes
+	// the text moves it with the text (a window's body hook, a terminal's
+	// forget), so the view stays where it was.
+	org int
+	// autoScroll is whether the view follows what is written: the cursor
+	// of a TextView, the screen of a TermView. Scrolling up stops it;
+	// scrolling to the end starts it again.
+	autoScroll    bool
+	scrollable    bool // false for tags, which show their text from the top
+	drag          bool // a selection is being swept
+	underlineLast bool // underline the last line, as the active window's tag
+	cursorHidden  bool // the program hid the cursor
+	// layout is the buffer's lines wrapped at the frame's width, laid out for
+	// laidOut; read it through lines.
+	layout   []VisualLine
+	laidOut  layoutKey
+	theme    *Theme
+	colors   *colorPair // points into theme, so theme changes apply
+	tabWidth int
+	// styleAt, when non-nil, returns the style to draw the rune at (line,
+	// col) in, given the frame's own style s for it.
+	styleAt func(line, col int, s tcell.Style) tcell.Style
+}
+
+func newFrame(b *Buffer, w, h int, theme *Theme, colors *colorPair, scrollable bool) frame {
+	return frame{w: w, h: h, buffer: b, theme: theme, colors: colors, scrollable: scrollable, tabWidth: 4}
+}
+
+// mouse handles the mouse in the frame: the wheel scrolls it, Button1 sweeps
+// a selection, and another button puts the cursor where it is pressed,
+// unless something is selected. A selection of nothing is dropped.
+func (f *frame) mouse(ev *tcell.EventMouse) {
+	buttons := ev.Buttons()
+	if f.scrollable {
+		if buttons&tcell.WheelUp != 0 {
+			f.Scroll(-1)
+			return
+		}
+		if buttons&tcell.WheelDown != 0 {
+			f.Scroll(1)
+			return
+		}
+	}
+	if buttons == tcell.ButtonNone {
+		f.drag = false
+		if f.buffer.selection.Active && f.buffer.selection.Start == f.buffer.selection.End {
+			f.buffer.ClearSelection()
+		}
+		return
+	}
+	p := f.PosAt(ev.Position())
+	switch {
+	case buttons == tcell.ButtonPrimary && !f.drag:
+		f.drag, f.buffer.cursor = true, p
+		f.buffer.SetSelection(p, p)
+	case buttons == tcell.ButtonPrimary:
+		f.buffer.cursor, f.buffer.selection.End = p, p
+	case !f.buffer.selection.Active:
+		f.buffer.cursor = p
+	}
+}
+
+func (f *frame) runeWidth(r rune, visualPos int) int {
+	if r == '\t' {
+		return f.tabWidth - (visualPos % f.tabWidth)
+	}
+	if unicode.IsMark(r) || unicode.Is(unicode.Cf, r) || unicode.IsControl(r) {
+		return 1
+	}
+	if wide(r) {
+		return 2
+	}
+	return 1
+}
+
+// wide reports whether r takes two columns.
+func wide(r rune) bool {
+	k := uwidth.LookupRune(r).Kind()
+	return k == uwidth.EastAsianWide || k == uwidth.EastAsianFullwidth
+}
+
+// A VisualLine is a row of the frame: the runes [Start, End) of a buffer line.
+type VisualLine struct {
+	BufferLine int
+	Start, End int
+}
+
+// layoutKey is what a layout depends on.
+type layoutKey struct{ w, tabWidth, version int }
+
+// lines returns the buffer's lines wrapped at the frame's width, laying them
+// out again if the text, the width or the tab width has changed.
+func (f *frame) lines() []VisualLine {
+	key := layoutKey{f.w, f.tabWidth, f.buffer.version}
+	if f.w <= 0 || key == f.laidOut {
+		return f.layout
+	}
+	f.laidOut = key
+	f.layout = nil
+	for i, line := range f.buffer.lines {
+		if len(line) == 0 {
+			f.layout = append(f.layout, VisualLine{i, 0, 0})
+			continue
+		}
+		visualPos, start := 0, 0
+		for idx, r := range line {
+			width := f.runeWidth(r, visualPos)
+			if visualPos+width > f.w && visualPos > 0 {
+				f.layout = append(f.layout, VisualLine{i, start, idx})
+				start, visualPos = idx, 0
+				width = f.runeWidth(r, visualPos)
+			}
+			visualPos += width
+		}
+		f.layout = append(f.layout, VisualLine{i, start, len(line)})
+	}
+	return f.layout
+}
+
+// top returns the index of the visual line shown first: the one org is on.
+func (f *frame) top() int {
+	lines := f.lines()
+	i := sort.Search(len(lines), func(i int) bool {
+		return f.buffer.RuneOffsetOfPos(lines[i].BufferLine, lines[i].Start) > f.org
+	})
+	return max(0, i-1)
+}
+
+// setTop scrolls the view to show visual line i first.
+func (f *frame) setTop(i int) {
+	lines := f.lines()
+	vl := lines[max(0, min(i, len(lines)-1))]
+	f.org = f.buffer.RuneOffsetOfPos(vl.BufferLine, vl.Start)
+}
+
+func (f *frame) GetScroll() (scroll, total, visible int) {
+	return f.top(), len(f.lines()), f.h
+}
+
+// Scroll scrolls n lines. Scrolling to the end makes the frame follow again;
+// scrolling back up stops it.
+func (f *frame) Scroll(n int) {
+	f.setTop(f.top() + n)
+	if f.top() >= len(f.lines())-f.h {
+		f.autoScroll = true
+	} else if n < 0 {
+		f.autoScroll = false
+	}
+}
+
+// bufferToVisual translates a buffer position to visual coordinates (vx, vrow).
+func (f *frame) bufferToVisual(bx, by int) (int, int) {
+	lines := f.lines()
+	for lidx, vl := range lines {
+		if vl.BufferLine == by && bx >= vl.Start && bx <= vl.End {
+			vx := 0
+			line := f.buffer.lines[by]
+			for i := vl.Start; i < bx; i++ {
+				vx += f.runeWidth(line[i], vx)
+			}
+			// Wrap edge case: if cursor is exactly at width, move to next visual line
+			if vx >= f.w && lidx+1 < len(lines) && lines[lidx+1].BufferLine == by {
+				continue
+			}
+			return vx, lidx
+		}
+	}
+	return 0, -1
+}
+
+// visualToBuffer translates visual coordinates (vx, vidx) to buffer position (bx, by).
+func (f *frame) visualToBuffer(vx, vidx int) (int, int) {
+	lines := f.lines()
+	vl := lines[max(0, min(vidx, len(lines)-1))]
+	line := f.buffer.lines[vl.BufferLine]
+	bx, currVX := vl.Start, 0
+	for i := vl.Start; i < vl.End; i++ {
+		w := f.runeWidth(line[i], currVX)
+		if currVX+w > vx {
+			break
+		}
+		currVX += w
+		bx = i + 1
+	}
+	return bx, vl.BufferLine
+}
+
+func (f *frame) Draw(cv canvas) {
+	selStyle := f.theme.Selection.style()
+	lines, vrow := f.lines(), 0
+	for lidx := f.top(); lidx < len(lines) && vrow < f.h; lidx++ {
+		vl, vcol := lines[lidx], 0
+		line := f.buffer.lines[vl.BufferLine]
+		lineStyle := f.colors.style()
+		if f.underlineLast && lidx == len(lines)-1 {
+			lineStyle = lineStyle.Underline(true)
+		}
+		for idx := vl.Start; idx < vl.End; idx++ {
+			r, style := line[idx], lineStyle
+			if f.buffer.selection.Contains(idx, vl.BufferLine, false) {
+				style = selStyle
+			} else if f.styleAt != nil {
+				style = f.styleAt(vl.BufferLine, idx, style)
+			}
+
+			width := f.runeWidth(r, vcol)
+			if r == '\t' {
+				cv.fill(rect{vcol, vrow, width, 1}, style)
+			} else {
+				str := string(r)
+				if unicode.IsMark(r) || unicode.Is(unicode.Cf, r) || unicode.IsControl(r) {
+					str = "□"
+				}
+				cv.put(vcol, vrow, str, style)
+			}
+			vcol += width
+		}
+		eolStyle := lineStyle
+		if f.buffer.selection.Contains(vl.End, vl.BufferLine, false) {
+			eolStyle = selStyle
+		}
+		cv.fill(rect{vcol, vrow, f.w - vcol, 1}, eolStyle)
+		vrow++
+	}
+	cv.fill(rect{0, vrow, f.w, f.h - vrow}, f.colors.style())
+}
+
+func (f *frame) PosAt(x, y int) Cursor {
+	bx, by := f.visualToBuffer(x, y+f.top())
+	return Cursor{bx, by}
+}
+
+func (f *frame) ShowCursor(cv canvas) {
+	if f.cursorHidden {
+		return
+	}
+	vx, vrow := f.bufferToVisual(f.buffer.cursor.x, f.buffer.cursor.y)
+	cv.showCursor(max(0, min(vx, f.w-1)), vrow-f.top())
+}
+
+// fit gives f width w and the height its text needs at that width.
+func (f *frame) fit(w int) {
+	f.w = w
+	f.h = max(1, len(f.lines()))
+}
+
+func (f *frame) AdvanceDragCursor(dir int) {
+	if !f.drag {
+		return
+	}
+	f.buffer.cursor = f.buffer.selection.End
+	if dir > 0 {
+		f.buffer.MoveDown()
+	} else {
+		f.buffer.MoveUp()
+	}
+	f.buffer.selection.End = f.buffer.cursor
+}
+
+// Search selects the next match of word after the selection, or else after
+// the cursor, wrapping around.
+func (f *frame) Search(word string) int {
+	start := f.buffer.cursor
+	if f.buffer.selection.Active {
+		start = f.buffer.selection.End
+	}
+	line, sel, ok := Search(f.buffer, word, start)
+	if ok {
+		f.buffer.cursor = sel.End
+		f.buffer.selection = sel
+		return line
+	}
+	return -1
+}
+
+// showLine scrolls to show line n, if it is not shown, and reports whether
+// it did.
+func (f *frame) showLine(n int) bool {
+	vidx := slices.IndexFunc(f.lines(), func(vl VisualLine) bool { return vl.BufferLine == n })
+	if top := f.top(); vidx == -1 || (vidx >= top && vidx < top+f.h) {
+		return false
+	}
+	f.setTop(vidx - f.h/4)
+	return true
 }
