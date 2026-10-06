@@ -506,13 +506,7 @@ func TestWindowFsEventIDEvents(t *testing.T) {
 	ef := vfs.UnwrapFile(f).(*winEventFile)
 
 	// Trigger an insert via buffer edit on the main goroutine
-	e.Call(func() {
-		win.body.GetBuffer().SetTextInRange(
-			win.body.GetBuffer().cursor,
-			win.body.GetBuffer().cursor,
-			"X",
-		)
-	})
+	e.Call(func() { win.body.GetBuffer().Insert('X') })
 
 	sr := &subReader{sub: ef.sub}
 	evCh := make(chan wevent.Event, 1)

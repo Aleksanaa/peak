@@ -319,6 +319,31 @@ func TestZeroxKeepsDirtyState(t *testing.T) {
 	}
 }
 
+// A |cmd's output may arrive after the window was edited; it must land at the
+// (clamped) selection instead of indexing lines that no longer exist.
+func TestPipeOutputAfterEdit(t *testing.T) {
+	e, col := newTestEditorWithColumn(t)
+	win := col.AddWindow(" /tmp/pipe.txt Get Put Del ", "a\nb\nc\nd\nselected")
+	buf := win.body.GetBuffer()
+	buf.SetSelection(Cursor{0, 4}, Cursor{8, 4})
+
+	e.runExternal(col, win, "|sleep 0.2; echo out")
+	e.Call(func() { buf.SetText("x") }) // the user replaces the text meanwhile
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var text string
+		e.Call(func() { text = buf.GetText() })
+		if text == "xout\n" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("body = %q, want %q", text, "xout\n")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestZeroxClick(t *testing.T) {
 	e, s := setupTest(t, 100, 24)
 

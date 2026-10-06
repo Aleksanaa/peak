@@ -237,12 +237,6 @@ func (b *Buffer) replace(start, end Cursor, content string) Cursor {
 	return b.cursor
 }
 
-func (b *Buffer) SetTextInRange(start, end Cursor, content string) Cursor {
-	var res Cursor
-	b.mutate(func() { res = b.replace(start, end, content) })
-	return res
-}
-
 // DeleteLine removes the cursor's line and leaves the cursor at the start of
 // the line that takes its place (the previous line, when the last is removed).
 func (b *Buffer) DeleteLine() {

@@ -754,15 +754,18 @@ func (e *Editor) runExternal(col *Column, win *Window, cmd string) {
 		filename = getwd()
 	}
 
+	// The output lands after the user may have edited the window, so the
+	// selection is kept as rune offsets, which clamp to the buffer (as acme's
+	// wrsel does), rather than as line/column positions that may no longer exist.
 	var input string
-	var selStart, selEnd Cursor
+	var q0, q1 int
 	if win != nil {
 		buf := win.body.GetBuffer()
+		start, end := buf.cursor, buf.cursor
 		if buf.selection.Active {
-			selStart, selEnd = buf.selection.Ordered()
-		} else {
-			selStart, selEnd = buf.cursor, buf.cursor
+			start, end = buf.selection.Ordered()
 		}
+		q0, q1 = buf.CursorToRuneOffset(start), buf.CursorToRuneOffset(end)
 		if pipechar == '>' || pipechar == '|' {
 			input = buf.GetSelectedText()
 		}
@@ -772,10 +775,7 @@ func (e *Editor) runExternal(col *Column, win *Window, cmd string) {
 		out, err := runCommand(cmd, filename, input, winid)
 		e.callCh <- func() {
 			if (pipechar == '<' || pipechar == '|') && win != nil {
-				buf := win.body.GetBuffer()
-				newCursor := buf.SetTextInRange(selStart, selEnd, out)
-				buf.cursor = newCursor
-				buf.ClearSelection()
+				win.body.GetBuffer().ReplaceRangeRunes(q0, q1, []rune(out))
 				if err != nil {
 					e.showError(col, win, getPathDir(filename), err.Error())
 				}
