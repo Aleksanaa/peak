@@ -64,16 +64,8 @@ func setupTest(t *testing.T, w, h int) (*Editor, tcell.Screen) {
 	if err := s.Init(); err != nil {
 		t.Fatalf("failed to init screen: %v", err)
 	}
-	e := &Editor{
-		screen:   s,
-		redrawCh: make(chan struct{}, 1),
-		callCh:   make(chan func(), 16),
-	}
-	e.ninep = NewNineP(e)
-	if err := e.ApplyTheme("catppuccin_mocha"); err != nil {
-		t.Fatalf("ApplyTheme: %v", err)
-	}
-	e.w, e.h = w, h
+	e := &Editor{}
+	e.setup(s)
 
 	go func() {
 		for fn := range e.callCh {
@@ -86,14 +78,6 @@ func setupTest(t *testing.T, w, h int) (*Editor, tcell.Screen) {
 			}
 		}
 	}()
-
-	tagStyle := tcell.StyleDefault.Background(e.theme.GlobalTagBG).Foreground(e.theme.GlobalTagFG)
-	e.tag = NewTextView(" NewCol Help Exit ", 0, 0, e.w, 1, tagStyle, true, false)
-	e.tag.style = func() tcell.Style {
-		return tcell.StyleDefault.Background(e.theme.GlobalTagBG).Foreground(e.theme.GlobalTagFG)
-	}
-	e.tag.theme = &e.theme
-	e.focusedView = e.tag
 	return e, s
 }
 

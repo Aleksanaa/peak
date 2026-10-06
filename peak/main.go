@@ -120,14 +120,6 @@ func (e *Editor) Init(numCols int, args []string, sessionFile string) {
 		log.SetOutput(logFile)
 	}
 
-	e.redrawCh = make(chan struct{}, 1)
-	e.callCh = make(chan func(), 16)
-	e.nextWinID = 1
-	e.ninep = NewNineP(e)
-	if err := e.ApplyTheme("catppuccin_mocha"); err != nil {
-		log.Printf("theme: %v", err)
-	}
-	e.ninep.Listen()
 	s, err := tcell.NewTerminfoScreen()
 	if err != nil {
 		log.Fatalf("%+v", err)
@@ -135,18 +127,9 @@ func (e *Editor) Init(numCols int, args []string, sessionFile string) {
 	if err := s.Init(); err != nil {
 		log.Fatalf("%+v", err)
 	}
-
-	e.screen = s
-	e.screen.EnableMouse()
-	e.w, e.h = e.screen.Size()
-
-	tagStyle := tcell.StyleDefault.Background(e.theme.GlobalTagBG).Foreground(e.theme.GlobalTagFG)
-	e.tag = NewTextView(" NewCol Help Exit ", 0, 0, e.w, 1, tagStyle, true, false)
-	e.tag.style = func() tcell.Style {
-		return tcell.StyleDefault.Background(e.theme.GlobalTagBG).Foreground(e.theme.GlobalTagFG)
-	}
-	e.tag.theme = &e.theme
-	e.focusedView = e.tag
+	s.EnableMouse()
+	e.setup(s)
+	e.ninep.Listen()
 
 	if numCols < 1 {
 		numCols = 1
@@ -189,6 +172,28 @@ func (e *Editor) Init(numCols int, args []string, sessionFile string) {
 		e.Execute(lastCol, win, "Get")
 	}
 	e.resize()
+}
+
+// setup builds an empty editor on screen s: no columns yet, and the 9P
+// socket not yet listening.
+func (e *Editor) setup(s tcell.Screen) {
+	e.screen = s
+	e.w, e.h = s.Size()
+	e.redrawCh = make(chan struct{}, 1)
+	e.callCh = make(chan func(), 16)
+	e.nextWinID = 1
+	e.ninep = NewNineP(e)
+	if err := e.ApplyTheme("catppuccin_mocha"); err != nil {
+		log.Printf("theme: %v", err)
+	}
+
+	tagStyle := tcell.StyleDefault.Background(e.theme.GlobalTagBG).Foreground(e.theme.GlobalTagFG)
+	e.tag = NewTextView(" NewCol Help Exit ", 0, 0, e.w, 1, tagStyle, true, false)
+	e.tag.style = func() tcell.Style {
+		return tcell.StyleDefault.Background(e.theme.GlobalTagBG).Foreground(e.theme.GlobalTagFG)
+	}
+	e.tag.theme = &e.theme
+	e.focusedView = e.tag
 }
 
 // Run enters the main event loop.
