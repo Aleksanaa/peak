@@ -297,6 +297,7 @@ func (e *Editor) Load(file string) error {
 		col := e.columns[0]
 		for len(col.windows) > 0 {
 			e.ninep.UmountWindow(col.windows[0])
+			col.windows[0].Close()
 			col.windows = col.windows[1:]
 		}
 		e.columns = e.columns[1:]

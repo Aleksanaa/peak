@@ -632,9 +632,13 @@ func (tv *TermView) encodeSGR(btn, x, y int, motion, release bool, mod tcell.Mod
 	return fmt.Sprintf("\x1b[<%d;%d;%d%s", b, x+1, y+1, suffix)
 }
 
+// Close is called on the main goroutine. Cancelling is synchronous so the
+// parse goroutine never reports a close for a window already being removed;
+// closing the session is not, since for a remote session it is several
+// blocking 9P round trips that must not stall the UI.
 func (tv *TermView) Close() {
 	tv.cancel()
-	tv.vt.Close()
+	go tv.vt.Close()
 }
 
 func (tv *TermView) Snarf() {

@@ -890,6 +890,14 @@ func NewWindow(tag, body string, parent *Column, editor *Editor, x, y, w, h int,
 	return win
 }
 
+// Close releases resources owned by the window's body. For a terminal it
+// hangs up the session, which ends the child process and the parse goroutine.
+func (win *Window) Close() {
+	if tv, ok := win.body.(*TermView); ok {
+		tv.Close()
+	}
+}
+
 func (win *Window) bodyTextView() *TextView {
 	if tv, ok := win.body.(*TextView); ok {
 		return tv

@@ -358,29 +358,32 @@ func (e *Editor) cmdDelete(win *Window) {
 	}
 }
 
+// RemoveWindow detaches target from the editor and releases its resources.
+// It is a no-op for a window that was already removed: a terminal whose
+// process exits races with Del, and both paths end up here.
 func (e *Editor) RemoveWindow(target *Window) {
-	e.ninep.UmountWindow(target)
 	col := target.parent
-	for i, w := range col.windows {
-		if w == target {
-			col.windows = append(col.windows[:i], col.windows[i+1:]...)
-			if col.maximized == target {
-				col.maximized = nil
-			}
-			col.Resize(col.x, col.y, col.w, col.h)
-			if e.active == target {
-				if len(col.windows) > 0 {
-					e.active = col.windows[0]
-				} else {
-					e.active = nil
-				}
-				if e.active != nil {
-					e.focusedView = e.active.body
-				} else {
-					e.focusedView = col.tag
-				}
-			}
-			return
+	i := slices.Index(col.windows, target)
+	if i < 0 {
+		return
+	}
+	e.ninep.UmountWindow(target)
+	target.Close()
+	col.windows = slices.Delete(col.windows, i, i+1)
+	if col.maximized == target {
+		col.maximized = nil
+	}
+	col.Resize(col.x, col.y, col.w, col.h)
+	if e.active == target {
+		if len(col.windows) > 0 {
+			e.active = col.windows[0]
+		} else {
+			e.active = nil
+		}
+		if e.active != nil {
+			e.focusedView = e.active.body
+		} else {
+			e.focusedView = col.tag
 		}
 	}
 }
