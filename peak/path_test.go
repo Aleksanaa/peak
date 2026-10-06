@@ -173,7 +173,7 @@ func TestReadFileOrDir_IgnoresWrongSize(t *testing.T) {
 
 	mem := afero.NewMemMapFs()
 	afero.WriteFile(mem, "/test.txt", []byte(content), 0644)
-	ns.Mount(mountPath, &wrongSizeFs{Fs: mem})
+	ns.Mount(mountPath, &wrongSizeFs{Fs: mem}, "")
 
 	// Call readFileOrDir directly (bypasses the async Get command).
 	got, isDir, _, err := readFileOrDir(mountPath + "/test.txt")

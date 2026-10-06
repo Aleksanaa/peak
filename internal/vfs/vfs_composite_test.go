@@ -27,7 +27,7 @@ func TestCompositeMountRead(t *testing.T) {
 	c := NewCompositeFs()
 	mounted := afero.NewMemMapFs()
 	mustWriteFile(t, mounted, "/hello.txt", "from mount")
-	c.Mount("/mnt", mounted)
+	c.Mount("/mnt", mounted, "")
 
 	got, err := afero.ReadFile(c, "/mnt/hello.txt")
 	if err != nil {
@@ -43,7 +43,7 @@ func TestCompositeMountStat(t *testing.T) {
 	mounted := afero.NewMemMapFs()
 	mustMkdirAll(t, mounted, "/sub")
 	mustWriteFile(t, mounted, "/sub/f.txt", "x")
-	c.Mount("/mnt", mounted)
+	c.Mount("/mnt", mounted, "")
 
 	fi, err := c.Stat("/mnt/sub/f.txt")
 	if err != nil {
@@ -65,7 +65,7 @@ func TestCompositeMountStat(t *testing.T) {
 func TestCompositeMountPointVisible(t *testing.T) {
 	c := NewCompositeFs()
 	mounted := afero.NewMemMapFs()
-	c.Mount("/mnt", mounted)
+	c.Mount("/mnt", mounted, "")
 
 	// The mount point itself should appear as a directory.
 	fi, err := c.Stat("/mnt")
@@ -81,7 +81,7 @@ func TestCompositeUmount(t *testing.T) {
 	c := NewCompositeFs()
 	mounted := afero.NewMemMapFs()
 	mustWriteFile(t, mounted, "/secret.txt", "secret")
-	c.Mount("/mnt", mounted)
+	c.Mount("/mnt", mounted, "")
 	c.Umount("/mnt")
 
 	if _, err := c.Stat("/mnt/secret.txt"); err == nil {
@@ -93,8 +93,8 @@ func TestCompositeFindMount(t *testing.T) {
 	c := NewCompositeFs()
 	a := afero.NewMemMapFs()
 	b := afero.NewMemMapFs()
-	c.Mount("/a", a)
-	c.Mount("/a/b", b)
+	c.Mount("/a", a, "")
+	c.Mount("/a/b", b, "")
 
 	// /a/b/file should match the deeper mount /a/b.
 	mp, fs := c.FindMount("/a/b/file")
@@ -126,8 +126,8 @@ func TestCompositeCrossMount(t *testing.T) {
 	a := afero.NewMemMapFs()
 	b := afero.NewMemMapFs()
 	mustWriteFile(t, a, "/f.txt", "a")
-	c.Mount("/a", a)
-	c.Mount("/b", b)
+	c.Mount("/a", a, "")
+	c.Mount("/b", b, "")
 
 	err := c.Rename("/a/f.txt", "/b/f.txt")
 	if err == nil {
@@ -139,7 +139,7 @@ func TestCompositeSameMountRename(t *testing.T) {
 	c := NewCompositeFs()
 	mounted := afero.NewMemMapFs()
 	mustWriteFile(t, mounted, "/orig.txt", "content")
-	c.Mount("/mnt", mounted)
+	c.Mount("/mnt", mounted, "")
 
 	if err := c.Rename("/mnt/orig.txt", "/mnt/renamed.txt"); err != nil {
 		t.Fatalf("Rename: %v", err)
@@ -160,7 +160,7 @@ func TestCompositeReaddirMerge(t *testing.T) {
 	mustWriteFile(t, c, "/x.txt", "x")
 	mounted := afero.NewMemMapFs()
 	mustWriteFile(t, mounted, "/y.txt", "y")
-	c.Mount("/mnt", mounted)
+	c.Mount("/mnt", mounted, "")
 
 	infos, err := afero.ReadDir(c, "/")
 	if err != nil {
@@ -189,7 +189,7 @@ func TestCompositeReaddirMerge(t *testing.T) {
 func TestCompositeWriteToMount(t *testing.T) {
 	c := NewCompositeFs()
 	mounted := afero.NewMemMapFs()
-	c.Mount("/mnt", mounted)
+	c.Mount("/mnt", mounted, "")
 
 	if err := afero.WriteFile(c, "/mnt/new.txt", []byte("written"), 0644); err != nil {
 		t.Fatalf("WriteFile via composite: %v", err)
@@ -204,7 +204,7 @@ func TestCompositeDeepMount(t *testing.T) {
 	c := NewCompositeFs()
 	inner := afero.NewMemMapFs()
 	mustWriteFile(t, inner, "/file.txt", "deep")
-	c.Mount("/a/b/c", inner)
+	c.Mount("/a/b/c", inner, "")
 
 	got, err := afero.ReadFile(c, "/a/b/c/file.txt")
 	if err != nil {
@@ -272,7 +272,7 @@ func TestRootedFsWalkRedirect(t *testing.T) {
 
 	// Mount a redirector under /mnt inside the composite.
 	redir := &redirectorFs{Fs: inner}
-	c.Mount("/mnt", redir)
+	c.Mount("/mnt", redir, "")
 
 	// Root the composite at /mnt so the 9P server sees it from /.
 	r := NewRootedFs(c, "/mnt")
@@ -305,7 +305,7 @@ func TestNinePWithComposite(t *testing.T) {
 	c := NewCompositeFs()
 	mounted := afero.NewMemMapFs()
 	mustWriteFile(t, mounted, "/data.txt", "mounted data")
-	c.Mount("/remote", mounted)
+	c.Mount("/remote", mounted, "")
 
 	r := NewRootedFs(c, "/")
 	cli := newTestPair(t, r)
@@ -323,7 +323,7 @@ func TestNinePWithCompositeStat(t *testing.T) {
 	c := NewCompositeFs()
 	mounted := afero.NewMemMapFs()
 	mustMkdirAll(t, mounted, "/subdir")
-	c.Mount("/mnt", mounted)
+	c.Mount("/mnt", mounted, "")
 
 	r := NewRootedFs(c, "/")
 	cli := newTestPair(t, r)

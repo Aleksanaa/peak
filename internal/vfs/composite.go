@@ -3,8 +3,10 @@ package vfs
 import (
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -15,26 +17,44 @@ import (
 // CompositeFs merges multiple afero.Fs into a single view.
 type CompositeFs struct {
 	root   afero.Fs
-	mounts map[string]afero.Fs
+	mounts map[string]Mount
 	mu     sync.RWMutex
+}
+
+// A Mount is an entry of the mount table: Fs attached at Path. Src says what
+// was attached, as listings of the namespace show it.
+type Mount struct {
+	Path, Src string
+	Fs        afero.Fs
 }
 
 func NewCompositeFs() *CompositeFs {
 	return &CompositeFs{
 		root:   afero.NewMemMapFs(),
-		mounts: make(map[string]afero.Fs),
+		mounts: make(map[string]Mount),
 	}
 }
 
-// Mount attaches an afero.Fs at the given path.
-func (fs *CompositeFs) Mount(path string, mountFs afero.Fs) {
+// Mount attaches mountFs at path, replacing what was there. src says what
+// mountFs is, for listing; it is empty for file servers that are part of the
+// namespace's makeup rather than mounted into it.
+func (fs *CompositeFs) Mount(path string, mountFs afero.Fs, src string) {
 	cleanPath := filepath.Clean(path)
 	// Ensure the mount point exists in the root memory FS
 	_ = fs.root.MkdirAll(cleanPath, 0755)
 
 	fs.mu.Lock()
-	fs.mounts[cleanPath] = mountFs
+	fs.mounts[cleanPath] = Mount{cleanPath, src, mountFs}
 	fs.mu.Unlock()
+}
+
+// Mounts returns the mount table, ordered by path.
+func (fs *CompositeFs) Mounts() []Mount {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+	mounts := slices.Collect(maps.Values(fs.mounts))
+	slices.SortFunc(mounts, func(a, b Mount) int { return strings.Compare(a.Path, b.Path) })
+	return mounts
 }
 
 // Umount detaches an afero.Fs from the given path.
@@ -65,7 +85,7 @@ func (fs *CompositeFs) getMountAndFs(name string) (mountPath string, mountedFs a
 		} else {
 			rel = "/" + rel
 		}
-		return bestMatch, fs.mounts[bestMatch], rel
+		return bestMatch, fs.mounts[bestMatch].Fs, rel
 	}
 	return "", fs.root, name
 }
@@ -201,7 +221,7 @@ func (fs *CompositeFs) FindMount(name string) (string, afero.Fs) {
 	if bestMatch == "" {
 		return "", nil
 	}
-	return bestMatch, fs.mounts[bestMatch]
+	return bestMatch, fs.mounts[bestMatch].Fs
 }
 
 func (fs *CompositeFs) Chmod(name string, mode os.FileMode) error {

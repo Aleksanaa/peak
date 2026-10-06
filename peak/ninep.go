@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/aleksana/peak/internal/peakfs"
 	"github.com/aleksana/peak/internal/quote"
@@ -22,23 +21,16 @@ var docFS embed.FS
 //go:embed theme
 var themeFS embed.FS
 
-type mountEntry struct {
-	src, dst string
-}
-
 // ns is the process's namespace: every path peak opens resolves in it, as
 // in Plan 9, where a namespace belongs to the process.
 var ns *vfs.CompositeFs
 
 // NineP manages the virtual filesystem and 9P server for Peak.
 type NineP struct {
-	editor  *Editor
-	bus     *globalEventBus
-	nsFs    *peakNamespaceFs
-	nsBase  string // VFS path where nsFs is mounted
-	mountMu sync.RWMutex
-	mounts  []mountEntry // 9P mounts via Mount()
-	binds   []mountEntry // local overlays via Bind()
+	editor *Editor
+	bus    *globalEventBus
+	nsFs   *peakNamespaceFs
+	nsBase string // VFS path where nsFs is mounted
 }
 
 // NewNineP builds the process namespace, ns, and peak's file server over it.
@@ -47,19 +39,19 @@ func NewNineP(e *Editor) *NineP {
 	ns = vfs.NewCompositeFs()
 	p := &NineP{editor: e, bus: &globalEventBus{}, nsBase: nsBase}
 
-	ns.Mount("/", afero.NewOsFs())
+	ns.Mount("/", afero.NewOsFs(), "")
 	p.nsFs = newPeakNamespaceFs(e, p.bus)
-	ns.Mount(nsBase, p.nsFs)
+	ns.Mount(nsBase, p.nsFs, "")
 
 	docFs := afero.FromIOFS{FS: docFS}
-	ns.Mount("/peak/doc", afero.NewBasePathFs(docFs, "doc"))
+	ns.Mount("/peak/doc", afero.NewBasePathFs(docFs, "doc"), "")
 
 	themeLayer := afero.NewMemMapFs()
 	themeLayer.Mkdir("/", 0755)
 	themeBase := afero.NewBasePathFs(afero.FromIOFS{FS: themeFS}, "theme")
-	ns.Mount("/peak/theme", afero.NewCopyOnWriteFs(themeBase, themeLayer))
+	ns.Mount("/peak/theme", afero.NewCopyOnWriteFs(themeBase, themeLayer), "")
 
-	ns.Mount("/peak/mirage", afero.NewMemMapFs())
+	ns.Mount("/peak/mirage", afero.NewMemMapFs(), "")
 
 	return p
 }
@@ -79,7 +71,7 @@ func (p *NineP) Listen() {
 
 // MountWindow exposes a window's namespace at /peak/<id>/.
 func (p *NineP) MountWindow(win *Window) {
-	ns.Mount("/peak/"+strconv.Itoa(win.ID), newWindowFs(win))
+	ns.Mount("/peak/"+strconv.Itoa(win.ID), newWindowFs(win), "")
 	p.bus.broadcast(fmt.Sprintf("new %d %s\n", win.ID, win.GetFilename()))
 }
 
@@ -101,7 +93,7 @@ func (p *NineP) BroadcastPut(win *Window) {
 	p.bus.broadcast(fmt.Sprintf("put %d %s\n", win.ID, win.GetFilename()))
 }
 
-// Mount attaches a 9P server to path in the VFS and records it in /mount. If
+// Mount attaches a 9P server to path in the VFS, listed in /mount. If
 // socket can be opened as a file in peak's own VFS it is treated as a virtual
 // socket; otherwise it is dialled as a Unix socket. Returns the resolved
 // destination path.
@@ -116,74 +108,47 @@ func (p *NineP) Mount(socket, path string) (string, error) {
 		return "", err
 	}
 	path = normalizePath(path, "")
-	ns.Mount(path, clientFs)
-	p.record(&p.mounts, socket, path)
+	ns.Mount(path, clientFs, socket)
 	return path, nil
 }
 
 func (p *NineP) Umount(path string) {
-	path = normalizePath(path, "")
-	ns.Umount(path)
-	p.mountMu.Lock()
-	p.mounts = removeByDst(p.mounts, path)
-	p.binds = removeByDst(p.binds, path)
-	p.mountMu.Unlock()
+	ns.Umount(normalizePath(path, ""))
 }
 
-// Bind overlays a source path onto dest in the VFS and records it in /bind.
-// The source may be any path reachable through the composite VFS (internal
-// or external).
+// Bind overlays a source path onto dest in the VFS, listed in /bind. The
+// source may be any path reachable through the composite VFS (internal or
+// external).
 func (p *NineP) Bind(src, dest string) error {
 	src = normalizePath(src, "")
-	dest = normalizePath(dest, "")
-	ns.Mount(dest, afero.NewBasePathFs(ns, src))
-	// Normalize again now that dest exists, so /bind lists it as a directory
-	// (with a trailing slash), as it always has.
-	p.record(&p.binds, normalizePath(src, ""), normalizePath(dest, ""))
+	ns.Mount(normalizePath(dest, ""), afero.NewBasePathFs(ns, src), src)
 	return nil
 }
 
-func (p *NineP) record(table *[]mountEntry, src, dst string) {
-	p.mountMu.Lock()
-	*table = append(*table, mountEntry{src, dst})
-	p.mountMu.Unlock()
-}
+// ListMounts returns the 9P servers mounted in the namespace as "src dst"
+// lines.
+func (p *NineP) ListMounts() string { return listNamespace(false) }
 
-// removeByDst drops the entries mounted at dst. Paths are compared cleaned:
-// normalizePath adds a trailing slash only once a path exists in the VFS, so
-// the same destination is spelled differently before and after mounting.
-func removeByDst(entries []mountEntry, dst string) []mountEntry {
-	dst = filepath.Clean(dst)
-	out := entries[:0]
-	for _, e := range entries {
-		if filepath.Clean(e.dst) != dst {
-			out = append(out, e)
-		}
-	}
-	return out
-}
+// ListBinds returns the paths bound in the namespace as "src dst" lines.
+func (p *NineP) ListBinds() string { return listNamespace(true) }
 
-// ListMounts returns current 9P mounts as "src dst\n" lines.
-func (p *NineP) ListMounts() string {
-	p.mountMu.RLock()
-	defer p.mountMu.RUnlock()
-	return formatEntries(p.mounts)
-}
-
-// ListBinds returns current local binds as "src dst\n" lines.
-func (p *NineP) ListBinds() string {
-	p.mountMu.RLock()
-	defer p.mountMu.RUnlock()
-	return formatEntries(p.binds)
-}
-
-func formatEntries(entries []mountEntry) string {
+// listNamespace lists the binds, or else the mounts, of the namespace as
+// quoted "src dst" lines. A bind is the namespace itself shown at another
+// path. A mount point is a directory, shown with a trailing slash, when what
+// is attached there is: a server's root always is, a bound path when it is
+// one.
+func listNamespace(binds bool) string {
 	var sb strings.Builder
-	for _, e := range entries {
-		sb.WriteString(quote.Quote(e.src))
-		sb.WriteByte(' ')
-		sb.WriteString(quote.Quote(e.dst))
-		sb.WriteByte('\n')
+	for _, m := range ns.Mounts() {
+		_, bind := m.Fs.(*afero.BasePathFs)
+		if m.Src == "" || bind != binds {
+			continue
+		}
+		dst := m.Path
+		if !bind || strings.HasSuffix(m.Src, "/") {
+			dst += "/"
+		}
+		fmt.Fprintf(&sb, "%s %s\n", quote.Quote(m.Src), quote.Quote(dst))
 	}
 	return sb.String()
 }

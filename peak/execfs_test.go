@@ -377,8 +377,6 @@ func TestUnmountRemovesMountEntry(t *testing.T) {
 	}
 	go vfs.NewNinePSrv(afero.NewMemMapFs()).ServeConn(serverF)
 
-	// The destination doesn't exist until mounted, so it is recorded without a
-	// trailing slash but normalized with one when unmounting.
 	dst := "/peak/execfs-test-unmount-mount"
 	writeControl(t, nsFs, "mount", "/peak/srv/unmount-mount-srv "+dst+"\n")
 	if !strings.Contains(e.ninep.ListMounts(), dst) {
@@ -1083,4 +1081,18 @@ func TestSrvServeConnVia9P(t *testing.T) {
 	e.ninep.Umount(mountPath)
 	f.Close()
 	<-serveDone
+}
+
+// /bind lists what the namespace holds: binding a path again replaces the
+// bind there, so it is listed once, from its new source.
+func TestRebindListedOnce(t *testing.T) {
+	e, _, nsFs, _ := setupExecFsTest(t)
+	first, second := t.TempDir(), t.TempDir()
+	dst := "/peak/execfs-test-rebind"
+	writeControl(t, nsFs, "bind", first+" "+dst+"\n")
+	writeControl(t, nsFs, "bind", second+" "+dst+"\n")
+
+	if got, want := e.ninep.ListBinds(), second+"/ "+dst+"/\n"; got != want {
+		t.Errorf("/bind = %q, want %q", got, want)
+	}
 }
