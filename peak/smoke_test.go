@@ -86,10 +86,12 @@ func setupTest(t *testing.T, w, h int) (*Editor, tcell.Screen) {
 	e := &Editor{}
 	e.setup(s)
 
+	// This goroutine stands in for the main loop. It draws only when asked,
+	// inside a call: a draw after a call returns would race with the caller
+	// reading the screen.
 	go func() {
 		for fn := range e.callCh {
 			fn()
-			e.Draw()
 			// Wake up any waitFor loops so they can recheck their condition.
 			select {
 			case e.screen.EventQ() <- tcell.NewEventInterrupt(nil):
@@ -105,20 +107,18 @@ func waitFor(t *testing.T, e *Editor, s tcell.Screen, condition func() bool) {
 	done := make(chan bool)
 	go func() {
 		for {
-			if condition() {
+			ok := condition()
+			// Draw on the editor's goroutine, whole frames only: the screen
+			// shows what the condition saw, and a condition on the screen is
+			// checked again against this frame. The draw is itself a call, so
+			// it wakes this loop.
+			e.Call(e.Draw)
+			if ok {
 				done <- true
 				return
 			}
-			ev, ok := <-s.EventQ()
-			if !ok {
+			if _, ok := <-s.EventQ(); !ok {
 				return
-			}
-			if intr, ok := ev.(*tcell.EventInterrupt); ok {
-				if f, ok := intr.Data().(func()); ok {
-					e.Call(f)
-					e.Draw()
-					s.Show()
-				}
 			}
 		}
 	}()
