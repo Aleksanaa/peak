@@ -172,7 +172,7 @@ func Search(buf *Buffer, word string, start Cursor) (int, Selection, bool) {
 	return -1, Selection{}, false
 }
 
-func GetTextInSelection(buf *Buffer, s Selection, trimRight bool) string {
+func GetTextInSelection(buf *Buffer, s Selection) string {
 	if !s.Active {
 		return ""
 	}
@@ -195,11 +195,7 @@ func GetTextInSelection(buf *Buffer, s Selection, trimRight bool) string {
 		x1 = max(0, min(x1, len(line)))
 		x2 = max(0, min(x2, len(line)))
 		if x1 < x2 {
-			content := string(line[x1:x2])
-			if trimRight {
-				content = strings.TrimRight(content, " ")
-			}
-			sb.WriteString(content)
+			sb.WriteString(string(line[x1:x2]))
 		}
 		if y < end.y {
 			sb.WriteRune('\n')

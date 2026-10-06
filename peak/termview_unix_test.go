@@ -92,11 +92,8 @@ func TestTermSelectionSeenByBufferPaths(t *testing.T) {
 	tv.HandleEvent(tcell.NewEventMouse(20, 0, tcell.ButtonNone, 0))
 
 	const want = "hello world"
-	if got := tv.GetSelectedText(); got != want {
-		t.Errorf("GetSelectedText = %q, want %q", got, want)
-	}
 	if got := tv.GetBuffer().GetSelectedText(); got != want {
-		t.Errorf("buffer selection (Snarf/Cut commands) = %q, want %q", got, want)
+		t.Errorf("buffer selection (Snarf/Cut and chords) = %q, want %q", got, want)
 	}
 	f, err := newWindowFs(termWin).OpenFile("rdsel", os.O_RDONLY, 0)
 	if err != nil {

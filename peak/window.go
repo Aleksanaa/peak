@@ -42,7 +42,6 @@ type View interface {
 	HandleEvent(tcell.Event)
 	PosAt(x, y int) Cursor // the buffer position shown at (x, y)
 
-	GetSelectedText() string
 	GetBuffer() *Buffer
 	Scroll(n int)
 	GetScroll() (scroll, total, visible int)
@@ -294,10 +293,6 @@ func (tv *TextView) Resize(w, h int) {
 
 func (tv *TextView) GetBuffer() *Buffer {
 	return tv.buffer
-}
-
-func (tv *TextView) GetSelectedText() string {
-	return tv.buffer.GetSelectedText()
 }
 
 func (tv *TextView) prepareTyping() bool {

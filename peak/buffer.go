@@ -113,7 +113,7 @@ func (b *Buffer) SetSelection(start, end Cursor) {
 }
 
 func (b *Buffer) GetSelectedText() string {
-	return GetTextInSelection(b, b.selection, false)
+	return GetTextInSelection(b, b.selection)
 }
 
 func (b *Buffer) Len() int {
@@ -133,7 +133,7 @@ func (b *Buffer) RunesInRange(q0, q1 int) []rune {
 		return nil
 	}
 	q0c, q1c := b.RuneOffsetToCursor(q0), b.RuneOffsetToCursor(q1)
-	return []rune(GetTextInSelection(b, Selection{Start: q0c, End: q1c, Active: true}, false))
+	return []rune(GetTextInSelection(b, Selection{Start: q0c, End: q1c, Active: true}))
 }
 
 func (b *Buffer) GetText() string {

@@ -134,16 +134,16 @@ func (e *Editor) argText(win *Window, cmd string) string {
 	if _, rest := quote.Cut(cmd); strings.TrimSpace(rest) != "" {
 		return strings.TrimSpace(rest)
 	}
-	sel := e.focusedView.GetSelectedText()
+	sel := e.focusedView.GetBuffer().GetSelectedText()
 	if sel == "" {
 		target := win
 		if target == nil {
 			target = e.active
 		}
 		if target != nil {
-			sel = target.body.GetSelectedText()
+			sel = target.body.GetBuffer().GetSelectedText()
 			if sel == "" {
-				sel = target.tag.GetSelectedText()
+				sel = target.tag.buffer.GetSelectedText()
 			}
 		}
 	}

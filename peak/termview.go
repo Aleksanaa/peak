@@ -399,11 +399,6 @@ func (tv *TermView) GetScrollback() string {
 	return sb.String()
 }
 
-func (tv *TermView) GetSelectedText() string {
-	b := tv.GetBuffer()
-	return GetTextInSelection(b, b.selection, true)
-}
-
 func (tv *TermView) HandleEvent(ev tcell.Event) {
 	tv.state.Lock()
 	closed := tv.closed
@@ -434,7 +429,7 @@ func (tv *TermView) HandleEvent(ev tcell.Event) {
 					tv.Paste()
 					return
 				case "f", "F":
-					if tv.GetSelectedText() != "" {
+					if tv.GetBuffer().GetSelectedText() != "" {
 						tv.editor.Execute(nil, nil, "Look")
 					}
 					return
@@ -604,7 +599,7 @@ func (tv *TermView) Close() {
 }
 
 func (tv *TermView) Snarf() {
-	if text := tv.GetSelectedText(); text != "" {
+	if text := tv.GetBuffer().GetSelectedText(); text != "" {
 		go clipboard.WriteAll(text)
 	}
 }
