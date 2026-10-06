@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/aleksana/peak/internal/peakfs"
 	"github.com/aleksana/peak/internal/vfs"
 	"github.com/aleksana/peak/internal/vfs/afero"
 )
@@ -63,11 +64,7 @@ func NewNineP(e *Editor) *NineP {
 }
 
 func (p *NineP) Listen() {
-	userDir, err := os.UserHomeDir()
-	if err != nil {
-		return
-	}
-	sockPath := filepath.Join(userDir, ".peak", "9p")
+	sockPath := peakfs.Socket()
 	os.MkdirAll(filepath.Dir(sockPath), 0700)
 	os.Remove(sockPath)
 

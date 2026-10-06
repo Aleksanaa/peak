@@ -6,8 +6,8 @@ import (
 	"log"
 	"net"
 	"os"
-	"path/filepath"
 
+	"github.com/aleksana/peak/internal/peakfs"
 	"github.com/aleksana/peak/internal/vfs"
 	"github.com/aleksana/peak/internal/vfs/afero"
 )
@@ -30,8 +30,7 @@ func main() {
 	if *socketPath == "" || (!*noMount && *mountPath != "") || *peakSocket != "" {
 		sock := *peakSocket
 		if sock == "" {
-			home, _ := os.UserHomeDir()
-			sock = filepath.Join(home, ".peak", "9p")
+			sock = peakfs.Socket()
 		}
 		var err error
 		peakFs, err = vfs.NewNinePClientFs("unix", sock)

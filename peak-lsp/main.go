@@ -1,26 +1,18 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"log"
-	"os"
-	"path/filepath"
-	"strconv"
-	"strings"
 	"sync"
 
+	"github.com/aleksana/peak/internal/peakfs"
 	"github.com/aleksana/peak/internal/vfs"
 	"github.com/aleksana/peak/internal/vfs/afero"
 )
 
 func main() {
-	socket := flag.String("s", "", "peak 9P socket (default: ~/.peak/9p)")
+	socket := flag.String("s", peakfs.Socket(), "peak 9P socket")
 	flag.Parse()
-	if *socket == "" {
-		home, _ := os.UserHomeDir()
-		*socket = filepath.Join(home, ".peak", "9p")
-	}
 	fs, err := vfs.NewNinePClientFs("unix", *socket)
 	if err != nil {
 		log.Fatalf("connect to peak: %v", err)
@@ -69,43 +61,17 @@ func watchEvents(fs afero.Fs) {
 		}
 	}
 
-	// Open the event stream before snapshotting so we don't miss windows
-	// that open during the bootstrap.
-	eventF, err := fs.Open("/event")
-	if err != nil {
-		log.Fatalf("open /event: %v", err)
-	}
-	defer eventF.Close()
-
-	// Bootstrap: start watching windows that are already open.
-	if entries, err := afero.ReadDir(fs, "/"); err == nil {
-		for _, e := range entries {
-			if e.IsDir() {
-				if id, err := strconv.Atoi(e.Name()); err == nil {
-					start(id)
-				}
-			}
-		}
-	}
-
-	scanner := bufio.NewScanner(eventF)
-	for scanner.Scan() {
-		line := scanner.Text()
-		parts := strings.Fields(line)
-		if len(parts) < 2 {
-			continue
-		}
-		id, err := strconv.Atoi(parts[1])
-		if err != nil {
-			continue
-		}
-		switch parts[0] {
+	err := peakfs.Watch(fs, func(ev peakfs.Event) {
+		switch ev.Kind {
 		case "new":
-			start(id)
+			start(ev.ID)
 		case "get", "put":
-			if len(parts) >= 3 {
-				retitle(id, parts[2])
+			if ev.Name != "" {
+				retitle(ev.ID, ev.Name)
 			}
 		}
+	})
+	if err != nil {
+		log.Fatalf("watch peak events: %v", err)
 	}
 }

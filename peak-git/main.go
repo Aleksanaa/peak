@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"crypto/sha256"
 	"flag"
 	"fmt"
@@ -13,17 +12,14 @@ import (
 
 	gogit "github.com/go-git/go-git/v5"
 
+	"github.com/aleksana/peak/internal/peakfs"
 	"github.com/aleksana/peak/internal/vfs"
 	"github.com/aleksana/peak/internal/vfs/afero"
 )
 
 func main() {
-	peakSocket := flag.String("p", "", "peak 9P socket (default: ~/.peak/9p)")
+	peakSocket := flag.String("p", peakfs.Socket(), "peak 9P socket")
 	flag.Parse()
-	if *peakSocket == "" {
-		home, _ := os.UserHomeDir()
-		*peakSocket = filepath.Join(home, ".peak", "9p")
-	}
 	peakFs, err := vfs.NewNinePClientFs("unix", *peakSocket)
 	if err != nil {
 		log.Fatalf("connect to peak: %v", err)
@@ -45,37 +41,17 @@ func watchEvents(peakFs afero.Fs) {
 	repos := make(map[string]*repoState) // repoPath → state
 	winRepos := make(map[string]string)  // windowID → repoPath
 
-	// Open the event stream before snapshotting current windows so we don't
-	// miss windows that open during the snapshot.
-	eventF, err := peakFs.Open("/event")
-	if err != nil {
-		log.Fatalf("open /event: %v", err)
-	}
-	defer eventF.Close()
-
-	// Bootstrap: treat all currently open windows as just-opened.
-	if entries, err := afero.ReadDir(peakFs, "/"); err == nil {
-		for _, e := range entries {
-			if e.IsDir() {
-				if _, err := strconv.Atoi(e.Name()); err == nil {
-					handleNew(peakFs, e.Name(), repos, winRepos)
-				}
-			}
-		}
-	}
-
-	scanner := bufio.NewScanner(eventF)
-	for scanner.Scan() {
-		parts := strings.Fields(scanner.Text())
-		if len(parts) < 2 {
-			continue
-		}
-		switch parts[0] {
+	err := peakfs.Watch(peakFs, func(ev peakfs.Event) {
+		id := strconv.Itoa(ev.ID)
+		switch ev.Kind {
 		case "new":
-			handleNew(peakFs, parts[1], repos, winRepos)
+			handleNew(peakFs, id, repos, winRepos)
 		case "close":
-			handleClose(peakFs, parts[1], repos, winRepos)
+			handleClose(peakFs, id, repos, winRepos)
 		}
+	})
+	if err != nil {
+		log.Fatalf("watch peak events: %v", err)
 	}
 }
 
