@@ -191,7 +191,7 @@ func (w *Window) saveState(colH int) WindowSession {
 	case WinFile:
 		ws.Kind = "file"
 		if tv := w.bodyTextView(); tv != nil {
-			ws.Scroll = tv.scroll.Pos
+			ws.Scroll = tv.top()
 			ws.CursorLine = tv.buffer.cursor.y
 			ws.CursorCol = tv.buffer.cursor.x
 			ws.TabWidth = tv.tabWidth
@@ -203,7 +203,7 @@ func (w *Window) saveState(colH int) WindowSession {
 	case WinDir:
 		ws.Kind = "dir"
 		if tv := w.bodyTextView(); tv != nil {
-			ws.Scroll = tv.scroll.Pos
+			ws.Scroll = tv.top()
 			ws.CursorLine = tv.buffer.cursor.y
 			ws.CursorCol = tv.buffer.cursor.x
 		}
@@ -236,14 +236,14 @@ func (w *Window) applyPreset(ws *WindowSession) {
 	}
 }
 
-// restoreViewState sets scroll and cursor after Resize has computed the layout.
+// restoreViewState sets scroll and cursor once Resize has set the final width.
 func (w *Window) restoreViewState(ws WindowSession) {
 	tv := w.bodyTextView()
 	if tv == nil {
 		return
 	}
 	if ws.Scroll > 0 {
-		tv.scroll.Pos = min(ws.Scroll, max(0, len(tv.layout)-1))
+		tv.setTop(ws.Scroll)
 	}
 	line := max(0, min(ws.CursorLine, len(tv.buffer.lines)-1))
 	col := max(0, min(ws.CursorCol, len(tv.buffer.lines[line])))
@@ -335,8 +335,8 @@ func (e *Editor) Load(file string) error {
 	for _, col := range e.columns {
 		col.Resize(col.rect)
 	}
-	// Restore scroll and cursor after Resize so UpdateLayout has computed the
-	// layout and the ratio-based scroll recalculation doesn't clobber them.
+	// Restore scroll and cursor after Resize: the scroll saved is a visual
+	// line, which depends on the window's final width.
 	for _, p := range deferred {
 		p.win.restoreViewState(p.ws)
 	}

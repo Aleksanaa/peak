@@ -505,7 +505,7 @@ func (e *Editor) cmdZerox(col *Column, win *Window) {
 	if tv := target.bodyTextView(); tv != nil {
 		newWin := target.parent.AddWindow(target.tag.buffer.GetText(), tv.buffer.GetText())
 		newTv := newWin.bodyTextView()
-		newTv.scroll.Pos = tv.scroll.Pos
+		newTv.org = tv.org
 		newTv.buffer.cursor = tv.buffer.cursor
 		newWin.kind, newWin.writable = target.kind, target.writable
 		// Versions are per buffer: the copy matches disk iff the original does.
@@ -560,7 +560,6 @@ func (e *Editor) cmdTab(col *Column, win *Window, cmd string) {
 	if err == nil && newTab > 0 {
 		if tv := target.bodyTextView(); tv != nil {
 			tv.tabWidth = newTab
-			tv.UpdateLayout()
 		}
 	}
 }

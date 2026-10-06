@@ -1279,16 +1279,15 @@ func TestTextViewTypingRevealsCursorBelowVisible(t *testing.T) {
 	}
 	body := strings.Join(lines, "\n")
 	tv := NewTextView(body, 40, 10, nil, nil, false, true)
-	tv.UpdateLayout()
 
 	bx, by := tv.visualToBuffer(0, 9)
 	tv.buffer.cursor = Cursor{bx, by}
 	tv.HandleEvent(tcell.NewEventKey(tcell.KeyDown, "", 0))
 
-	if tv.scroll.Pos != 1 {
-		t.Fatalf("after KeyDown past visible, scroll.Pos=%d, want 1", tv.scroll.Pos)
+	if tv.top() != 1 {
+		t.Fatalf("after KeyDown past visible, scroll.Pos=%d, want 1", tv.top())
 	}
-	if !tv.scroll.AutoScroll {
+	if !tv.autoScroll {
 		t.Fatal("after key event, AutoScroll must be true")
 	}
 }
@@ -1302,16 +1301,15 @@ func TestTextViewScrollAwayThenTypeSnapsToCursor(t *testing.T) {
 	}
 	body := strings.Join(lines, "\n")
 	tv := NewTextView(body, 40, 10, nil, nil, false, true)
-	tv.UpdateLayout()
 
-	tv.scroll.Pos = 50
-	tv.scroll.AutoScroll = false
+	tv.setTop(50)
+	tv.autoScroll = false
 	tv.HandleEvent(tcell.NewEventKey(tcell.KeyRune, "x", 0))
 
-	if tv.scroll.Pos != 0 {
-		t.Fatalf("after typing while scrolled away, scroll.Pos=%d, want 0", tv.scroll.Pos)
+	if tv.top() != 0 {
+		t.Fatalf("after typing while scrolled away, scroll.Pos=%d, want 0", tv.top())
 	}
-	if !tv.scroll.AutoScroll {
+	if !tv.autoScroll {
 		t.Fatal("after key event, AutoScroll must be true")
 	}
 }
@@ -1325,14 +1323,13 @@ func TestSyncScrollOnlyFollowsDownward(t *testing.T) {
 	}
 	body := strings.Join(lines, "\n")
 	tv := NewTextView(body, 40, 10, nil, nil, false, true)
-	tv.UpdateLayout()
 
-	tv.scroll.Pos = 50
-	tv.scroll.AutoScroll = true
+	tv.setTop(50)
+	tv.autoScroll = true
 	tv.SyncScroll()
 
-	if tv.scroll.Pos != 50 {
-		t.Fatalf("SyncScroll snapped upward: scroll.Pos=%d, want 50", tv.scroll.Pos)
+	if tv.top() != 50 {
+		t.Fatalf("SyncScroll snapped upward: scroll.Pos=%d, want 50", tv.top())
 	}
 }
 
@@ -1345,16 +1342,14 @@ func TestSyncScrollFollowsCursorDownward(t *testing.T) {
 	}
 	body := strings.Join(lines, "\n")
 	tv := NewTextView(body, 40, 10, nil, nil, false, true)
-	tv.UpdateLayout()
 
 	tv.buffer.cursor = Cursor{0, 95}
-	tv.UpdateLayout()
-	tv.scroll.Pos = 80
-	tv.scroll.AutoScroll = true
+	tv.setTop(80)
+	tv.autoScroll = true
 	tv.SyncScroll()
 
-	if tv.scroll.Pos <= 80 {
-		t.Fatalf("SyncScroll did not follow downward: scroll.Pos=%d, want > 80", tv.scroll.Pos)
+	if tv.top() <= 80 {
+		t.Fatalf("SyncScroll did not follow downward: scroll.Pos=%d, want > 80", tv.top())
 	}
 }
 
@@ -1613,10 +1608,10 @@ func TestDragSelectAtBottomEdgeSetsScrollWin(t *testing.T) {
 	if e.repeat == nil {
 		t.Fatal("at bottom edge: no auto-scroll")
 	}
-	before := tv.scroll.Pos
+	before := tv.top()
 	e.repeat()
-	if tv.scroll.Pos != before+1 {
-		t.Errorf("at bottom edge: a tick scrolled from %d to %d, want down by 1", before, tv.scroll.Pos)
+	if tv.top() != before+1 {
+		t.Errorf("at bottom edge: a tick scrolled from %d to %d, want down by 1", before, tv.top())
 	}
 
 	// Move back into the middle: the auto-scroll stops.
@@ -1654,14 +1649,14 @@ func TestDragSelectTickExtendsSelection(t *testing.T) {
 		t.Fatal("no auto-scroll after dragging to bottom edge")
 	}
 
-	wantScrollPos := tv.scroll.Pos + 1
+	wantScrollPos := tv.top() + 1
 	wantEndY := tv.buffer.selection.End.y + 1
 
 	// One timer tick scrolls and advances the drag cursor.
 	e.repeat()
 
-	if tv.scroll.Pos != wantScrollPos {
-		t.Errorf("after tick: scroll.Pos = %d, want %d", tv.scroll.Pos, wantScrollPos)
+	if tv.top() != wantScrollPos {
+		t.Errorf("after tick: scroll.Pos = %d, want %d", tv.top(), wantScrollPos)
 	}
 	if tv.buffer.selection.End.y != wantEndY {
 		t.Errorf("after tick: selection.End.y = %d, want %d", tv.buffer.selection.End.y, wantEndY)
@@ -1701,7 +1696,6 @@ func TestDragSelectInTagDoesNotScrollBody(t *testing.T) {
 func TestEscToggleSelection(t *testing.T) {
 	text := strings.Repeat("line\n", 20)
 	tv := NewTextView(text, 40, 5, nil, nil, false, true)
-	tv.UpdateLayout()
 
 	selStart := Cursor{0, 3}
 	selEnd := Cursor{2, 5}
@@ -1777,14 +1771,14 @@ func TestDragSelectStopsAtLastLine(t *testing.T) {
 	e.HandleEvent(tcell.NewEventMouse(bodyX, bodyY, tcell.ButtonPrimary, 0))
 	e.HandleEvent(tcell.NewEventMouse(bodyX, bodyY+bodyH-1, tcell.ButtonPrimary, 0))
 
-	scrollBefore := tv.scroll.Pos
+	scrollBefore := tv.top()
 	endYBefore := tv.buffer.selection.End.y
 
 	// A tick at the boundary must neither scroll nor extend the selection.
 	e.repeat()
 
-	if tv.scroll.Pos != scrollBefore {
-		t.Errorf("scroll.Pos changed from %d to %d; should stay at boundary", scrollBefore, tv.scroll.Pos)
+	if tv.top() != scrollBefore {
+		t.Errorf("scroll.Pos changed from %d to %d; should stay at boundary", scrollBefore, tv.top())
 	}
 	if tv.buffer.selection.End.y != endYBefore {
 		t.Errorf("selection.End.y changed from %d to %d; should stay at boundary", endYBefore, tv.buffer.selection.End.y)
@@ -1811,16 +1805,16 @@ func TestScrollBarHoldsMouse(t *testing.T) {
 	tv := win.bodyTextView()
 	bar, body := screenAt(e, win).X, screenAt(e, win.body)
 	e.HandleEvent(tcell.NewEventMouse(bar, body.Y+2, tcell.ButtonSecondary, 0))
-	if tv.scroll.Pos != 3 {
-		t.Fatalf("Button3 on the bar's third row scrolled to %d, want 3", tv.scroll.Pos)
+	if tv.top() != 3 {
+		t.Fatalf("Button3 on the bar's third row scrolled to %d, want 3", tv.top())
 	}
 	if e.repeat == nil {
 		t.Fatal("holding Button3 on the bar should repeat")
 	}
 
 	e.HandleEvent(tcell.NewEventMouse(body.X+1, body.Y+4, tcell.ButtonSecondary, 0))
-	if tv.scroll.Pos != 3 || tv.buffer.cursor != (Cursor{}) {
-		t.Errorf("moving the held pointer onto the body acted there: scroll %d, cursor %v", tv.scroll.Pos, tv.buffer.cursor)
+	if tv.top() != 3 || tv.buffer.cursor != (Cursor{}) {
+		t.Errorf("moving the held pointer onto the body acted there: scroll %d, cursor %v", tv.top(), tv.buffer.cursor)
 	}
 
 	e.HandleEvent(tcell.NewEventMouse(body.X+1, body.Y+4, tcell.ButtonNone, 0))
@@ -2200,5 +2194,46 @@ func TestTagGrowsWithItsText(t *testing.T) {
 	}
 	if _, _, visible := win.body.GetScroll(); visible != win.h-2 {
 		t.Errorf("body height = %d, want %d", visible, win.h-2)
+	}
+}
+
+// The view stays on the text it shows when lines are added or removed above
+// it, and an undo puts it back.
+func TestScrollStaysOnItsText(t *testing.T) {
+	_, col := newTestEditorWithColumn(t)
+	lines := make([]string, 100)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("L%02d", i)
+	}
+	win := col.AddWindow(" /tmp/s Del ", strings.Join(lines, "\n"))
+	col.Resize(col.rect)
+	tv := win.bodyTextView()
+	shown := func() string { return string(tv.buffer.lines[tv.lines()[tv.top()].BufferLine]) }
+	tv.setTop(50)
+
+	tv.buffer.saveState()
+	tv.buffer.replace(Cursor{0, 0}, Cursor{0, 0}, "new\nlines\n")
+	if got := shown(); got != "L50" {
+		t.Errorf("after inserting above, the view shows %q first, want L50", got)
+	}
+	tv.buffer.Undo()
+	if got := shown(); got != "L50" {
+		t.Errorf("after undo, the view shows %q first, want L50", got)
+	}
+}
+
+// Changing the tab width wraps the text again at once, not at the next edit.
+func TestTabRewraps(t *testing.T) {
+	e, col := newTestEditorWithColumn(t)
+	win := col.AddWindow(" /tmp/t Del ", "\tx")
+	col.Resize(col.rect)
+	tv := win.bodyTextView()
+	tv.w = 6 // "\tx" takes 5 columns at tab width 4, 9 at 8
+	if n := len(tv.lines()); n != 1 {
+		t.Fatalf("%d visual lines at tab width 4, want 1", n)
+	}
+	e.Execute(col, win, "Tab 8")
+	if n := len(tv.lines()); n != 2 {
+		t.Errorf("%d visual lines at tab width 8, want 2", n)
 	}
 }

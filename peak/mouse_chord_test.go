@@ -15,7 +15,6 @@ func setupMouseChordWindow(t *testing.T) (*Editor, *Window, *TextView) {
 	e.columns = append(e.columns, col)
 	win := col.AddWindow(" /tmp/chord.txt Get Put Del ", "alpha beta")
 	col.Resize(col.rect)
-	win.tag.UpdateLayout()
 	tv := win.bodyTextView()
 	if tv == nil {
 		t.Fatal("window body is not a TextView")
@@ -265,7 +264,6 @@ func TestChordTargetsTerminalWindow(t *testing.T) {
 		t.Skipf("cannot create term window: %v", err)
 	}
 	col.Resize(col.rect)
-	termWin.tag.UpdateLayout()
 
 	term, ok := termWin.body.(*TermView)
 	if !ok {

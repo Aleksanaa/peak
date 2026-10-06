@@ -60,45 +60,36 @@ func (b *Buffer) saveState() {
 	b.redoStack = nil
 }
 
-func (b *Buffer) Undo() {
-	if len(b.history) == 0 {
-		return
-	}
-	var q1Old int
-	if b.onMutate != nil {
-		q1Old = b.Len()
-	}
-	b.redoStack = append(b.redoStack, bufferState{lines: b.copyLines(), cursor: b.cursor, version: b.version})
-	last := b.history[len(b.history)-1]
-	b.history = b.history[:len(b.history)-1]
-	b.lines = last.lines
-	b.cursor = last.cursor
-	b.version = last.version
-	b.ClearSelection()
-	if b.onMutate != nil {
-		content := b.GetText()
-		b.onMutate(0, q1Old, b.Len(), content)
-	}
-}
+func (b *Buffer) Undo() { b.restore(&b.history, &b.redoStack) }
+func (b *Buffer) Redo() { b.restore(&b.redoStack, &b.history) }
 
-func (b *Buffer) Redo() {
-	if len(b.redoStack) == 0 {
+// restore makes the last state of from the buffer's, keeping the current one
+// on to. It reports only the text that differs, so that what is kept in
+// place across edits stays in place.
+func (b *Buffer) restore(from, to *[]bufferState) {
+	if len(*from) == 0 {
 		return
 	}
-	var q1Old int
+	var old []rune
 	if b.onMutate != nil {
-		q1Old = b.Len()
+		old = []rune(b.GetText())
 	}
-	b.history = append(b.history, bufferState{lines: b.copyLines(), cursor: b.cursor, version: b.version})
-	next := b.redoStack[len(b.redoStack)-1]
-	b.redoStack = b.redoStack[:len(b.redoStack)-1]
-	b.lines = next.lines
-	b.cursor = next.cursor
-	b.version = next.version
+	*to = append(*to, bufferState{lines: b.copyLines(), cursor: b.cursor, version: b.version})
+	s := (*from)[len(*from)-1]
+	*from = (*from)[:len(*from)-1]
+	b.lines, b.cursor, b.version = s.lines, s.cursor, s.version
 	b.ClearSelection()
 	if b.onMutate != nil {
-		content := b.GetText()
-		b.onMutate(0, q1Old, b.Len(), content)
+		cur := []rune(b.GetText())
+		p := 0
+		for p < len(old) && p < len(cur) && old[p] == cur[p] {
+			p++
+		}
+		n := 0
+		for n < len(old)-p && n < len(cur)-p && old[len(old)-1-n] == cur[len(cur)-1-n] {
+			n++
+		}
+		b.onMutate(p, len(old)-n, len(cur)-n, string(cur[p:len(cur)-n]))
 	}
 }
 

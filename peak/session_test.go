@@ -73,7 +73,7 @@ func TestWindowSaveStateCleanFile(t *testing.T) {
 	_, col := newTestEditorWithColumn(t)
 	win := addFileWindow(t, col, " /tmp/foo.go Get Put Del ", "line1\nline2\nline3")
 	tv := win.bodyTextView()
-	tv.scroll.Pos = 1
+	tv.setTop(1)
 	tv.buffer.cursor = Cursor{3, 2}
 	tv.tabWidth = 8
 	win.explicitHeight = 20
@@ -124,10 +124,10 @@ func TestWindowSaveStateDirtyFile(t *testing.T) {
 
 func TestWindowSaveStateDir(t *testing.T) {
 	_, col := newTestEditorWithColumn(t)
-	win := col.AddWindow(" /home/user/ Get Del ", "")
+	win := col.AddWindow(" /home/user/ Get Del ", strings.Repeat("entry/\n", 10))
 	win.kind = WinDir
 	tv := win.bodyTextView()
-	tv.scroll.Pos = 5
+	tv.setTop(5)
 	tv.buffer.cursor = Cursor{0, 3}
 
 	ws := win.saveState(col.h)
@@ -296,8 +296,8 @@ func TestWindowRestoreViewState(t *testing.T) {
 	win.restoreViewState(WindowSession{Scroll: 5, CursorLine: 10, CursorCol: 3})
 
 	tv := win.bodyTextView()
-	if tv.scroll.Pos != 5 {
-		t.Errorf("Scroll = %d, want 5", tv.scroll.Pos)
+	if tv.top() != 5 {
+		t.Errorf("Scroll = %d, want 5", tv.top())
 	}
 	if tv.buffer.cursor.y != 10 || tv.buffer.cursor.x != 3 {
 		t.Errorf("cursor = (%d,%d), want (10,3)", tv.buffer.cursor.y, tv.buffer.cursor.x)
@@ -343,8 +343,8 @@ func TestWindowRestoreViewStateScrollClamped(t *testing.T) {
 	win.restoreViewState(WindowSession{Scroll: 99999})
 
 	tv := win.bodyTextView()
-	if tv.scroll.Pos > max(0, len(tv.layout)-1) {
-		t.Errorf("Scroll not clamped: pos=%d, layout=%d", tv.scroll.Pos, len(tv.layout))
+	if tv.top() > max(0, len(tv.lines())-1) {
+		t.Errorf("Scroll not clamped: pos=%d, layout=%d", tv.top(), len(tv.lines()))
 	}
 }
 

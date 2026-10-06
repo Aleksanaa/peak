@@ -2,8 +2,9 @@ package main
 
 import (
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
-
 	"unicode"
 
 	"github.com/aleksana/peak/internal/quote"
@@ -32,9 +33,8 @@ type VisualLine struct {
 // in mouse events and PosAt, are in its own coordinates, and it draws
 // on a canvas of its own.
 type View interface {
-	// Layout computes visual-line wrapping and synchronises scroll position.
-	// Must be called once per frame before Draw, and after every Resize.
-	// Must not paint anything.
+	// Layout readies the view for Draw, as by scrolling to follow the
+	// cursor. It is called once per frame and must not paint anything.
 	Layout()
 	Draw(canvas)
 	ShowCursor(canvas)
@@ -53,21 +53,25 @@ type View interface {
 }
 
 type TextView struct {
-	w, h          int
-	scroll        ScrollState
+	w, h int
+	// org is the rune offset of the first character shown. Edits move it
+	// with the text (see NewWindow), so the view stays where it was.
+	org           int
+	autoScroll    bool
 	buffer        *Buffer
 	drag          bool
 	singleLine    bool
 	scrollable    bool
 	underlineLast bool
-	layout        []VisualLine
-	lastWidth     int
-	lastVersion   int
-	theme         *Theme
-	colors        *colorPair // points into theme, so theme changes apply
-	tabWidth      int
-	typingStart   *Cursor
-	typingEnd     *Cursor
+	// layout is the buffer's lines wrapped at the view's width, laid out for
+	// laidOut; read it through lines.
+	layout      []VisualLine
+	laidOut     layoutKey
+	theme       *Theme
+	colors      *colorPair // points into theme, so theme changes apply
+	tabWidth    int
+	typingStart *Cursor
+	typingEnd   *Cursor
 	// colorAt, when non-nil, returns a foreground color override for a rune offset.
 	colorAt func(runeOff int) (tcell.Color, bool)
 }
@@ -77,18 +81,15 @@ func (tv *TextView) IsRaw() bool {
 }
 
 func NewTextView(text string, w, h int, theme *Theme, colors *colorPair, singleLine, scrollable bool) *TextView {
-	tv := &TextView{
+	return &TextView{
 		w: w, h: h,
-		buffer:      NewBuffer(text),
-		theme:       theme,
-		colors:      colors,
-		singleLine:  singleLine,
-		scrollable:  scrollable,
-		lastVersion: -1,
-		tabWidth:    4,
+		buffer:     NewBuffer(text),
+		theme:      theme,
+		colors:     colors,
+		singleLine: singleLine,
+		scrollable: scrollable,
+		tabWidth:   4,
 	}
-	tv.UpdateLayout()
-	return tv
 }
 
 func (tv *TextView) runeWidth(r rune, visualPos int) int {
@@ -105,21 +106,17 @@ func (tv *TextView) runeWidth(r rune, visualPos int) int {
 	return 1
 }
 
-func (tv *TextView) UpdateLayout() {
-	if tv.w <= 0 {
-		return
-	}
-	if len(tv.layout) > 0 && tv.w == tv.lastWidth && tv.buffer.version == tv.lastVersion {
-		return
-	}
+// layoutKey is what a layout depends on.
+type layoutKey struct{ w, tabWidth, version int }
 
-	ratio := 0.0
-	if len(tv.layout) > 0 {
-		ratio = float64(tv.scroll.Pos) / float64(len(tv.layout))
+// lines returns the buffer's lines wrapped at the view's width, laying them
+// out again if the text, the width or the tab width has changed.
+func (tv *TextView) lines() []VisualLine {
+	key := layoutKey{tv.w, tv.tabWidth, tv.buffer.version}
+	if tv.w <= 0 || key == tv.laidOut {
+		return tv.layout
 	}
-
-	tv.lastWidth = tv.w
-	tv.lastVersion = tv.buffer.version
+	tv.laidOut = key
 	tv.layout = nil
 	for i, line := range tv.buffer.lines {
 		if len(line) == 0 {
@@ -138,29 +135,45 @@ func (tv *TextView) UpdateLayout() {
 		}
 		tv.layout = append(tv.layout, VisualLine{i, start, len(line)})
 	}
+	return tv.layout
+}
 
-	limit := len(tv.layout)
-	if len(tv.layout) <= tv.h {
-		limit = 0
-	}
-	tv.scroll.Pos = max(0, min(limit, int(ratio*float64(len(tv.layout)))))
+// top returns the index of the visual line shown first: the one org is on.
+func (tv *TextView) top() int {
+	lines := tv.lines()
+	i := sort.Search(len(lines), func(i int) bool {
+		return tv.buffer.RuneOffsetOfPos(lines[i].BufferLine, lines[i].Start) > tv.org
+	})
+	return max(0, i-1)
+}
+
+// setTop scrolls the view to show visual line i first.
+func (tv *TextView) setTop(i int) {
+	lines := tv.lines()
+	vl := lines[max(0, min(i, len(lines)-1))]
+	tv.org = tv.buffer.RuneOffsetOfPos(vl.BufferLine, vl.Start)
 }
 
 func (tv *TextView) Layout() {
 	if !tv.scrollable {
-		tv.scroll.Pos = 0
+		tv.org = 0
 	}
-	tv.UpdateLayout()
 	tv.SyncScroll()
 }
 
 func (tv *TextView) GetScroll() (scroll, total, visible int) {
-	return tv.scroll.Pos, len(tv.layout), tv.h
+	return tv.top(), len(tv.lines()), tv.h
 }
 
+// Scroll scrolls n lines. Scrolling to the end makes the view follow the
+// cursor again; scrolling back up stops it.
 func (tv *TextView) Scroll(n int) {
-	_, total, visible := tv.GetScroll()
-	tv.scroll.Scroll(n, total, visible)
+	tv.setTop(tv.top() + n)
+	if tv.top() >= len(tv.lines())-tv.h {
+		tv.autoScroll = true
+	} else if n < 0 {
+		tv.autoScroll = false
+	}
 }
 
 func (tv *TextView) GotoLineCol(lineNum, colNum int) {
@@ -179,7 +192,8 @@ func (tv *TextView) GotoLineCol(lineNum, colNum int) {
 
 // bufferToVisual translates a buffer position to visual coordinates (vx, vrow).
 func (tv *TextView) bufferToVisual(bx, by int) (int, int) {
-	for lidx, vl := range tv.layout {
+	lines := tv.lines()
+	for lidx, vl := range lines {
 		if vl.BufferLine == by && bx >= vl.Start && bx <= vl.End {
 			vx := 0
 			line := tv.buffer.lines[by]
@@ -187,7 +201,7 @@ func (tv *TextView) bufferToVisual(bx, by int) (int, int) {
 				vx += tv.runeWidth(line[i], vx)
 			}
 			// Wrap edge case: if cursor is exactly at width, move to next visual line
-			if vx >= tv.w && lidx+1 < len(tv.layout) && tv.layout[lidx+1].BufferLine == by {
+			if vx >= tv.w && lidx+1 < len(lines) && lines[lidx+1].BufferLine == by {
 				continue
 			}
 			return vx, lidx
@@ -198,13 +212,8 @@ func (tv *TextView) bufferToVisual(bx, by int) (int, int) {
 
 // visualToBuffer translates visual coordinates (vx, vidx) to buffer position (bx, by).
 func (tv *TextView) visualToBuffer(vx, vidx int) (int, int) {
-	if vidx < 0 {
-		vidx = 0
-	}
-	if vidx >= len(tv.layout) {
-		vidx = len(tv.layout) - 1
-	}
-	vl := tv.layout[vidx]
+	lines := tv.lines()
+	vl := lines[max(0, min(vidx, len(lines)-1))]
 	line := tv.buffer.lines[vl.BufferLine]
 	bx, currVX := vl.Start, 0
 	for i := vl.Start; i < vl.End; i++ {
@@ -220,12 +229,12 @@ func (tv *TextView) visualToBuffer(vx, vidx int) (int, int) {
 
 func (tv *TextView) Draw(cv canvas) {
 	selStyle := tv.theme.Selection.style()
-	vrow := 0
-	for lidx := tv.scroll.Pos; lidx < len(tv.layout) && vrow < tv.h; lidx++ {
-		vl, vcol := tv.layout[lidx], 0
+	lines, vrow := tv.lines(), 0
+	for lidx := tv.top(); lidx < len(lines) && vrow < tv.h; lidx++ {
+		vl, vcol := lines[lidx], 0
 		line := tv.buffer.lines[vl.BufferLine]
 		lineStyle := tv.colors.style()
-		if tv.underlineLast && lidx == len(tv.layout)-1 {
+		if tv.underlineLast && lidx == len(lines)-1 {
 			lineStyle = lineStyle.Underline(true)
 		}
 		var lineRuneBase int
@@ -265,28 +274,23 @@ func (tv *TextView) Draw(cv canvas) {
 }
 
 func (tv *TextView) PosAt(x, y int) Cursor {
-	bx, by := tv.visualToBuffer(x, y+tv.scroll.Pos)
+	bx, by := tv.visualToBuffer(x, y+tv.top())
 	return Cursor{bx, by}
 }
 
 func (tv *TextView) ShowCursor(cv canvas) {
 	vx, vrow := tv.bufferToVisual(tv.buffer.cursor.x, tv.buffer.cursor.y)
-	cv.showCursor(max(0, min(vx, tv.w-1)), vrow-tv.scroll.Pos)
+	cv.showCursor(max(0, min(vx, tv.w-1)), vrow-tv.top())
 }
 
 // fit gives tv width w and the height its text needs at that width.
 func (tv *TextView) fit(w int) {
 	tv.w = w
-	tv.UpdateLayout()
-	tv.h = max(1, len(tv.layout))
+	tv.h = max(1, len(tv.lines()))
 }
 
 func (tv *TextView) Resize(w, h int) {
-	if tv.w == w && tv.h == h {
-		return
-	}
 	tv.w, tv.h = w, h
-	tv.UpdateLayout()
 }
 
 func (tv *TextView) GetBuffer() *Buffer {
@@ -362,20 +366,21 @@ func (tv *TextView) HandleEvent(ev tcell.Event) {
 		case tcell.KeyPgUp:
 			tv.typingStart = nil
 			tv.buffer.ClearSelection()
-			tv.scroll.Pos = max(0, tv.scroll.Pos-tv.h)
+			top := max(0, tv.top()-tv.h)
+			tv.setTop(top)
 			_, vrow := tv.bufferToVisual(tv.buffer.cursor.x, tv.buffer.cursor.y)
-			if vrow >= tv.scroll.Pos+tv.h {
-				bx, by := tv.visualToBuffer(0, tv.scroll.Pos)
+			if vrow >= top+tv.h {
+				bx, by := tv.visualToBuffer(0, top)
 				tv.buffer.cursor = Cursor{bx, by}
 			}
 		case tcell.KeyPgDn:
 			tv.typingStart = nil
 			tv.buffer.ClearSelection()
-			tv.scroll.Pos = min(len(tv.layout)-1, tv.scroll.Pos+tv.h)
-			tv.scroll.Pos = max(0, tv.scroll.Pos)
+			top := max(0, min(len(tv.lines())-1, tv.top()+tv.h))
+			tv.setTop(top)
 			_, vrow := tv.bufferToVisual(tv.buffer.cursor.x, tv.buffer.cursor.y)
-			if vrow < tv.scroll.Pos {
-				bx, by := tv.visualToBuffer(0, tv.scroll.Pos)
+			if vrow < top {
+				bx, by := tv.visualToBuffer(0, top)
 				tv.buffer.cursor = Cursor{bx, by}
 			}
 		case tcell.KeyUp:
@@ -435,15 +440,13 @@ func (tv *TextView) HandleEvent(ev tcell.Event) {
 				tv.buffer.Insert(r)
 			}
 		}
-		tv.scroll.AutoScroll = true
-		tv.UpdateLayout()
+		tv.autoScroll = true
 		_, vrow := tv.bufferToVisual(tv.buffer.cursor.x, tv.buffer.cursor.y)
-		if vrow < tv.scroll.Pos {
-			tv.scroll.Pos = vrow
-		} else if vrow >= tv.scroll.Pos+tv.h {
-			tv.scroll.Pos = vrow - tv.h + 1
+		if top := tv.top(); vrow < top {
+			tv.setTop(vrow)
+		} else if vrow >= top+tv.h {
+			tv.setTop(vrow - tv.h + 1)
 		}
-		tv.scroll.Clamp(len(tv.layout), tv.h)
 	case *tcell.EventMouse:
 		buttons := ev.Buttons()
 		if buttons != tcell.ButtonNone {
@@ -497,14 +500,13 @@ func (tv *TextView) AdvanceDragCursor(dir int) {
 }
 
 func (tv *TextView) SyncScroll() {
-	if !tv.scrollable || !tv.scroll.AutoScroll {
+	if !tv.scrollable || !tv.autoScroll {
 		return
 	}
 	_, vrow := tv.bufferToVisual(tv.buffer.cursor.x, tv.buffer.cursor.y)
-	if vrow >= tv.scroll.Pos+tv.h {
-		tv.scroll.Pos = vrow - tv.h + 1
+	if vrow >= tv.top()+tv.h {
+		tv.setTop(vrow - tv.h + 1)
 	}
-	tv.scroll.Clamp(len(tv.layout), tv.h)
 }
 
 func (tv *TextView) Search(word string) int {
@@ -518,20 +520,12 @@ func (tv *TextView) Search(word string) int {
 }
 
 func (tv *TextView) ShowLineAt(lineNum int) {
-	tv.UpdateLayout()
-	vidx := -1
-	for i, vl := range tv.layout {
-		if vl.BufferLine == lineNum {
-			vidx = i
-			break
-		}
-	}
-	if vidx == -1 || (vidx >= tv.scroll.Pos && vidx < tv.scroll.Pos+tv.h) {
+	vidx := slices.IndexFunc(tv.lines(), func(vl VisualLine) bool { return vl.BufferLine == lineNum })
+	if top := tv.top(); vidx == -1 || (vidx >= top && vidx < top+tv.h) {
 		return
 	}
-	tv.scroll.Pos = vidx - tv.h/4
-	tv.scroll.Clamp(len(tv.layout), tv.h)
-	tv.scroll.AutoScroll = true
+	tv.setTop(vidx - tv.h/4)
+	tv.autoScroll = true
 	tv.SyncScroll()
 }
 
@@ -762,6 +756,7 @@ func NewWindow(tag, body string, parent *Column, editor *Editor, w int) *Window 
 		win.adjustSpans(q0, q1Old, q1New)
 		win.addrQ0 = adjustPoint(win.addrQ0, q0, q1Old, q1New)
 		win.addrQ1 = adjustPoint(win.addrQ1, q0, q1Old, q1New)
+		tv.org = adjustPoint(tv.org, q0, q1Old, q1New)
 		if q1Old > q0 {
 			win.broadcastEvent('K', 'D', q0, q1Old, "")
 		}
