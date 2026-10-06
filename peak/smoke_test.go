@@ -296,6 +296,29 @@ func TestDelColClick(t *testing.T) {
 	}
 }
 
+// A Zerox copy has its own buffer and version numbers; it must be dirty
+// exactly when the original is.
+func TestZeroxKeepsDirtyState(t *testing.T) {
+	for _, saved := range []bool{true, false} {
+		e, col := newTestEditorWithColumn(t)
+		path := writeTempFile(t, "hello\n")
+		win := e.createWindow(col, path, "hello\n", false, true, -1, 0)
+		win.bodyTextView().buffer.Insert('x')
+		if saved {
+			win.markSaved(win.body.GetBuffer().version) // as Put does
+		}
+
+		e.cmdZerox(col, win)
+
+		if e.active == win {
+			t.Fatal("Zerox did not create a window")
+		}
+		if got := e.active.IsDirty(); got != !saved {
+			t.Errorf("saved=%v: copy dirty = %v, want %v", saved, got, !saved)
+		}
+	}
+}
+
 func TestZeroxClick(t *testing.T) {
 	e, s := setupTest(t, 100, 24)
 

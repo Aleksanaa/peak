@@ -221,32 +221,18 @@ func (w *Window) applyPreset(ws *WindowSession) {
 	if fields := strings.Fields(ws.Tag); len(fields) > 0 {
 		filename = fields[0]
 	}
+	tv := w.bodyTextView()
+	if ws.TabWidth > 0 {
+		tv.tabWidth = ws.TabWidth
+	}
 	if ws.Dirty {
-		if tv := w.bodyTextView(); tv != nil {
-			tv.buffer.SetText(ws.Body)
-			if ws.TabWidth > 0 {
-				tv.tabWidth = ws.TabWidth
-			}
-		}
-		w.kind = WinFile
-		w.writable = true
+		tv.buffer.SetText(ws.Body)
+		w.kind, w.writable = WinFile, true
+		w.markSaved(-1)
 	} else if filename != "" {
-		content, isDir, writable, err := readFileOrDir(filename)
-		if err == nil {
-			if tv := w.bodyTextView(); tv != nil {
-				tv.buffer.SetText(content)
-				if ws.TabWidth > 0 {
-					tv.tabWidth = ws.TabWidth
-				}
-				w.savedVersion = tv.buffer.version
-				w.warnedVersion = w.savedVersion
-			}
-			if isDir {
-				w.kind = WinDir
-			} else {
-				w.kind = WinFile
-				w.writable = writable
-			}
+		if content, isDir, writable, err := readFileOrDir(filename); err == nil {
+			tv.buffer.SetText(content)
+			w.loaded(isDir, writable)
 		}
 	}
 }

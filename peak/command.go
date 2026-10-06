@@ -220,13 +220,7 @@ func (e *Editor) OpenLine(win *Window, path string, line, col int, binaryFallbac
 func (e *Editor) createWindow(target *Column, full string, content string, isDir bool, writable bool, line, col int) *Window {
 	newWin := target.AddWindow(" "+full+" Get Put Undo Redo Snarf Zerox Del ", content)
 	e.ActivateWindow(newWin)
-	if isDir {
-		newWin.kind = WinDir
-	} else {
-		newWin.kind = WinFile
-		newWin.writable = writable
-	}
-	newWin.savedVersion = newWin.bodyTextView().buffer.version
+	newWin.loaded(isDir, writable)
 	target.Resize(target.x, target.y, target.w, target.h)
 	if line >= 0 {
 		newWin.bodyTextView().GotoLineCol(line, col)
@@ -287,14 +281,7 @@ func (e *Editor) cmdGet(win *Window, cmd string) {
 				target.SetName(path)
 				if tv := target.bodyTextView(); tv != nil {
 					tv.buffer.SetText(content)
-					if isDir {
-						target.kind = WinDir
-					} else {
-						target.kind = WinFile
-						target.writable = writable
-					}
-					target.savedVersion = tv.buffer.version
-					target.warnedVersion = target.savedVersion
+					target.loaded(isDir, writable)
 					e.ninep.BroadcastGet(target)
 				}
 			} else {
@@ -328,8 +315,7 @@ func (e *Editor) cmdPut(win *Window, cmd string) {
 					e.showError(target.parent, target, "", normalizeError(err))
 				} else {
 					target.writable = true
-					target.savedVersion = version
-					target.warnedVersion = version
+					target.markSaved(version)
 					e.ninep.BroadcastPut(target)
 				}
 			}
@@ -528,10 +514,13 @@ func (e *Editor) cmdZerox(col *Column, win *Window) {
 		newTv := newWin.bodyTextView()
 		newTv.scroll.Pos = tv.scroll.Pos
 		newTv.buffer.cursor = tv.buffer.cursor
-		newWin.kind = target.kind
-		newWin.writable = target.writable
-		newWin.savedVersion = target.savedVersion
-		newWin.warnedVersion = target.warnedVersion
+		newWin.kind, newWin.writable = target.kind, target.writable
+		// Versions are per buffer: the copy matches disk iff the original does.
+		if target.IsDirty() {
+			newWin.markSaved(-1)
+		} else {
+			newWin.markSaved(newTv.buffer.version)
+		}
 		e.ActivateWindow(newWin)
 		target.parent.Resize(target.parent.x, target.parent.y, target.parent.w, target.parent.h)
 	} else if target.kind == WinTerm {

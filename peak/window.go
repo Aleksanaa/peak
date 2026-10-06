@@ -877,6 +877,22 @@ func (win *Window) bodyTextView() *TextView {
 	return nil
 }
 
+// loaded records that the body now holds exactly what is on disk.
+func (win *Window) loaded(isDir, writable bool) {
+	win.kind = WinFile
+	if isDir {
+		win.kind = WinDir
+	}
+	win.writable = writable
+	win.markSaved(win.body.GetBuffer().version)
+}
+
+// markSaved records that the body at version matches the file on disk; -1
+// means no version does. Saving also settles any unsaved-changes warning.
+func (win *Window) markSaved(version int) {
+	win.savedVersion, win.warnedVersion = version, version
+}
+
 func (win *Window) IsDirty() bool {
 	if win.kind != WinFile || !win.writable {
 		return false
