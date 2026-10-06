@@ -241,17 +241,20 @@ func (b *Buffer) SetTextInRange(start, end Cursor, content string) Cursor {
 	return res
 }
 
+// DeleteLine removes the cursor's line and leaves the cursor at the start of
+// the line that takes its place (the previous line, when the last is removed).
 func (b *Buffer) DeleteLine() {
 	b.mutate(func() {
-		if len(b.lines) <= 1 {
-			b.lines = [][]rune{{}}
-			b.cursor = Cursor{0, 0}
-		} else {
-			b.lines = append(b.lines[:b.cursor.y], b.lines[b.cursor.y+1:]...)
-			b.cursor.y = min(b.cursor.y, len(b.lines)-1)
-			b.cursor.x = 0
+		y := b.cursor.y
+		switch {
+		case len(b.lines) == 1:
+			b.replace(Cursor{0, 0}, Cursor{len(b.lines[0]), 0}, "")
+		case y < len(b.lines)-1:
+			b.replace(Cursor{0, y}, Cursor{0, y + 1}, "")
+		default:
+			b.replace(Cursor{len(b.lines[y-1]), y - 1}, Cursor{len(b.lines[y]), y}, "")
+			b.cursor = Cursor{0, y - 1}
 		}
-		b.bumpVersion()
 	})
 }
 
