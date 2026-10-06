@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/aleksana/peak/internal/peakfs"
+	"github.com/aleksana/peak/internal/quote"
 	"github.com/aleksana/peak/internal/vfs"
 	"github.com/aleksana/peak/internal/vfs/afero"
 )
@@ -61,7 +62,7 @@ func main() {
 			if err != nil {
 				log.Printf("warning: open /mount: %v (auto-mount disabled)", err)
 			} else {
-				if _, err := fmt.Fprintf(mountF, "%s %s\n", *socketPath, *mountPath); err != nil {
+				if _, err := fmt.Fprintf(mountF, "%s %s\n", quote.Quote(*socketPath), quote.Quote(*mountPath)); err != nil {
 					log.Printf("warning: mount failed: %v", err)
 				} else {
 					log.Printf("mounted at %s", *mountPath)
@@ -90,7 +91,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("open /mount: %v", err)
 		}
-		fmt.Fprintf(mountF, "/peak/srv/ssh %s\n", *mountPath)
+		fmt.Fprintf(mountF, "/peak/srv/ssh %s\n", quote.Quote(*mountPath))
 		mountF.Close()
 		log.Printf("mounted at %s", *mountPath)
 	} else {

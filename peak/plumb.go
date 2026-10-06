@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/aleksana/peak/internal/quote"
 )
 
 var (
@@ -39,6 +41,10 @@ func (e *Editor) Plumb(win *Window, word string) bool {
 	word = strings.TrimSpace(word)
 	if word == "" {
 		return false
+	}
+	// A quoted name, as clicked in a listing, plumbs as the name it quotes.
+	if f := quote.Fields(word); len(f) == 1 {
+		word = f[0]
 	}
 
 	// Try protocol handlers first

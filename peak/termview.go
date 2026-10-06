@@ -7,8 +7,9 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/aleksana/peak/internal/quote"
 	"github.com/aleksana/peak/internal/session"
-	"github.com/aleksana/peak/peak/term"
+	terminal "github.com/aleksana/peak/peak/term"
 	"github.com/atotto/clipboard"
 	"github.com/gdamore/tcell/v3"
 	"github.com/gdamore/tcell/v3/color"
@@ -369,7 +370,7 @@ func (tv *TermView) GetClickWord(mx, my int) string {
 	realRY := ry + tv.scroll.Pos
 
 	if tv.buffer.selection.Contains(rx, realRY, true) {
-		return tv.GetSelectedText()
+		return quote.Unquote(tv.GetSelectedText())
 	}
 
 	limit := max(maxHistory, tv.h)
@@ -390,7 +391,8 @@ func (tv *TermView) GetClickWord(mx, my int) string {
 		}
 	}
 	tv.state.Unlock()
-	return strings.TrimSpace(sb.String())
+	// Quoted text stands for its contents, as if they were selected.
+	return quote.Unquote(strings.TrimSpace(sb.String()))
 }
 
 func (tv *TermView) GetBuffer() *Buffer {

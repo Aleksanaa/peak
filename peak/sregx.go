@@ -10,6 +10,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/aleksana/peak/internal/quote"
 	"github.com/aleksana/peak/peak/regexp"
 )
 
@@ -756,13 +757,13 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 		}
 		return addr, true
 	case 'B':
-		files := strings.Fields(cmd.text)
+		files := quote.Fields(cmd.text)
 		for _, f := range files {
-			ctx.Editor.Execute(nil, nil, "New "+f)
+			ctx.Editor.Execute(nil, nil, "New "+quote.Quote(f))
 		}
 		return addr, true
 	case 'D':
-		files := strings.Fields(cmd.text)
+		files := quote.Fields(cmd.text)
 		if len(files) == 0 {
 			ctx.Editor.Execute(nil, ctx.Window, "Del")
 		} else {

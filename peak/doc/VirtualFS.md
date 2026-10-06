@@ -28,8 +28,10 @@ like /peak/ssh.
 
 These files live directly under /peak:
 
-- event             Global event stream. Each line is "new <id>" or
-                    "close <id>" when a window opens or closes.
+- event             Global event stream, one line per event:
+                    "<kind> <id> <name>", where kind is new, close,
+                    focus, get, or put, and name is the window's file
+                    name: the rest of the line, as is (not quoted).
                     Reads block until an event arrives.
 - index             Snapshot of all open windows. Each line has the format:
                     <id> <taglen> <bodylen> <isdir> <isdirty> <tag>
@@ -42,6 +44,9 @@ These files live directly under /peak:
 - unmount           Write a path to detach it from the VFS.
 - bind              Write "<src> <dst>" to overlay src onto dst. Read
                     to list current binds.
+
+Paths in mount, unmount, and bind, written or listed, are backtick-quoted
+when they contain spaces (see Quoting in Commands).
 - new/              Walking into this directory creates a new empty
                     window and redirects to its /peak/<id>/ directory.
 - srv/              Virtual socket registry. Open read-write to post a
@@ -53,7 +58,9 @@ These files live directly under /peak:
 Each open window is accessible at /peak/<id>/:
 
 - body              Window body text. Readable and writable.
-- tag               Window tag text. Readable and writable.
+- tag               Window tag text. Readable and writable. Its first
+                    field is the file name, backtick-quoted if it
+                    contains spaces.
 - ctl               Control file. Read returns the window status:
                     <id> <taglen> <bodylen> <isdir> <isdirty> <width>
                     terminal <maxtab>. Write executes a command.

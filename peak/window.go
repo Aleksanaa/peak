@@ -6,6 +6,7 @@ import (
 
 	"unicode"
 
+	"github.com/aleksana/peak/internal/quote"
 	"github.com/aleksana/peak/internal/session"
 	"github.com/aleksana/peak/internal/wevent"
 	"github.com/gdamore/tcell/v3"
@@ -272,19 +273,15 @@ func (tv *TextView) Draw(s tcell.Screen) {
 
 func (tv *TextView) GetClickWord(mx, my int) string {
 	bx, by := tv.visualToBuffer(mx-tv.x, my-tv.y+tv.scroll.Pos)
-	if tv.buffer.selection.Contains(bx, by, false) {
-		word := strings.TrimSpace(tv.buffer.GetSelectedText())
-		if word != "" {
-			return word
-		}
-	}
-	// double click on blank area is same as double click on selection
-	// complement that we cannot set mouse cursor position like acme
+	sel := strings.TrimSpace(tv.buffer.GetSelectedText())
 	word := strings.TrimSpace(tv.buffer.GetWordAt(bx, by))
-	if word == "" && tv.buffer.selection.Active {
-		return strings.TrimSpace(tv.buffer.GetSelectedText())
+	// A click in the selection takes the selection; so does a click on blank
+	// space, since we cannot set the mouse cursor position like acme.
+	if sel != "" && (tv.buffer.selection.Contains(bx, by, false) || word == "") {
+		word = sel
 	}
-	return word
+	// Quoted text stands for its contents, as if they were selected.
+	return quote.Unquote(word)
 }
 
 func (tv *TextView) ShowCursor(s tcell.Screen) {
@@ -898,12 +895,15 @@ func (win *Window) Warn() {
 	win.warnedVersion = win.body.GetBuffer().version
 }
 
+// tagText is the tag of a window named name, followed by commands. The name
+// is the tag's first field, quoted if it contains spaces.
+func tagText(name, commands string) string {
+	return " " + quote.Quote(name) + " " + commands + " "
+}
+
 func (win *Window) GetFilename() string {
-	fields := strings.Fields(string(win.tag.buffer.lines[0]))
-	if len(fields) > 0 {
-		return fields[0]
-	}
-	return ""
+	name, _ := quote.Cut(string(win.tag.buffer.lines[0]))
+	return name
 }
 
 func (win *Window) GetDir() string {
@@ -912,13 +912,12 @@ func (win *Window) GetDir() string {
 
 func (win *Window) SetName(name string) {
 	tag := win.tag.buffer.GetText()
-	fields := strings.Fields(tag)
-	if len(fields) > 0 {
-		fields[0] = name
-		win.tag.buffer.SetText(" " + strings.Join(fields, " ") + " ")
-	} else {
-		win.tag.buffer.SetText(" " + name + " Get Put Del ")
+	if strings.TrimSpace(tag) == "" {
+		win.tag.buffer.SetText(tagText(name, "Get Put Del"))
+		return
 	}
+	_, rest := quote.Cut(tag) // the rest of the tag is kept as typed
+	win.tag.buffer.SetText(" " + quote.Quote(name) + rest)
 }
 
 // clickWordOffsets returns the rune offsets [q0, q1) of word in the target view.
@@ -931,9 +930,12 @@ func (win *Window) clickWordOffsets(target View, mx, my int, word string) (q0, q
 	if by < 0 || by >= len(tv.buffer.lines) {
 		return 0, len([]rune(word))
 	}
-	wStart, wEnd := GetWordBoundaries(bx, len(tv.buffer.lines[by]), func(i int) rune {
-		return tv.buffer.lines[by][i]
-	})
+	line := tv.buffer.lines[by]
+	wStart, wEnd := GetWordBoundaries(bx, len(line), func(i int) rune { return line[i] })
+	// Quoted text stands for its contents: the range is inside the backticks.
+	if raw := string(line[wStart:wEnd]); quote.Unquote(raw) != raw {
+		wStart, wEnd = wStart+1, wEnd-1
+	}
 	q0 = tv.buffer.RuneOffsetOfPos(by, wStart)
 	q1 = tv.buffer.RuneOffsetOfPos(by, wEnd)
 	return

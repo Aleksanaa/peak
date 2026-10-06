@@ -74,3 +74,23 @@ Commands take arguments in this order:
 1. Text following the command name (e.g., Get main.go).
 2. Current text selection.
 3. The filename in the window tag (for Get and Put).
+
+
+## 8. Quoting
+
+Commands, tags, and Peak's control files split text into fields at white
+space. To keep spaces inside one field, enclose it in backticks. Two
+backticks in a row stand for one literal backtick.
+
+    New `my notes.txt`
+    Edit B `a b.txt` c.txt
+
+Peak quotes the names it writes the same way: a window tag shows
+`/home/me/my notes.txt`, and a directory listing shows `my notes.txt`.
+Clicking quoted text acts on its contents, as if you had selected them:
+middle-clicking `Win btop` runs Win btop, and right-clicking `my notes.txt`
+opens that file. Plumbed text is read as one field, so `my notes.txt`:12
+opens the file at line 12.
+
+Shell commands receive their text unchanged; there, backticks keep their
+shell meaning.

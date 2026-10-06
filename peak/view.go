@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"unicode"
+
+	"github.com/aleksana/peak/internal/quote"
 )
 
 // Cursor represents a 2D position.
@@ -80,18 +82,18 @@ func IsWordChar(r rune) bool {
 	return r != 0 && !unicode.IsSpace(r)
 }
 
+// GetWordBoundaries returns the bounds [start, end) of the word around x. A word
+// is a field (see package quote), so a backtick-quoted name is one word.
 func GetWordBoundaries(x int, length int, getChar func(int) rune) (int, int) {
 	if x < 0 || x >= length {
 		return x, x
 	}
-	start, end := x, x
-	for start > 0 && IsWordChar(getChar(start-1)) {
-		start--
-	}
-	for end < length && IsWordChar(getChar(end)) {
-		end++
-	}
-	return start, end
+	return quote.FieldAt(x, length, func(i int) rune {
+		if r := getChar(i); r != 0 {
+			return r
+		}
+		return ' ' // an empty terminal cell
+	})
 }
 
 // Search performs a two-pass search (forward from start, then wrap around).

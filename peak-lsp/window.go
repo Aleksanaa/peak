@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/aleksana/peak/internal/coords"
+	"github.com/aleksana/peak/internal/quote"
 	"github.com/aleksana/peak/internal/vfs/afero"
 	"github.com/aleksana/peak/internal/wevent"
 	enry "github.com/go-enry/go-enry/v2"
@@ -178,13 +179,10 @@ func watchWindow(fs afero.Fs, id int, retitleCh <-chan string) {
 	close(trigger)
 }
 
-// extractFilename returns the first whitespace-delimited token from a tag string.
+// extractFilename returns the window name: the first field of its tag.
 func extractFilename(tag string) string {
-	f := strings.Fields(tag)
-	if len(f) == 0 {
-		return ""
-	}
-	return f[0]
+	name, _ := quote.Cut(tag)
+	return name
 }
 
 // detectHighlighter detects the language using go-enry and builds a highlighter.

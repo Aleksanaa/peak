@@ -17,7 +17,8 @@ The editor is divided into several areas, all editable:
 
 The Window Tag shows the filename and Get Put Undo Redo Snarf Zerox Del
 by default, but it is a plain text buffer and you can type or execute
-anything there.
+anything there. A filename containing spaces is shown in backticks, e.g.
+`my notes.txt` (see Quoting in Commands).
 
 The Handle is the small colored area at the left edge of each column and
 window. Drag it to move or resize elements.
@@ -39,6 +40,7 @@ Three mouse buttons do different things:
     - path           opens the file.
     - path:line      opens the file at the given line.
     - path:line:col  opens the file at the given line and column.
+  - Right-clicking backtick-quoted text plumbs its contents, spaces included.
   - SSH paths with ports use host::port to avoid ambiguity with line numbers.
   - URLs (http://, https://, mailto:, magnet:) are opened in the system browser.
   - If the text is not a recognized path or URL, Peak searches for it (Look).
@@ -46,6 +48,8 @@ Three mouse buttons do different things:
 - Button 3 (Middle): Execute.
   - Middle-clicking a word executes it as a command.
   - Selecting text first and then middle-clicking executes the whole selection.
+  - Middle-clicking backtick-quoted text executes its contents, as if they
+    were selected: `Win btop` runs Win btop.
   - Commands can be built-ins (Put, Get) or any shell command (ls, make, ...).
   - You can execute text from anywhere: the tag, the body, or command output.
 

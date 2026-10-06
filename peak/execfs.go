@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/aleksana/peak/internal/quote"
 	"github.com/aleksana/peak/internal/vfs"
 	"github.com/aleksana/peak/internal/vfs/afero"
 )
@@ -131,7 +132,7 @@ type mountFile struct {
 func (f *mountFile) SetConn(c vfs.ConnCleaner) { f.conn = c }
 
 func (f *mountFile) WriteAt(p []byte, _ int64) (int, error) {
-	parts := strings.Fields(strings.TrimSpace(string(p)))
+	parts := quote.Fields(string(p))
 	if len(parts) < 2 {
 		return len(p), nil
 	}
@@ -154,7 +155,7 @@ type unmountFile struct {
 }
 
 func (f *unmountFile) WriteAt(p []byte, _ int64) (int, error) {
-	if path := strings.TrimSpace(string(p)); path != "" {
+	if path, _ := quote.Cut(string(p)); path != "" {
 		f.editor.ninep.Umount(path)
 	}
 	return len(p), nil
@@ -171,7 +172,7 @@ type bindFile struct {
 }
 
 func (f *bindFile) WriteAt(p []byte, _ int64) (int, error) {
-	parts := strings.Fields(strings.TrimSpace(string(p)))
+	parts := quote.Fields(string(p))
 	if len(parts) < 2 {
 		return len(p), nil
 	}

@@ -132,8 +132,8 @@ func (c *Column) AddWindow(tagText, bodyText string, preset ...*WindowSession) *
 
 // AddTermWindow creates a terminal window. An optional preset sets the initial
 // height from the saved session.
-func (c *Column) AddTermWindow(tagText, cmd, dir string, preset ...*WindowSession) (*Window, error) {
-	if tagText == "" {
+func (c *Column) AddTermWindow(tag, cmd, dir string, preset ...*WindowSession) (*Window, error) {
+	if tag == "" {
 		var name string
 		if cmd == "" {
 			if name, _ = os.Hostname(); name == "" {
@@ -142,11 +142,11 @@ func (c *Column) AddTermWindow(tagText, cmd, dir string, preset ...*WindowSessio
 		} else {
 			name = filepath.Base(strings.Fields(cmd)[0])
 		}
-		tagText = " " + filepath.Join(dir, "-"+name) + " Zerox Del "
+		tag = tagText(filepath.Join(dir, "-"+name), "Zerox Del")
 	}
 
 	c.maximized = nil
-	newWin, err := NewTermWindow(tagText, c, c.editor, c.x, c.y, c.w, 0, cmd, dir)
+	newWin, err := NewTermWindow(tag, c, c.editor, c.x, c.y, c.w, 0, cmd, dir)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +162,7 @@ func (c *Column) AddTermWindow(tagText, cmd, dir string, preset ...*WindowSessio
 
 func (c *Column) AddSessionTermWindow(title string, sess session.Session) (*Window, error) {
 	c.maximized = nil
-	newWin, err := newTermWindowFromSession(" "+title+" Zerox Del ", sess, c, c.editor, c.x, c.y, c.w, 0)
+	newWin, err := newTermWindowFromSession(tagText(title, "Zerox Del"), sess, c, c.editor, c.x, c.y, c.w, 0)
 	if err != nil {
 		return nil, err
 	}

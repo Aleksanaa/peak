@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/aleksana/peak/internal/quote"
 	"github.com/aleksana/peak/internal/session"
 	"github.com/gdamore/tcell/v3"
 	"github.com/gdamore/tcell/v3/color"
@@ -21,7 +22,7 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 		return false
 	}
 
-	fields := strings.Fields(cmd)
+	fields := quote.Fields(cmd)
 	root := fields[0]
 
 	switch root {
@@ -73,14 +74,14 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 	case "Umount":
 		e.cmdUmount(win, cmd)
 	case "Dump":
-		if err := e.Dump(e.getArg(win, cmd)); err != nil {
+		if err := e.Dump(e.argName(win, cmd)); err != nil {
 			e.showError(nil, win, "", "Dump: "+err.Error())
 		}
 	case "Load":
 		if !e.warnDirty(nil, win, e.allWindows()) {
 			return false
 		}
-		if err := e.Load(e.getArg(win, cmd)); err != nil {
+		if err := e.Load(e.argName(win, cmd)); err != nil {
 			e.showError(nil, win, "", "Load: "+err.Error())
 		}
 	case "Help":
@@ -94,7 +95,7 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 }
 
 func (e *Editor) cmdMount(win *Window, cmd string) {
-	args := e.getArgs(win, cmd)
+	args := e.argFields(win, cmd)
 	if len(args) < 2 {
 		e.showError(nil, win, "", "Usage: Mount socket path")
 		return
@@ -106,7 +107,7 @@ func (e *Editor) cmdMount(win *Window, cmd string) {
 }
 
 func (e *Editor) cmdBind(win *Window, cmd string) {
-	args := e.getArgs(win, cmd)
+	args := e.argFields(win, cmd)
 	if len(args) < 2 {
 		e.showError(nil, win, "", "Usage: Bind src dest")
 		return
@@ -119,20 +120,20 @@ func (e *Editor) cmdBind(win *Window, cmd string) {
 }
 
 func (e *Editor) cmdUmount(win *Window, cmd string) {
-	arg := e.getArg(win, cmd)
+	arg := e.argName(win, cmd)
 	if arg == "" {
 		return
 	}
 	e.ninep.Umount(arg)
 }
 
-func (e *Editor) getArgs(win *Window, cmd string) []string {
-	fields := strings.Fields(cmd)
-	if len(fields) > 1 {
-		return fields[1:]
+// argText returns a command's argument: the text after the command word, or
+// else the selection. Commands taking free text (Edit, Look, Win) use it as
+// is; argName and argFields read it as quoted names.
+func (e *Editor) argText(win *Window, cmd string) string {
+	if _, rest := quote.Cut(cmd); strings.TrimSpace(rest) != "" {
+		return strings.TrimSpace(rest)
 	}
-
-	// Fallback to selection if no arguments provided in the command line
 	sel := e.focusedView.GetSelectedText()
 	if sel == "" {
 		target := win
@@ -146,19 +147,17 @@ func (e *Editor) getArgs(win *Window, cmd string) []string {
 			}
 		}
 	}
-
-	if sel != "" {
-		return strings.Fields(sel)
-	}
-	return nil
+	return strings.TrimSpace(sel)
 }
 
-func (e *Editor) getArg(win *Window, cmd string) string {
-	args := e.getArgs(win, cmd)
-	if len(args) > 0 {
-		return strings.Join(args, " ")
-	}
-	return ""
+// argName returns the single name a command takes, such as Get's file.
+func (e *Editor) argName(win *Window, cmd string) string {
+	return quote.Unquote(e.argText(win, cmd))
+}
+
+// argFields returns the names a command takes, such as Mount's socket and path.
+func (e *Editor) argFields(win *Window, cmd string) []string {
+	return quote.Fields(e.argText(win, cmd))
 }
 
 func (e *Editor) Open(win *Window, path string) {
@@ -218,7 +217,7 @@ func (e *Editor) OpenLine(win *Window, path string, line, col int, binaryFallbac
 }
 
 func (e *Editor) createWindow(target *Column, full string, content string, isDir bool, writable bool, line, col int) *Window {
-	newWin := target.AddWindow(" "+full+" Get Put Undo Redo Snarf Zerox Del ", content)
+	newWin := target.AddWindow(tagText(full, "Get Put Undo Redo Snarf Zerox Del"), content)
 	e.ActivateWindow(newWin)
 	newWin.loaded(isDir, writable)
 	target.Resize(target.x, target.y, target.w, target.h)
@@ -269,7 +268,7 @@ func (e *Editor) cmdGet(win *Window, cmd string) {
 		col := e.getTargetColumn(nil, win)
 		target = e.createWindow(col, "./untitled.txt", "", false, true, -1, 0)
 	}
-	arg := e.getArg(target, cmd)
+	arg := e.argName(target, cmd)
 	if arg == "" {
 		arg = target.GetFilename()
 	}
@@ -296,7 +295,7 @@ func (e *Editor) cmdPut(win *Window, cmd string) {
 	if target == nil {
 		return
 	}
-	arg := e.getArg(target, cmd)
+	arg := e.argName(target, cmd)
 	if arg == "" {
 		arg = target.GetFilename()
 	}
@@ -394,7 +393,7 @@ func (e *Editor) cmdNewCol() {
 }
 
 func (e *Editor) cmdNew(col *Column, win *Window, cmd string) {
-	arg := e.getArg(win, cmd)
+	arg := e.argName(win, cmd)
 	if arg != "" {
 		e.Open(win, arg)
 		return
@@ -404,7 +403,7 @@ func (e *Editor) cmdNew(col *Column, win *Window, cmd string) {
 }
 
 func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {
-	arg := e.getArg(win, cmd)
+	arg := e.argText(win, cmd)
 	win = e.getTargetWindow(win)
 	targetCol := e.getTargetColumn(col, win)
 	if win != nil {
@@ -595,7 +594,7 @@ func (e *Editor) cmdLook(win *Window, cmd string) {
 		return
 	}
 
-	arg := e.getArg(target, cmd)
+	arg := e.argText(target, cmd)
 	if arg == "" {
 		return
 	}
@@ -612,7 +611,7 @@ func (e *Editor) cmdEdit(col *Column, win *Window, cmd string) {
 		return
 	}
 
-	arg := e.getArg(target, cmd)
+	arg := e.argText(target, cmd)
 	if arg == "" {
 		return
 	}
@@ -678,7 +677,7 @@ func (e *Editor) findOrCreateErrorWindow(col *Column, win *Window, dir string) *
 	}
 
 	targetCol := e.getTargetColumn(col, win)
-	newWin := targetCol.AddWindow(" "+errName+" Get Del ", "")
+	newWin := targetCol.AddWindow(tagText(errName, "Get Del"), "")
 	newWin.kind = WinOut
 	e.ActivateWindow(newWin)
 	targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
@@ -811,7 +810,7 @@ func (e *Editor) RemoveColumn(c *Column) {
 }
 
 func (e *Editor) cmdTheme(win *Window, cmd string) {
-	name := e.getArg(win, cmd)
+	name := e.argName(win, cmd)
 	if name == "" {
 		e.Open(win, "/peak/theme")
 		return

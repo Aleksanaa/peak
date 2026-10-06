@@ -8,11 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 
 	gogit "github.com/go-git/go-git/v5"
 
 	"github.com/aleksana/peak/internal/peakfs"
+	"github.com/aleksana/peak/internal/quote"
 	"github.com/aleksana/peak/internal/vfs"
 	"github.com/aleksana/peak/internal/vfs/afero"
 )
@@ -63,11 +63,11 @@ func handleNew(peakFs afero.Fs, winID string, repos map[string]*repoState, winRe
 	if err != nil {
 		return
 	}
-	fields := strings.Fields(string(tag))
-	if len(fields) == 0 {
+	filename, _ := quote.Cut(string(tag))
+	if filename == "" {
 		return
 	}
-	repoPath := findRepo(fields[0])
+	repoPath := findRepo(filename)
 	if repoPath == "" {
 		return
 	}
@@ -137,7 +137,7 @@ func startAndBindRepo(peakFs afero.Fs, repoPath string) (afero.File, string, err
 		return nil, "", fmt.Errorf("/mount: %w", err)
 	}
 	mountPath := repoPath + "/.git/fs"
-	fmt.Fprintf(mountF, "/peak/srv/%s %s\n", name, mountPath)
+	fmt.Fprintf(mountF, "/peak/srv/%s %s\n", name, quote.Quote(mountPath))
 	mountF.Close()
 
 	return serverF, mountPath, nil
@@ -150,7 +150,7 @@ func unbindRepo(peakFs afero.Fs, mountPath string) {
 		return
 	}
 	defer f.Close()
-	fmt.Fprintf(f, "%s\n", mountPath)
+	fmt.Fprintf(f, "%s\n", quote.Quote(mountPath))
 }
 
 // findRepo walks up from path to find the nearest git worktree root.

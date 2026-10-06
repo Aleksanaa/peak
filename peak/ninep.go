@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/aleksana/peak/internal/peakfs"
+	"github.com/aleksana/peak/internal/quote"
 	"github.com/aleksana/peak/internal/vfs"
 	"github.com/aleksana/peak/internal/vfs/afero"
 )
@@ -179,9 +180,9 @@ func (p *NineP) ListBinds() string {
 func formatEntries(entries []mountEntry) string {
 	var sb strings.Builder
 	for _, e := range entries {
-		sb.WriteString(e.src)
+		sb.WriteString(quote.Quote(e.src))
 		sb.WriteByte(' ')
-		sb.WriteString(e.dst)
+		sb.WriteString(quote.Quote(e.dst))
 		sb.WriteByte('\n')
 	}
 	return sb.String()

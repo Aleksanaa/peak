@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/aleksana/peak/internal/quote"
 )
 
 const sessionVersion = 1
@@ -217,10 +219,7 @@ func (w *Window) saveState(colH int) WindowSession {
 
 // applyPreset loads content into w from ws before the window is mounted.
 func (w *Window) applyPreset(ws *WindowSession) {
-	filename := ""
-	if fields := strings.Fields(ws.Tag); len(fields) > 0 {
-		filename = fields[0]
-	}
+	filename, _ := quote.Cut(ws.Tag)
 	tv := w.bodyTextView()
 	if ws.TabWidth > 0 {
 		tv.tabWidth = ws.TabWidth
