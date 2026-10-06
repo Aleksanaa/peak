@@ -409,7 +409,7 @@ func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {
 	targetCol := e.getTargetColumn(col, win)
 	if win != nil {
 		winPath := win.GetFilename()
-		if mountPath, mountFs := e.ninep.FindMount(winPath); mountPath != "" {
+		if mountPath, mountFs := ns.FindMount(winPath); mountPath != "" {
 			dir := getPathDir(winPath)
 			relPath, _ := filepath.Rel(mountPath, dir)
 			if newF, err := mountFs.OpenFile("new", os.O_RDWR, 0); err == nil {
@@ -443,7 +443,7 @@ func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {
 	} else {
 		dir = getwd()
 	}
-	if localDir, ok := e.ninep.ResolveLocalPath(dir); ok {
+	if localDir, ok := ns.ResolveLocalPath(dir); ok {
 		dir = localDir
 	} else {
 		e.showError(targetCol, win, "", dir+": don't know how to open terminal window")
@@ -459,18 +459,17 @@ func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {
 }
 
 func (e *Editor) openRemoteTermWindow(targetCol *Column, win *Window, mountPath, sessRel, dir string) {
-	vfsRoot := getVFS()
 	ioPath := filepath.Join(mountPath, sessRel, "io")
 	ctlPath := filepath.Join(mountPath, sessRel, "ctl")
 
-	ioRead, err := vfsRoot.OpenFile(ioPath, os.O_RDONLY, 0)
+	ioRead, err := ns.OpenFile(ioPath, os.O_RDONLY, 0)
 	if err != nil {
 		e.callCh <- func() {
 			e.showError(targetCol, win, "", "remote io: "+err.Error())
 		}
 		return
 	}
-	ioWrite, err := vfsRoot.OpenFile(ioPath, os.O_WRONLY, 0)
+	ioWrite, err := ns.OpenFile(ioPath, os.O_WRONLY, 0)
 	if err != nil {
 		ioRead.Close()
 		e.callCh <- func() {
@@ -478,7 +477,7 @@ func (e *Editor) openRemoteTermWindow(targetCol *Column, win *Window, mountPath,
 		}
 		return
 	}
-	ctlF, err := vfsRoot.OpenFile(ctlPath, os.O_WRONLY, 0)
+	ctlF, err := ns.OpenFile(ctlPath, os.O_WRONLY, 0)
 	if err != nil {
 		ioRead.Close()
 		ioWrite.Close()

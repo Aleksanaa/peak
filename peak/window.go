@@ -818,7 +818,7 @@ func newTermWindowFromSession(tag string, sess session.Session, parent *Column, 
 			newPath = tagDirBase + "/"
 		}
 		for {
-			if _, err := getVFS().Stat(newPath); err == nil {
+			if _, err := ns.Stat(newPath); err == nil {
 				break
 			}
 			if parent := filepath.Dir(newPath); parent != newPath {

@@ -166,14 +166,14 @@ type wrongSizeInfo struct {
 func (fi *wrongSizeInfo) Size() int64 { return 1 }
 
 func TestReadFileOrDir_IgnoresWrongSize(t *testing.T) {
-	e, _ := setupTest(t, 100, 24)
+	setupTest(t, 100, 24)
 
 	mountPath := "/peak/mirage/wrongsize"
 	content := "Hello World - this file is 62 bytes but Stat claims size=1"
 
 	mem := afero.NewMemMapFs()
 	afero.WriteFile(mem, "/test.txt", []byte(content), 0644)
-	e.ninep.vfs.Mount(mountPath, &wrongSizeFs{Fs: mem})
+	ns.Mount(mountPath, &wrongSizeFs{Fs: mem})
 
 	// Call readFileOrDir directly (bypasses the async Get command).
 	got, isDir, _, err := readFileOrDir(mountPath + "/test.txt")

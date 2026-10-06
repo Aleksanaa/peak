@@ -24,10 +24,13 @@ type mountEntry struct {
 	src, dst string
 }
 
+// ns is the process's namespace: every path peak opens resolves in it, as
+// in Plan 9, where a namespace belongs to the process.
+var ns *vfs.CompositeFs
+
 // NineP manages the virtual filesystem and 9P server for Peak.
 type NineP struct {
 	editor  *Editor
-	vfs     *vfs.CompositeFs
 	bus     *globalEventBus
 	nsFs    *peakNamespaceFs
 	nsBase  string // VFS path where nsFs is mounted
@@ -36,24 +39,25 @@ type NineP struct {
 	binds   []mountEntry // local overlays via Bind()
 }
 
+// NewNineP builds the process namespace, ns, and peak's file server over it.
 func NewNineP(e *Editor) *NineP {
 	const nsBase = "/peak"
-	fs := vfs.NewCompositeFs()
-	p := &NineP{editor: e, vfs: fs, bus: &globalEventBus{}, nsBase: nsBase}
+	ns = vfs.NewCompositeFs()
+	p := &NineP{editor: e, bus: &globalEventBus{}, nsBase: nsBase}
 
-	p.vfs.Mount("/", afero.NewOsFs())
+	ns.Mount("/", afero.NewOsFs())
 	p.nsFs = newPeakNamespaceFs(e, p.bus)
-	p.vfs.Mount(nsBase, p.nsFs)
+	ns.Mount(nsBase, p.nsFs)
 
 	docFs := afero.FromIOFS{FS: docFS}
-	p.vfs.Mount("/peak/doc", afero.NewBasePathFs(docFs, "doc"))
+	ns.Mount("/peak/doc", afero.NewBasePathFs(docFs, "doc"))
 
 	themeLayer := afero.NewMemMapFs()
 	themeLayer.Mkdir("/", 0755)
 	themeBase := afero.NewBasePathFs(afero.FromIOFS{FS: themeFS}, "theme")
-	p.vfs.Mount("/peak/theme", afero.NewCopyOnWriteFs(themeBase, themeLayer))
+	ns.Mount("/peak/theme", afero.NewCopyOnWriteFs(themeBase, themeLayer))
 
-	p.vfs.Mount("/peak/mirage", afero.NewMemMapFs())
+	ns.Mount("/peak/mirage", afero.NewMemMapFs())
 
 	return p
 }
@@ -67,7 +71,7 @@ func (p *NineP) Listen() {
 	os.MkdirAll(filepath.Dir(sockPath), 0700)
 	os.Remove(sockPath)
 
-	srv := vfs.NewNinePSrv(vfs.NewRootedFs(p.vfs, p.nsBase))
+	srv := vfs.NewNinePSrv(vfs.NewRootedFs(ns, p.nsBase))
 	go func() {
 		if err := srv.Serve("unix", sockPath); err != nil {
 			log.Printf("9P server error: %v", err)
@@ -77,13 +81,13 @@ func (p *NineP) Listen() {
 
 // MountWindow exposes a window's namespace at /peak/<id>/.
 func (p *NineP) MountWindow(win *Window) {
-	p.vfs.Mount("/peak/"+strconv.Itoa(win.ID), newWindowFs(win))
+	ns.Mount("/peak/"+strconv.Itoa(win.ID), newWindowFs(win))
 	p.bus.broadcast(fmt.Sprintf("new %d %s\n", win.ID, win.GetFilename()))
 }
 
 // UmountWindow removes a window's namespace.
 func (p *NineP) UmountWindow(win *Window) {
-	p.vfs.Umount("/peak/" + strconv.Itoa(win.ID))
+	ns.Umount("/peak/" + strconv.Itoa(win.ID))
 	p.bus.broadcast(fmt.Sprintf("close %d %s\n", win.ID, win.GetFilename()))
 }
 
@@ -105,7 +109,7 @@ func (p *NineP) BroadcastPut(win *Window) {
 // destination path.
 func (p *NineP) Mount(socket, path string) (string, error) {
 	var clientFs afero.Fs
-	if f, err := p.vfs.OpenFile(socket, os.O_RDONLY, 0); err == nil {
+	if f, err := ns.OpenFile(socket, os.O_RDONLY, 0); err == nil {
 		if clientFs, err = vfs.NewNinePClientFsFromConn(f); err != nil {
 			f.Close()
 			return "", err
@@ -114,14 +118,14 @@ func (p *NineP) Mount(socket, path string) (string, error) {
 		return "", err
 	}
 	path = normalizePath(path, "")
-	p.vfs.Mount(path, clientFs)
+	ns.Mount(path, clientFs)
 	p.record(&p.mounts, socket, path)
 	return path, nil
 }
 
 func (p *NineP) Umount(path string) {
 	path = normalizePath(path, "")
-	p.vfs.Umount(path)
+	ns.Umount(path)
 	p.mountMu.Lock()
 	p.mounts = removeByDst(p.mounts, path)
 	p.binds = removeByDst(p.binds, path)
@@ -134,7 +138,7 @@ func (p *NineP) Umount(path string) {
 func (p *NineP) Bind(src, dest string) error {
 	src = normalizePath(src, "")
 	dest = normalizePath(dest, "")
-	p.vfs.Mount(dest, afero.NewBasePathFs(p.vfs, src))
+	ns.Mount(dest, afero.NewBasePathFs(ns, src))
 	// Normalize again now that dest exists, so /bind lists it as a directory
 	// (with a trailing slash), as it always has.
 	p.record(&p.binds, normalizePath(src, ""), normalizePath(dest, ""))
@@ -184,16 +188,4 @@ func formatEntries(entries []mountEntry) string {
 		sb.WriteByte('\n')
 	}
 	return sb.String()
-}
-
-// ResolveLocalPath resolves path to a real OS path through any bind mounts.
-// Returns ("", false) for remote or purely virtual paths.
-func (p *NineP) ResolveLocalPath(path string) (string, bool) {
-	return p.vfs.ResolveLocalPath(path)
-}
-
-// FindMount returns the mount path and mounted Fs for the deepest non-root
-// mount containing path. Returns ("", nil) if none found.
-func (p *NineP) FindMount(path string) (string, afero.Fs) {
-	return p.vfs.FindMount(path)
 }

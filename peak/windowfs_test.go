@@ -886,11 +886,11 @@ func TestEventScannerIntegration(t *testing.T) {
 func TestRemoveWindowUnmountsFromVFS(t *testing.T) {
 	e, _, win, _ := setupWindowTest(t)
 	mountPath := fmt.Sprintf("/peak/%d", win.ID)
-	if mp, _ := e.ninep.FindMount(mountPath); mp != mountPath {
+	if mp, _ := ns.FindMount(mountPath); mp != mountPath {
 		t.Fatal("window not mounted before RemoveWindow")
 	}
 	e.RemoveWindow(win)
-	if mp, _ := e.ninep.FindMount(mountPath); mp == mountPath {
+	if mp, _ := ns.FindMount(mountPath); mp == mountPath {
 		t.Errorf("window still mounted at %s after RemoveWindow", mountPath)
 	}
 }
@@ -904,7 +904,7 @@ func TestRemoveColumnUnmountsAllWindows(t *testing.T) {
 
 	for _, id := range ids {
 		mountPath := fmt.Sprintf("/peak/%d", id)
-		if mp, _ := e.ninep.FindMount(mountPath); mp == mountPath {
+		if mp, _ := ns.FindMount(mountPath); mp == mountPath {
 			t.Errorf("window %d still mounted after RemoveColumn", id)
 		}
 	}

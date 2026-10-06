@@ -460,8 +460,6 @@ func (t *Theme) colorForAttr(attr string) tcell.Color {
 	}
 }
 
-var appEditor *Editor
-
 func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [-c columns] [file...]\n", os.Args[0])
@@ -471,8 +469,8 @@ func main() {
 	load := flag.String("l", "", "session file to load at startup")
 	flag.Parse()
 
-	appEditor = &Editor{}
-	appEditor.Init(*cols, flag.Args(), *load)
-	defer appEditor.screen.Fini()
-	appEditor.Run()
+	e := &Editor{}
+	e.Init(*cols, flag.Args(), *load)
+	defer e.screen.Fini()
+	e.Run()
 }

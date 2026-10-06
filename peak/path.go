@@ -13,10 +13,6 @@ import (
 	"github.com/aleksana/peak/internal/vfs/afero"
 )
 
-func getVFS() afero.Fs {
-	return appEditor.ninep.vfs
-}
-
 // toDir ensures a directory path ends with a trailing slash.
 func toDir(path string) string {
 	if path != "" && !strings.HasSuffix(path, "/") {
@@ -70,7 +66,7 @@ func normalizePath(path, base string) string {
 	} else {
 		abs, _ = filepath.Abs(path)
 	}
-	if fi, err := getVFS().Stat(abs); err == nil {
+	if fi, err := ns.Stat(abs); err == nil {
 		if fi.IsDir() {
 			return toDir(abs)
 		}
@@ -109,18 +105,18 @@ func getwd() string {
 
 // readFile reads data from a file.
 func readFile(path string) ([]byte, error) {
-	return afero.ReadFile(getVFS(), path)
+	return afero.ReadFile(ns, path)
 }
 
 // writeFile writes data to a file.
 func writeFile(path string, data []byte) error {
-	return afero.WriteFile(getVFS(), path, data, 0644)
+	return afero.WriteFile(ns, path, data, 0644)
 }
 
 // readFileOrDir returns the content of a file or a listing if it's a directory,
 // and whether the file is writable (owner-write permission bit set).
 func readFileOrDir(path string) (string, bool, bool, error) {
-	fi, err := getVFS().Stat(path)
+	fi, err := ns.Stat(path)
 	if err != nil {
 		return "", false, false, err
 	}
@@ -130,7 +126,7 @@ func readFileOrDir(path string) (string, bool, bool, error) {
 		return content, true, writable, err
 	}
 
-	f, err := getVFS().Open(path)
+	f, err := ns.Open(path)
 	if err != nil {
 		return "", false, writable, err
 	}
@@ -198,7 +194,7 @@ func readFileTail(f afero.File, prefix []byte, off int64) (string, error) {
 
 // listDir returns a formatted string listing the contents of a directory.
 func listDir(path string) (string, error) {
-	entries, err := afero.ReadDir(getVFS(), path)
+	entries, err := afero.ReadDir(ns, path)
 	if err != nil {
 		return "", err
 	}
@@ -216,9 +212,8 @@ func listDir(path string) (string, error) {
 
 // runCommand runs a command with sh -c and returns the output and error.
 func runCommand(cmd, path, input string, winid int) (string, error) {
-	ninep := appEditor.ninep
 	dir := getPathDir(path)
-	if mountPath, mountFs := ninep.FindMount(dir); mountPath != "" {
+	if mountPath, mountFs := ns.FindMount(dir); mountPath != "" {
 		relPath, _ := filepath.Rel(mountPath, dir)
 		if runF, err := mountFs.OpenFile("run", os.O_RDWR, 0); err == nil {
 			out, rerr := remoteRun(runF, toDir(relPath), cmd)
@@ -226,7 +221,7 @@ func runCommand(cmd, path, input string, winid int) (string, error) {
 			return out, rerr
 		}
 	}
-	if localDir, ok := ninep.ResolveLocalPath(dir); ok {
+	if localDir, ok := ns.ResolveLocalPath(dir); ok {
 		return runLocalCommand(cmd, path, localDir, input, winid)
 	}
 	return "", fmt.Errorf("%s: don't know how to run command", path)

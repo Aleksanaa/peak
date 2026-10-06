@@ -69,7 +69,6 @@ func setupTest(t *testing.T, w, h int) (*Editor, tcell.Screen) {
 		redrawCh: make(chan struct{}, 1),
 		callCh:   make(chan func(), 16),
 	}
-	appEditor = e
 	e.ninep = NewNineP(e)
 	if err := e.ApplyTheme("catppuccin_mocha"); err != nil {
 		t.Fatalf("ApplyTheme: %v", err)
@@ -818,7 +817,7 @@ func TestSimpleEdit(t *testing.T) {
 	path := "/peak/mirage/1.txt"
 
 	// Pre-create the directory and file in memory FS so Open succeeds
-	getVFS().MkdirAll("/peak/mirage", 0755)
+	ns.MkdirAll("/peak/mirage", 0755)
 	writeFile(path, []byte(""))
 
 	for i := 1; i <= 2; i++ {
@@ -1017,7 +1016,7 @@ func TestSimplePlumb(t *testing.T) {
 	path := "/peak/mirage/2.txt"
 	testString := "DirListing Test Content"
 
-	getVFS().MkdirAll("/peak/mirage", 0755)
+	ns.MkdirAll("/peak/mirage", 0755)
 	writeFile(path, []byte(""))
 
 	// 1. Open and Write
@@ -1102,7 +1101,7 @@ func TestPlumbLineCol(t *testing.T) {
 	s.Show()
 
 	path := "/peak/mirage/linecol.txt"
-	getVFS().MkdirAll("/peak/mirage", 0755)
+	ns.MkdirAll("/peak/mirage", 0755)
 	writeFile(path, []byte("line one\nline two\nline three\n"))
 
 	findWin := func() *Window {

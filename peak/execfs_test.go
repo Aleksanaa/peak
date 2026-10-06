@@ -338,7 +338,7 @@ func TestUnmountFileUnmountsByPath(t *testing.T) {
 	writeControl(t, nsFs, "unmount", dst+"\n")
 
 	// VFS entry gone.
-	mp, _ := nsFs.editor.ninep.FindMount(dst)
+	mp, _ := ns.FindMount(dst)
 	if mp == dst {
 		t.Errorf("VFS mount still registered at %s after unmount", dst)
 	}
@@ -435,7 +435,7 @@ func TestUnmountFileBlankWriteNoop(t *testing.T) {
 // ---- bindFile ----
 
 func TestBindFileOverlaysLocalPath(t *testing.T) {
-	e, _, nsFs, _ := setupExecFsTest(t)
+	_, _, nsFs, _ := setupExecFsTest(t)
 	src := t.TempDir()
 	dst := "/peak/execfs-test-bind-overlay"
 
@@ -446,7 +446,7 @@ func TestBindFileOverlaysLocalPath(t *testing.T) {
 	f.WriteString(src + " " + dst + "\n")
 	f.Close()
 
-	mp, _ := e.ninep.FindMount(dst)
+	mp, _ := ns.FindMount(dst)
 	if mp != dst {
 		t.Errorf("bind: mount not registered at %s (got %q)", dst, mp)
 	}
@@ -587,14 +587,14 @@ func TestWalkRedirectNonNewNameIgnored(t *testing.T) {
 }
 
 func TestWalkRedirectWindowFilesAccessible(t *testing.T) {
-	e, _, nsFs, _ := setupExecFsTest(t)
+	_, _, nsFs, _ := setupExecFsTest(t)
 	redirectPath, _, ok := nsFs.WalkRedirect("/", "new")
 	if !ok {
 		t.Fatal("WalkRedirect returned ok=false")
 	}
 
 	// Verify the window files are accessible through the composite at /peak.
-	inner := afero.NewBasePathFs(e.ninep.vfs, "/peak")
+	inner := afero.NewBasePathFs(ns, "/peak")
 	for _, file := range []string{"body", "tag", "ctl", "event", "addr", "data"} {
 		path := redirectPath + "/" + file
 		if _, err := inner.Stat(path); err != nil {
@@ -880,7 +880,7 @@ func TestMountDispatchVirtualSocket(t *testing.T) {
 	if _, err := e.ninep.Mount("/peak/srv/mounttest", mountTarget); err != nil {
 		t.Fatalf("Mount: %v", err)
 	}
-	mp, _ := e.ninep.FindMount(mountTarget)
+	mp, _ := ns.FindMount(mountTarget)
 	if mp != mountTarget {
 		t.Errorf("mount not registered at %s after virtual mount", mountTarget)
 	}
@@ -901,7 +901,7 @@ func TestMountDispatchUnixSocket(t *testing.T) {
 	if _, err := e.ninep.Mount(sockPath, mountTarget); err != nil {
 		t.Fatalf("Mount: %v", err)
 	}
-	mp, _ := e.ninep.FindMount(mountTarget)
+	mp, _ := ns.FindMount(mountTarget)
 	if mp != mountTarget {
 		t.Errorf("mount not registered at %s after unix mount", mountTarget)
 	}
@@ -916,7 +916,7 @@ func TestMountDispatchUnixSocket(t *testing.T) {
 func dialPeakSrv(t *testing.T, e *Editor) (peakFs afero.Fs, conn net.Conn, done <-chan struct{}) {
 	t.Helper()
 	client, server := net.Pipe()
-	srv := vfs.NewNinePSrv(vfs.NewRootedFs(e.ninep.vfs, "/peak"))
+	srv := vfs.NewNinePSrv(vfs.NewRootedFs(ns, "/peak"))
 	ch := make(chan struct{})
 	go func() {
 		srv.ServeConn(server)
@@ -956,7 +956,7 @@ func TestSrvDirectServeConn(t *testing.T) {
 		t.Fatalf("Mount: %v", err)
 	}
 
-	data, err := afero.ReadFile(e.ninep.vfs, mountPath+"/hello")
+	data, err := afero.ReadFile(ns, mountPath+"/hello")
 	if err != nil {
 		t.Fatalf("ReadFile through mount: %v", err)
 	}
@@ -993,14 +993,14 @@ func TestMountAutoUnmountOnConnDrop(t *testing.T) {
 	}
 	mountF.Close()
 
-	if mp, _ := e.ninep.FindMount("/peak/auto-unmount"); mp != "/peak/auto-unmount" {
+	if mp, _ := ns.FindMount("/peak/auto-unmount"); mp != "/peak/auto-unmount" {
 		t.Fatal("mount not found after mounting")
 	}
 
 	conn.Close()    // simulate crash
 	<-serveConnDone // cleanup() has run by the time this fires
 
-	if mp, _ := e.ninep.FindMount("/peak/auto-unmount"); mp == "/peak/auto-unmount" {
+	if mp, _ := ns.FindMount("/peak/auto-unmount"); mp == "/peak/auto-unmount" {
 		t.Fatal("mount should have been cleaned up after connection drop")
 	}
 }
@@ -1034,7 +1034,7 @@ func TestMountMultipleAutoUnmount(t *testing.T) {
 		mountF.Close()
 	}
 	for _, dst := range mounts {
-		if mp, _ := e.ninep.FindMount(dst); mp != dst {
+		if mp, _ := ns.FindMount(dst); mp != dst {
 			t.Fatalf("mount %s not found before drop", dst)
 		}
 	}
@@ -1043,7 +1043,7 @@ func TestMountMultipleAutoUnmount(t *testing.T) {
 	<-serveConnDone
 
 	for _, dst := range mounts {
-		if mp, _ := e.ninep.FindMount(dst); mp == dst {
+		if mp, _ := ns.FindMount(dst); mp == dst {
 			t.Errorf("mount %s should have been cleaned up", dst)
 		}
 	}
@@ -1076,7 +1076,7 @@ func TestSrvServeConnVia9P(t *testing.T) {
 	fmt.Fprintf(mountF, "/peak/srv/p9svc %s\n", mountPath)
 	mountF.Close()
 
-	if mp, _ := e.ninep.FindMount(mountPath); mp != mountPath {
+	if mp, _ := ns.FindMount(mountPath); mp != mountPath {
 		t.Fatal("mount not found after ServeConn-based setup")
 	}
 
