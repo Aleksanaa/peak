@@ -351,9 +351,9 @@ func (e *Editor) clickWindow(ev *tcell.EventMouse, t mouseTarget, buttons tcell.
 		var q0, q1 int
 		if q0, q1, word = clickRange(target.GetBuffer(), target.PosAt(t.x, t.y)); word != "" {
 			if buttons&tcell.ButtonMiddle != 0 {
-				win.broadcastEvent('M', 'x', q0, q1, 0, word)
+				win.broadcastEvent('M', 'x', q0, q1, word)
 			} else {
-				win.broadcastEvent('M', 'l', q0, q1, 0, word)
+				win.broadcastEvent('M', 'l', q0, q1, word)
 			}
 		}
 	}

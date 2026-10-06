@@ -600,8 +600,8 @@ func (w *Window) Draw(cv canvas) {
 }
 
 // broadcastEvent delivers a counted event record to all open event file subscribers.
-func (win *Window) broadcastEvent(origin, typ byte, q0, q1, flag int, text string) {
-	record := wevent.Format(wevent.Event{Origin: origin, Type: typ, Q0: q0, Q1: q1, Flag: flag, Text: text})
+func (win *Window) broadcastEvent(origin, typ byte, q0, q1 int, text string) {
+	record := wevent.Format(wevent.Event{Origin: origin, Type: typ, Q0: q0, Q1: q1, Text: text})
 	for _, s := range win.eventSubs {
 		s.deliver(record)
 	}
@@ -763,10 +763,10 @@ func NewWindow(tag, body string, parent *Column, editor *Editor, w int) *Window 
 		win.addrQ0 = adjustPoint(win.addrQ0, q0, q1Old, q1New)
 		win.addrQ1 = adjustPoint(win.addrQ1, q0, q1Old, q1New)
 		if q1Old > q0 {
-			win.broadcastEvent('K', 'D', q0, q1Old, 0, "")
+			win.broadcastEvent('K', 'D', q0, q1Old, "")
 		}
 		if text != "" {
-			win.broadcastEvent('K', 'I', q0, q1New, 0, text)
+			win.broadcastEvent('K', 'I', q0, q1New, text)
 		}
 	}
 	return win
