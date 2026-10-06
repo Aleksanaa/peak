@@ -53,7 +53,6 @@ type dragCursor interface {
 type TextView struct {
 	BaseView
 	buffer        *Buffer
-	style         func() tcell.Style
 	drag          bool
 	singleLine    bool
 	scrollable    bool
@@ -62,6 +61,7 @@ type TextView struct {
 	lastWidth     int
 	lastVersion   int
 	theme         *Theme
+	colors        *colorPair // points into theme, so theme changes apply
 	tabWidth      int
 	typingStart   *Cursor
 	typingEnd     *Cursor
@@ -73,13 +73,14 @@ func (tv *TextView) IsRaw() bool {
 	return false
 }
 
-func NewTextView(text string, x, y, w, h int, style tcell.Style, singleLine, scrollable bool) *TextView {
+func NewTextView(text string, x, y, w, h int, theme *Theme, colors *colorPair, singleLine, scrollable bool) *TextView {
 	tv := &TextView{
 		BaseView: BaseView{
 			x: x, y: y, w: w, h: h,
 		},
 		buffer:      NewBuffer(text),
-		style:       func() tcell.Style { return style },
+		theme:       theme,
+		colors:      colors,
 		singleLine:  singleLine,
 		scrollable:  scrollable,
 		lastVersion: -1,
@@ -217,14 +218,14 @@ func (tv *TextView) visualToBuffer(vx, vidx int) (int, int) {
 }
 
 func (tv *TextView) Draw(s tcell.Screen) {
-	selStyle := tcell.StyleDefault.Background(tv.theme.SelectionBG).Foreground(tv.theme.SelectionFG)
+	selStyle := tv.theme.Selection.style()
 	spaces := strings.Repeat(" ", tv.w)
 
 	vrow := 0
 	for lidx := tv.scroll.Pos; lidx < len(tv.layout) && vrow < tv.h; lidx++ {
 		vl, vcol := tv.layout[lidx], 0
 		line := tv.buffer.lines[vl.BufferLine]
-		lineStyle := tv.style()
+		lineStyle := tv.colors.style()
 		if tv.underlineLast && lidx == len(tv.layout)-1 {
 			lineStyle = lineStyle.Underline(true)
 		}
@@ -265,7 +266,7 @@ func (tv *TextView) Draw(s tcell.Screen) {
 		vrow++
 	}
 	for ; vrow < tv.h; vrow++ {
-		s.PutStrStyled(tv.x, tv.y+vrow, spaces, tv.style())
+		s.PutStrStyled(tv.x, tv.y+vrow, spaces, tv.colors.style())
 	}
 }
 
@@ -577,7 +578,7 @@ func (hd *Handle) Resize(x, y, w, h int) { hd.x, hd.y, hd.w, hd.h = x, y, w, h }
 
 type Scrollbar struct {
 	BaseView
-	thumbStyle   func() tcell.Style
+	thumb        *tcell.Color
 	scrollPos    int
 	totalLines   int
 	visibleLines int
@@ -590,7 +591,7 @@ func (sb *Scrollbar) Draw(s tcell.Screen) {
 	thumbHeight := max(1, (sb.visibleLines*sb.visibleLines)/sb.totalLines)
 	thumbStart := min(sb.visibleLines-thumbHeight, (sb.scrollPos*sb.visibleLines)/sb.totalLines)
 	for i := 0; i < thumbHeight; i++ {
-		s.Put(sb.x, sb.y+thumbStart+i, " ", sb.thumbStyle())
+		s.Put(sb.x, sb.y+thumbStart+i, " ", tcell.StyleDefault.Background(*sb.thumb))
 	}
 }
 func (sb *Scrollbar) Resize(x, y, w, h int) { sb.x, sb.y, sb.w, sb.h = x, y, w, h }
@@ -743,22 +744,17 @@ func (win *Window) colorAtFunc() func(int) (tcell.Color, bool) {
 }
 
 func newWindow(tag string, parent *Column, editor *Editor, x, y, w, h int) *Window {
-	tagStyle := tcell.StyleDefault.Background(editor.theme.TagBG).Foreground(editor.theme.TagFG)
 	handle := &Handle{BaseView: BaseView{x: x, y: y, w: 1, h: 1}, color: editor.theme.Handle}
 	bodyView := &BodyView{TreeNode: TreeNode{BaseView: BaseView{x: x + 1, y: y + 1, w: w - 1, h: h - 1}}}
 	bodyView.scroll = &Scrollbar{
-		BaseView:   BaseView{x: x + 1, y: y + 1, w: 1, h: h - 1},
-		thumbStyle: func() tcell.Style { return tcell.StyleDefault.Background(editor.theme.ScrollThumb) },
+		BaseView: BaseView{x: x + 1, y: y + 1, w: 1, h: h - 1},
+		thumb:    &editor.theme.ScrollThumb,
 	}
 	win := &Window{
 		TreeNode: TreeNode{BaseView: BaseView{x: x, y: y, w: w, h: h}},
-		tag:      NewTextView(tag, x+1, y, w-1, 1, tagStyle, false, false),
+		tag:      NewTextView(tag, x+1, y, w-1, 1, &editor.theme, &editor.theme.Tag, false, false),
 		parent:   parent, editor: editor,
 		handle: handle, bodyView: bodyView,
-	}
-	win.tag.theme = &editor.theme
-	win.tag.style = func() tcell.Style {
-		return tcell.StyleDefault.Background(editor.theme.TagBG).Foreground(editor.theme.TagFG)
 	}
 	win.tag.buffer.onMutate = func(_, _, _ int, _ string) {
 		prev := len(win.tag.layout)
@@ -838,13 +834,8 @@ func newTermWindowFromSession(tag string, sess session.Session, parent *Column, 
 }
 
 func NewWindow(tag, body string, parent *Column, editor *Editor, x, y, w, h int) *Window {
-	bodyStyle := tcell.StyleDefault.Background(editor.theme.BodyBG).Foreground(editor.theme.BodyFG)
 	win := newWindow(tag, parent, editor, x, y, w, h)
-	tv := NewTextView(body, x+1, y+1, w-1, h-1, bodyStyle, false, true)
-	tv.theme = &editor.theme
-	tv.style = func() tcell.Style {
-		return tcell.StyleDefault.Background(editor.theme.BodyBG).Foreground(editor.theme.BodyFG)
-	}
+	tv := NewTextView(body, x+1, y+1, w-1, h-1, &editor.theme, &editor.theme.Body, false, true)
 	win.body = tv
 	win.bodyView.content = tv
 	tv.buffer.onMutate = func(q0, q1Old, q1New int, text string) {

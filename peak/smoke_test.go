@@ -49,6 +49,25 @@ func GetColorCoordinate(s tcell.Screen, color tcell.Color) (int, int, bool) {
 	return -1, -1, false
 }
 
+// Views hold pointers into the editor's theme, so switching themes recolors
+// everything already on screen.
+func TestThemeSwitchRecolorsViews(t *testing.T) {
+	e, col := newTestEditorWithColumn(t)
+	col.AddWindow(" /tmp/theme.txt Del ", "some text")
+	col.Resize(col.x, col.y, col.w, col.h)
+
+	if err := e.ApplyTheme("acme"); err != nil {
+		t.Fatalf("ApplyTheme: %v", err)
+	}
+	e.Draw()
+
+	for row, want := range []tcell.Color{e.theme.GlobalTag.BG, e.theme.ColTag.BG, e.theme.Tag.BG, e.theme.Body.BG} {
+		if _, style, _ := e.screen.Get(10, row); style.GetBackground() != want {
+			t.Errorf("row %d background = %v, want %v", row, style.GetBackground(), want)
+		}
+	}
+}
+
 // VerifyNewColExists checks if the word "NewCol" is present anywhere on the screen.
 func VerifyNewColExists(s tcell.Screen) bool {
 	_, _, found := GetWordCoordinate(s, "NewCol", 0, 0)
@@ -137,16 +156,16 @@ func TestTcellView(t *testing.T) {
 	}
 
 	// Test color search for the GlobalTagBG
-	cx, cy, cfound := GetColorCoordinate(s, e.theme.GlobalTagBG)
+	cx, cy, cfound := GetColorCoordinate(s, e.theme.GlobalTag.BG)
 	if !cfound {
-		t.Errorf("Expected to find GlobalTagBG color (%v), but it was not found", e.theme.GlobalTagBG)
+		t.Errorf("Expected to find GlobalTagBG color (%v), but it was not found", e.theme.GlobalTag.BG)
 	} else {
 		t.Logf("GlobalTagBG color found at coordinate: (%d, %d)", cx, cy)
 	}
 }
 
 func TestTextViewClickPlacesCursorOnClickedCharacter(t *testing.T) {
-	tv := NewTextView("abc", 0, 0, 10, 1, tcell.StyleDefault, false, false)
+	tv := NewTextView("abc", 0, 0, 10, 1, nil, nil, false, false)
 
 	tv.HandleEvent(tcell.NewEventMouse(0, 0, tcell.ButtonPrimary, 0))
 
@@ -1259,7 +1278,7 @@ func TestTextViewTypingRevealsCursorBelowVisible(t *testing.T) {
 		lines[i] = "line"
 	}
 	body := strings.Join(lines, "\n")
-	tv := NewTextView(body, 0, 0, 40, 10, tcell.StyleDefault, false, true)
+	tv := NewTextView(body, 0, 0, 40, 10, nil, nil, false, true)
 	tv.UpdateLayout()
 
 	bx, by := tv.visualToBuffer(0, 9)
@@ -1282,7 +1301,7 @@ func TestTextViewScrollAwayThenTypeSnapsToCursor(t *testing.T) {
 		lines[i] = "text"
 	}
 	body := strings.Join(lines, "\n")
-	tv := NewTextView(body, 0, 0, 40, 10, tcell.StyleDefault, false, true)
+	tv := NewTextView(body, 0, 0, 40, 10, nil, nil, false, true)
 	tv.UpdateLayout()
 
 	tv.scroll.Pos = 50
@@ -1305,7 +1324,7 @@ func TestSyncScrollOnlyFollowsDownward(t *testing.T) {
 		lines[i] = "text"
 	}
 	body := strings.Join(lines, "\n")
-	tv := NewTextView(body, 0, 0, 40, 10, tcell.StyleDefault, false, true)
+	tv := NewTextView(body, 0, 0, 40, 10, nil, nil, false, true)
 	tv.UpdateLayout()
 
 	tv.scroll.Pos = 50
@@ -1325,7 +1344,7 @@ func TestSyncScrollFollowsCursorDownward(t *testing.T) {
 		lines[i] = "text"
 	}
 	body := strings.Join(lines, "\n")
-	tv := NewTextView(body, 0, 0, 40, 10, tcell.StyleDefault, false, true)
+	tv := NewTextView(body, 0, 0, 40, 10, nil, nil, false, true)
 	tv.UpdateLayout()
 
 	tv.buffer.cursor = Cursor{0, 95}
@@ -1560,7 +1579,7 @@ func TestDelcolNarrowNoExtraTagRow(t *testing.T) {
 	// not tag background — no stale blank tag row.
 	bodyRow := w.y + w.tagHeight()
 	_, style, _ := s.Get(w.x+1, bodyRow)
-	if style.GetBackground() == e.theme.TagBG {
+	if style.GetBackground() == e.theme.Tag.BG {
 		t.Errorf("row %d below window tag has TagBG background — stale extra tag row", bodyRow)
 	}
 }
@@ -1679,7 +1698,7 @@ func TestDragSelectInTagDoesNotScrollBody(t *testing.T) {
 
 func TestEscToggleSelection(t *testing.T) {
 	text := strings.Repeat("line\n", 20)
-	tv := NewTextView(text, 0, 0, 40, 5, tcell.StyleDefault, false, true)
+	tv := NewTextView(text, 0, 0, 40, 5, nil, nil, false, true)
 	tv.UpdateLayout()
 
 	selStart := Cursor{0, 3}

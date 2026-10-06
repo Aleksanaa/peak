@@ -13,15 +13,19 @@ import (
 	"github.com/gdamore/tcell/v3/color"
 )
 
+// colorPair is the background and foreground of one kind of text area.
+type colorPair struct{ BG, FG tcell.Color }
+
+func (c *colorPair) style() tcell.Style {
+	return tcell.StyleDefault.Background(c.BG).Foreground(c.FG)
+}
+
 type Theme struct {
-	TagBG, TagFG                      tcell.Color
-	BodyBG, BodyFG                    tcell.Color
-	ColTagBG, ColTagFG                tcell.Color
-	GlobalTagBG, GlobalTagFG          tcell.Color
+	GlobalTag, ColTag, Tag, Body, Selection colorPair
+
 	Handle, ScrollThumb, ScrollGutter tcell.Color
 	HandleDirty, HandleError          tcell.Color
 	HandleWritable, HandleUnwritable  tcell.Color
-	SelectionBG, SelectionFG          tcell.Color
 	HandleColumn                      tcell.Color
 
 	SynKeyword  tcell.Color
@@ -187,12 +191,7 @@ func (e *Editor) setup(s tcell.Screen) {
 		log.Printf("theme: %v", err)
 	}
 
-	tagStyle := tcell.StyleDefault.Background(e.theme.GlobalTagBG).Foreground(e.theme.GlobalTagFG)
-	e.tag = NewTextView(" NewCol Help Exit ", 0, 0, e.w, 1, tagStyle, true, false)
-	e.tag.style = func() tcell.Style {
-		return tcell.StyleDefault.Background(e.theme.GlobalTagBG).Foreground(e.theme.GlobalTagFG)
-	}
-	e.tag.theme = &e.theme
+	e.tag = NewTextView(" NewCol Help Exit ", 0, 0, e.w, 1, &e.theme, &e.theme.GlobalTag, true, false)
 	e.focusedView = e.tag
 }
 

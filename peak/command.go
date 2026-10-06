@@ -854,21 +854,21 @@ func applyThemeFromData(t *Theme, data []byte) error {
 func setThemeField(t *Theme, key string, c tcell.Color) {
 	switch key {
 	case "GlobalTagBG":
-		t.GlobalTagBG = c
+		t.GlobalTag.BG = c
 	case "GlobalTagFG":
-		t.GlobalTagFG = c
+		t.GlobalTag.FG = c
 	case "ColTagBG":
-		t.ColTagBG = c
+		t.ColTag.BG = c
 	case "ColTagFG":
-		t.ColTagFG = c
+		t.ColTag.FG = c
 	case "TagBG":
-		t.TagBG = c
+		t.Tag.BG = c
 	case "TagFG":
-		t.TagFG = c
+		t.Tag.FG = c
 	case "BodyBG":
-		t.BodyBG = c
+		t.Body.BG = c
 	case "BodyFG":
-		t.BodyFG = c
+		t.Body.FG = c
 	case "Handle":
 		t.Handle = c
 	case "ScrollThumb":
@@ -884,9 +884,9 @@ func setThemeField(t *Theme, key string, c tcell.Color) {
 	case "HandleUnwritable":
 		t.HandleUnwritable = c
 	case "SelectionBG":
-		t.SelectionBG = c
+		t.Selection.BG = c
 	case "SelectionFG":
-		t.SelectionFG = c
+		t.Selection.FG = c
 	case "HandleColumn":
 		t.HandleColumn = c
 	case "SynKeyword":

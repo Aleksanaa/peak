@@ -87,10 +87,10 @@ func NewTermView(editor *Editor, sess session.Session, x, y, w, h int, onClose f
 		return nil, err
 	}
 	tv.state.ResponseWriter = sess
-	if h := editor.theme.BodyFG.Hex(); h >= 0 {
+	if h := editor.theme.Body.FG.Hex(); h >= 0 {
 		tv.state.FGColor = terminal.RGB(uint8(h>>16), uint8(h>>8), uint8(h))
 	}
-	if h := editor.theme.BodyBG.Hex(); h >= 0 {
+	if h := editor.theme.Body.BG.Hex(); h >= 0 {
 		tv.state.BGColor = terminal.RGB(uint8(h>>16), uint8(h>>8), uint8(h))
 	}
 	tv.vt = vt
@@ -208,8 +208,8 @@ func (tv *TermView) Draw(s tcell.Screen) {
 			}
 
 			if tv.buffer.selection.Contains(x, screenY, false) {
-				style = style.Background(tv.editor.theme.SelectionBG).
-					Foreground(tv.editor.theme.SelectionFG)
+				style = style.Background(tv.editor.theme.Selection.BG).
+					Foreground(tv.editor.theme.Selection.FG)
 			}
 			s.Put(tv.x+x, tv.y+y, string(char), style)
 		}
