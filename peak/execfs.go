@@ -200,7 +200,6 @@ func indexSnap(editor *Editor) []byte {
 	var sb strings.Builder
 	editor.Call(func() {
 		for _, win := range editor.allWindows() {
-			win.lk.Lock()
 			tagLen := win.tag.buffer.Len()
 			bodyLen := win.body.GetBuffer().Len()
 			isDir, isDirty := 0, 0
@@ -211,7 +210,6 @@ func indexSnap(editor *Editor) []byte {
 				isDirty = 1
 			}
 			tag := win.tag.buffer.GetText()
-			win.lk.Unlock()
 			if i := strings.IndexByte(tag, '\n'); i >= 0 {
 				tag = tag[:i]
 			}

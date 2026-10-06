@@ -10,6 +10,8 @@ import (
 )
 
 // windowFs implements afero.Fs for a single window's /peak/<id>/ directory.
+// Its files are served on 9P goroutines, so they reach window state only
+// through editor.Call, on the main goroutine that owns it.
 type windowFs struct{ *vfs.NamespaceFs }
 
 func newWindowFs(win *Window) *windowFs {
@@ -34,9 +36,7 @@ func newWindowFs(win *Window) *windowFs {
 func newWinBodyFile(win *Window, flag int) *winBodyFile {
 	f := &winBodyFile{win: win}
 	if flag&os.O_WRONLY == 0 {
-		win.lk.Lock()
-		f.Data = []byte(win.body.GetBuffer().GetText())
-		win.lk.Unlock()
+		win.editor.Call(func() { f.Data = []byte(win.body.GetBuffer().GetText()) })
 	}
 	return f
 }
@@ -50,14 +50,11 @@ func (f *winBodyFile) Close() error {
 	if f.Writes == nil {
 		return nil
 	}
-	if f.win.kind == WinTerm {
-		f.win.body.(*TermView).session.Write(f.Writes)
+	if tv, ok := f.win.body.(*TermView); ok {
+		tv.session.Write(f.Writes)
 		return nil
 	}
-	f.win.lk.Lock()
-	f.win.body.GetBuffer().SetText(string(f.Writes))
-	f.win.lk.Unlock()
-	f.win.editor.Redraw()
+	f.win.editor.Call(func() { f.win.body.GetBuffer().SetText(string(f.Writes)) })
 	return nil
 }
 
@@ -66,9 +63,7 @@ func (f *winBodyFile) Close() error {
 func newWinTagFile(win *Window, flag int) *winTagFile {
 	f := &winTagFile{win: win}
 	if flag&os.O_WRONLY == 0 {
-		win.lk.Lock()
-		f.Data = []byte(win.tag.buffer.GetText())
-		win.lk.Unlock()
+		win.editor.Call(func() { f.Data = []byte(win.tag.buffer.GetText()) })
 	}
 	return f
 }
@@ -82,10 +77,7 @@ func (f *winTagFile) Close() error {
 	if f.Writes == nil {
 		return nil
 	}
-	f.win.lk.Lock()
-	f.win.tag.buffer.SetText(string(f.Writes))
-	f.win.lk.Unlock()
-	f.win.editor.Redraw()
+	f.win.editor.Call(func() { f.win.tag.buffer.SetText(string(f.Writes)) })
 	return nil
 }
 
@@ -94,26 +86,22 @@ func (f *winTagFile) Close() error {
 // ctlSnap returns the structured read payload for /<id>/ctl:
 // "<id> <taglen> <bodylen> <isdir> <isdirty> <width> terminal <maxtab>\n"
 // All lengths are rune counts; width is terminal columns.
-func ctlSnap(win *Window) []byte {
-	var tagLen, bodyLen, width, maxtab int
-	isDir, isDirty := 0, 0
-	win.lk.Lock()
-	tagLen = win.tag.buffer.Len()
-	bodyLen = win.body.GetBuffer().Len()
-	if win.kind == WinDir {
-		isDir = 1
-	}
-	if win.IsDirty() {
-		isDirty = 1
-	}
-	width = win.w - 1
-	maxtab = 4
-	if tv, ok := win.body.(*TextView); ok {
-		maxtab = tv.tabWidth
-	}
-	win.lk.Unlock()
-	return fmt.Appendf(nil, "%d %d %d %d %d %d terminal %d\n",
-		win.ID, tagLen, bodyLen, isDir, isDirty, width, maxtab)
+func ctlSnap(win *Window) (snap []byte) {
+	win.editor.Call(func() {
+		isDir, isDirty, maxtab := 0, 0, 4
+		if win.kind == WinDir {
+			isDir = 1
+		}
+		if win.IsDirty() {
+			isDirty = 1
+		}
+		if tv, ok := win.body.(*TextView); ok {
+			maxtab = tv.tabWidth
+		}
+		snap = fmt.Appendf(nil, "%d %d %d %d %d %d terminal %d\n",
+			win.ID, win.tag.buffer.Len(), win.body.GetBuffer().Len(), isDir, isDirty, win.w-1, maxtab)
+	})
+	return snap
 }
 
 func newWinCtlFile(win *Window, flag int) *winCtlFile {
@@ -147,15 +135,13 @@ func (f *winCtlFile) WriteString(s string) (int, error) { return f.WriteAt([]byt
 
 func newWinRdselFile(win *Window) *winRdselFile {
 	f := &winRdselFile{}
-	win.lk.Lock()
-	buf := win.body.GetBuffer()
-	if buf.selection.Active {
-		start, end := buf.selection.Ordered()
-		q0 := buf.RuneOffsetOfPos(start.y, start.x)
-		q1 := buf.RuneOffsetOfPos(end.y, end.x)
-		f.Data = []byte(string(buf.RunesInRange(q0, q1)))
-	}
-	win.lk.Unlock()
+	win.editor.Call(func() {
+		buf := win.body.GetBuffer()
+		if buf.selection.Active {
+			start, end := buf.selection.Ordered()
+			f.Data = []byte(string(buf.RunesInRange(buf.CursorToRuneOffset(start), buf.CursorToRuneOffset(end))))
+		}
+	})
 	return f
 }
 
@@ -168,14 +154,13 @@ type winRdselFile struct {
 
 func newWinWrselFile(win *Window) *winWrselFile {
 	f := &winWrselFile{win: win}
-	win.lk.Lock()
-	buf := win.body.GetBuffer()
-	if buf.selection.Active {
-		start, end := buf.selection.Ordered()
-		f.q0 = buf.RuneOffsetOfPos(start.y, start.x)
-		f.q1 = buf.RuneOffsetOfPos(end.y, end.x)
-	}
-	win.lk.Unlock()
+	win.editor.Call(func() {
+		buf := win.body.GetBuffer()
+		if buf.selection.Active {
+			start, end := buf.selection.Ordered()
+			f.q0, f.q1 = buf.CursorToRuneOffset(start), buf.CursorToRuneOffset(end)
+		}
+	})
 	return f
 }
 
@@ -191,14 +176,11 @@ func (f *winWrselFile) Close() error {
 	if f.Writes == nil {
 		return nil
 	}
-	if f.win.kind == WinTerm {
+	if _, ok := f.win.body.(*TermView); ok {
 		return nil
 	}
 	runes := []rune(string(f.Writes))
-	f.win.lk.Lock()
-	f.win.body.GetBuffer().ReplaceRangeRunes(f.q0, f.q1, runes)
-	f.win.lk.Unlock()
-	f.win.editor.Redraw()
+	f.win.editor.Call(func() { f.win.body.GetBuffer().ReplaceRangeRunes(f.q0, f.q1, runes) })
 	return nil
 }
 

@@ -914,7 +914,9 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 		input := string(runes[addr.q0:addr.q1])
 		filename := ctx.Window.GetFilename()
 		winid := ctx.Window.ID
-		out, err := runPipe(cmd.cmdc, cmd.text, input, filename, winid)
+		var out string
+		var err error
+		ctx.Editor.await(func() { out, err = runPipe(cmd.cmdc, cmd.text, input, filename, winid) })
 		if err != nil {
 			if ctx.Out != nil {
 				ctx.Out.Write([]byte(err.Error() + "\n"))

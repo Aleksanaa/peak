@@ -3,7 +3,6 @@ package main
 import (
 	"path/filepath"
 	"strings"
-	"sync"
 
 	"unicode"
 
@@ -625,7 +624,6 @@ type Window struct {
 	savedVersion  int
 	warnedVersion int
 
-	lk        sync.Mutex
 	eventSubs []*eventSub
 
 	addrQ0, addrQ1 int
@@ -656,52 +654,25 @@ func (w *Window) WalkDraw(s tcell.Screen) {
 	}
 	w.handle.color = handleColor
 
-	w.lk.Lock()
 	w.tag.Layout()
 	w.tag.Draw(s)
-	spans := append([]colorSpan(nil), w.spans...)
-	w.lk.Unlock()
-
 	w.handle.Draw(s)
 
 	if tv, ok := w.body.(*TextView); ok {
-		if len(spans) > 0 {
-			tv.colorAt = w.colorAtFunc(spans)
-		} else {
-			tv.colorAt = nil
+		tv.colorAt = nil
+		if len(w.spans) > 0 {
+			tv.colorAt = w.colorAtFunc()
 		}
 	}
 
-	w.lk.Lock()
 	w.body.Layout()
 	sb := w.bodyView.scroll
 	sb.scrollPos, sb.totalLines, sb.visibleLines = w.body.GetScroll()
 	w.bodyView.scroll.Draw(s)
 	w.body.Draw(s)
-	w.lk.Unlock()
-}
-
-func (win *Window) subscribeEvent() *eventSub {
-	sub := newEventSub()
-	win.lk.Lock()
-	win.eventSubs = append(win.eventSubs, sub)
-	win.lk.Unlock()
-	return sub
-}
-
-func (win *Window) unsubscribeEvent(sub *eventSub) {
-	win.lk.Lock()
-	for i, s := range win.eventSubs {
-		if s == sub {
-			win.eventSubs = append(win.eventSubs[:i], win.eventSubs[i+1:]...)
-			break
-		}
-	}
-	win.lk.Unlock()
 }
 
 // broadcastEvent delivers a counted event record to all open event file subscribers.
-// Caller must hold win.lk. deliver is non-blocking so holding lk is safe.
 func (win *Window) broadcastEvent(origin, typ byte, q0, q1, flag int, text string) {
 	record := wevent.Format(wevent.Event{Origin: origin, Type: typ, Q0: q0, Q1: q1, Flag: flag, Text: text})
 	for _, s := range win.eventSubs {
@@ -722,7 +693,7 @@ func adjustPoint(q, q0, q1Old, q1New int) int {
 }
 
 // adjustSpans shifts or drops color spans to stay consistent with a body
-// mutation [q0, q1Old) → [q0, q1New). Caller must hold win.lk.
+// mutation [q0, q1Old) → [q0, q1New).
 func (win *Window) adjustSpans(q0, q1Old, q1New int) {
 	if len(win.spans) == 0 {
 		return
@@ -750,8 +721,9 @@ func (win *Window) adjustSpans(q0, q1Old, q1New int) {
 	win.spans = spans[:j]
 }
 
-// colorAtFunc returns a closure that looks up a rune offset in the given spans.
-func (win *Window) colorAtFunc(spans []colorSpan) func(int) (tcell.Color, bool) {
+// colorAtFunc returns a closure that looks up a rune offset in the window's spans.
+func (win *Window) colorAtFunc() func(int) (tcell.Color, bool) {
+	spans := win.spans
 	theme := win.editor.theme
 	i := 0
 	lastOff := -1

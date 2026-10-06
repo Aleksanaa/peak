@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync/atomic"
 
 	"github.com/aleksana/peak/internal/session"
 	"github.com/aleksana/peak/peak/term"
@@ -33,7 +34,7 @@ type TermView struct {
 
 	contentHeight int
 	buffer        *Buffer
-	bufferDirty   bool
+	bufferDirty   atomic.Bool // set by the parse goroutine
 
 	cmd          string       // command used to start the terminal, for session save
 	OnCWD        func(string) // called on main goroutine with decoded absolute path; set by owner
@@ -144,7 +145,7 @@ func NewTermView(editor *Editor, sess session.Session, x, y, w, h int, onClose f
 				tv.editor.Call(tv.onClose)
 				return
 			}
-			tv.bufferDirty = true
+			tv.bufferDirty.Store(true)
 			// Layout() (called from Window.Draw on the next frame) handles
 			// contentHeight and scroll sync. Just signal a redraw.
 			tv.editor.Redraw()
@@ -394,7 +395,8 @@ func (tv *TermView) GetClickWord(mx, my int) string {
 }
 
 func (tv *TermView) GetBuffer() *Buffer {
-	if tv.bufferDirty {
+	// Clear before reading, so output parsed meanwhile marks it dirty again.
+	if tv.bufferDirty.Swap(false) {
 		cursor := tv.buffer.cursor
 		sel := tv.buffer.selection
 		tv.buffer.SetText(tv.GetScrollback())
@@ -402,7 +404,6 @@ func (tv *TermView) GetBuffer() *Buffer {
 		tv.buffer.selection = sel
 		tv.buffer.history = nil
 		tv.buffer.redoStack = nil
-		tv.bufferDirty = false
 	}
 	return tv.buffer
 }

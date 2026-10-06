@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -114,7 +115,8 @@ func (b *globalEventBus) broadcast(line string) {
 func newWinEventFile(win *Window, flag int) *winEventFile {
 	var sub *eventSub
 	if flag&os.O_WRONLY == 0 {
-		sub = win.subscribeEvent()
+		sub = newEventSub()
+		win.editor.Call(func() { win.eventSubs = append(win.eventSubs, sub) })
 	}
 	return &winEventFile{win: win, sub: sub}
 }
@@ -168,11 +170,12 @@ func (f *winEventFile) WriteString(s string) (int, error) { return f.WriteAt([]b
 
 func (f *winEventFile) Close() error {
 	if f.sub != nil {
-		f.win.unsubscribeEvent(f.sub)
+		win := f.win
+		win.editor.Call(func() {
+			win.eventSubs = slices.DeleteFunc(win.eventSubs, func(s *eventSub) bool { return s == f.sub })
+			win.spans = nil
+		})
 		f.sub.close()
-		f.win.lk.Lock()
-		f.win.spans = nil
-		f.win.lk.Unlock()
 	}
 	return nil
 }
@@ -182,9 +185,7 @@ func (f *winEventFile) Close() error {
 func newWinAddrFile(win *Window, flag int) *winAddrFile {
 	f := &winAddrFile{win: win}
 	if flag&os.O_WRONLY == 0 {
-		win.lk.Lock()
-		f.Data = fmt.Appendf(nil, "#%d,#%d\n", win.addrQ0, win.addrQ1)
-		win.lk.Unlock()
+		win.editor.Call(func() { f.Data = fmt.Appendf(nil, "#%d,#%d\n", win.addrQ0, win.addrQ1) })
 	}
 	return f
 }
@@ -199,14 +200,14 @@ func (f *winAddrFile) Close() error {
 		return nil
 	}
 	s := strings.TrimSpace(string(f.Writes))
-	f.win.lk.Lock()
-	buf := f.win.body.GetBuffer()
-	q0, q1, err := parseAddr(s, buf)
-	if err == nil {
-		f.win.addrQ0 = clampAddr(q0, buf)
-		f.win.addrQ1 = clampAddr(q1, buf)
-	}
-	f.win.lk.Unlock()
+	win := f.win
+	win.editor.Call(func() {
+		buf := win.body.GetBuffer()
+		if q0, q1, err := parseAddr(s, buf); err == nil {
+			win.addrQ0 = clampAddr(q0, buf)
+			win.addrQ1 = clampAddr(q1, buf)
+		}
+	})
 	return nil
 }
 
@@ -261,10 +262,7 @@ func clampAddr(q int, buf *Buffer) int {
 func newWinDataFile(win *Window, flag int) *winDataFile {
 	f := &winDataFile{win: win}
 	if flag&os.O_WRONLY == 0 {
-		win.lk.Lock()
-		runes := win.body.GetBuffer().RunesInRange(win.addrQ0, win.addrQ1)
-		f.Data = []byte(string(runes))
-		win.lk.Unlock()
+		win.editor.Call(func() { f.Data = []byte(string(win.body.GetBuffer().RunesInRange(win.addrQ0, win.addrQ1))) })
 	}
 	return f
 }
@@ -278,16 +276,15 @@ func (f *winDataFile) Close() error {
 	if f.Writes == nil {
 		return nil
 	}
-	if f.win.kind == WinTerm {
+	win := f.win
+	if _, ok := win.body.(*TermView); ok {
 		return nil
 	}
 	runes := []rune(string(f.Writes))
-	f.win.lk.Lock()
-	buf := f.win.body.GetBuffer()
-	buf.ReplaceRangeRunes(f.win.addrQ0, f.win.addrQ1, runes)
-	f.win.addrQ1 = f.win.addrQ0 + len(runes)
-	f.win.lk.Unlock()
-	f.win.editor.Redraw()
+	win.editor.Call(func() {
+		win.body.GetBuffer().ReplaceRangeRunes(win.addrQ0, win.addrQ1, runes)
+		win.addrQ1 = win.addrQ0 + len(runes)
+	})
 	return nil
 }
 
@@ -329,10 +326,7 @@ func (f *winColorFile) Close() error {
 		newSpans = append(newSpans, colorSpan{q0, q1, parts[2]})
 	}
 	sort.SliceStable(newSpans, func(i, j int) bool { return newSpans[i].q0 < newSpans[j].q0 })
-	f.win.lk.Lock()
-	f.win.spans = newSpans
-	f.win.lk.Unlock()
-	f.win.editor.Redraw()
+	f.win.editor.Call(func() { f.win.spans = newSpans })
 	return nil
 }
 

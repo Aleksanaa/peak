@@ -91,6 +91,25 @@ func (e *Editor) Call(f func()) {
 	<-done
 }
 
+// await runs fn on another goroutine and serves Calls until it returns. The
+// main goroutine waits this way on work that may itself need the main
+// goroutine, such as a shell command reading peak's files over 9P.
+func (e *Editor) await(fn func()) {
+	done := make(chan struct{})
+	go func() {
+		fn()
+		close(done)
+	}()
+	for {
+		select {
+		case <-done:
+			return
+		case f := <-e.callCh:
+			f()
+		}
+	}
+}
+
 // Init sets up the initial editor state with the specified number of columns.
 func (e *Editor) Init(numCols int, args []string, sessionFile string) {
 	user, _ := os.UserHomeDir()
@@ -187,9 +206,6 @@ func (e *Editor) Run() {
 
 		select {
 		case ev := <-events:
-			if timer != nil {
-				timer.Stop()
-			}
 			if ev == nil {
 				return
 			}
@@ -199,15 +215,10 @@ func (e *Editor) Run() {
 				e.Draw()
 			}
 		case fn := <-e.callCh:
-			if timer != nil {
-				timer.Stop()
-			}
 			fn()
-			e.Draw()
+			// Coalesce: a burst of calls (e.g. 9P traffic) costs one Draw.
+			e.Redraw()
 		case <-e.redrawCh:
-			if timer != nil {
-				timer.Stop()
-			}
 			e.Draw()
 		case <-tick:
 			if e.scrollWin != nil && time.Since(e.scrollStartTime) > 200*time.Millisecond {
@@ -220,6 +231,9 @@ func (e *Editor) Run() {
 				}
 				e.Draw()
 			}
+		}
+		if timer != nil {
+			timer.Stop()
 		}
 	}
 }
@@ -273,15 +287,7 @@ func (e *Editor) HandleEvent(ev tcell.Event) (bool, bool) {
 				return e.Execute(nil, nil, "Look"), true
 			}
 		}
-		win := e.windowOf(e.focusedView)
-		if win != nil {
-			win.lk.Lock()
-		}
-		quit := e.focusedView.HandleEvent(ev)
-		if win != nil {
-			win.lk.Unlock()
-		}
-		return quit, true
+		return e.focusedView.HandleEvent(ev), true
 	case *tcell.EventMouse:
 		return e.handleMouse(ev), true
 	case *tcell.EventResize:
@@ -291,17 +297,6 @@ func (e *Editor) HandleEvent(ev tcell.Event) (bool, bool) {
 		return false, true
 	}
 	return false, true
-}
-
-// windowOf returns the Window that owns view v, or nil for the global tag.
-func (e *Editor) windowOf(v View) *Window {
-	var found *Window
-	e.Walk(func(d DrawNode) {
-		if w, ok := d.(*Window); ok && (w.body == v || w.tag == v) {
-			found = w
-		}
-	})
-	return found
 }
 
 func (e *Editor) ActivateWindow(win *Window) {

@@ -37,15 +37,6 @@ func (n *TreeNode) WalkDraw(s tcell.Screen) {
 	}
 }
 
-func (n *TreeNode) Walk(fn func(DrawNode)) {
-	for _, c := range n.children {
-		fn(c)
-		if p, ok := c.(interface{ Walk(func(DrawNode)) }); ok {
-			p.Walk(fn)
-		}
-	}
-}
-
 func distribute(children []DrawNode, total int, lastTotal int) []int {
 	heights := make([]int, len(children))
 	totalExplicit, numAuto := 0, 0

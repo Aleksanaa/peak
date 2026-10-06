@@ -270,7 +270,6 @@ func (e *Editor) clickWindow(ev *tcell.EventMouse, t mouseTarget, mx, my int, bu
 		e.dragView = e.focusedView
 	}
 
-	win.lk.Lock()
 	target.HandleEvent(ev)
 	var word string
 	if buttons&(tcell.ButtonMiddle|tcell.ButtonSecondary) != 0 && (!target.IsRaw() || ev.Modifiers()&tcell.ModCtrl != 0) {
@@ -283,7 +282,6 @@ func (e *Editor) clickWindow(ev *tcell.EventMouse, t mouseTarget, mx, my int, bu
 			}
 		}
 	}
-	win.lk.Unlock()
 
 	if word == "" {
 		return false
@@ -306,10 +304,6 @@ func (e *Editor) fireChord(middle bool) {
 	win := g.anchorWin
 	g.chorded = true
 
-	if win != nil {
-		win.lk.Lock()
-		defer win.lk.Unlock()
-	}
 	switch v := g.anchorView.(type) {
 	case *TermView:
 		if middle {
