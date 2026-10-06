@@ -404,7 +404,7 @@ func (tv *TermView) GetSelectedText() string {
 	return GetTextInSelection(b, b.selection, true)
 }
 
-func (tv *TermView) HandleEvent(ev tcell.Event) bool {
+func (tv *TermView) HandleEvent(ev tcell.Event) {
 	tv.state.Lock()
 	closed := tv.closed
 	isMouseMode := tv.state.Mode(terminal.ModeMouseMask)
@@ -413,7 +413,7 @@ func (tv *TermView) HandleEvent(ev tcell.Event) bool {
 	tv.state.Unlock()
 
 	if closed {
-		return false
+		return
 	}
 
 	switch e := ev.(type) {
@@ -429,35 +429,34 @@ func (tv *TermView) HandleEvent(ev tcell.Event) bool {
 				switch e.Str() {
 				case "c", "C", "x", "X":
 					tv.Snarf()
-					return false
+					return
 				case "v", "V":
 					tv.Paste()
-					return false
+					return
 				case "f", "F":
 					if tv.GetSelectedText() != "" {
 						tv.editor.Execute(nil, nil, "Look")
 					}
-					return false
+					return
 				}
 			}
 
 			switch key {
 			case tcell.KeyEsc:
 				tv.buffer.selection.Active = false
-				return false
+				return
 			case tcell.KeyPgUp:
 				tv.Scroll(-tv.h)
-				return false
+				return
 			case tcell.KeyPgDn:
 				tv.Scroll(tv.h)
-				return false
+				return
 			}
 		}
 		if !tv.onCWDStarted {
 			tv.OnCWD = nil
 		}
 		tv.session.Write([]byte(keyToEscSeq(e)))
-		return false
 	case *tcell.EventMouse:
 		rx, ry := e.Position()
 		realRY := ry + tv.scroll.Pos
@@ -491,7 +490,7 @@ func (tv *TermView) HandleEvent(ev tcell.Event) bool {
 				tv.Scroll(dir)
 			}
 			tv.lastMX, tv.lastMY, tv.lastButtons = rx, ry, buttons
-			return false
+			return
 		}
 
 		if isMouseMode && !ctrlPressed && !tv.selecting {
@@ -542,7 +541,6 @@ func (tv *TermView) HandleEvent(ev tcell.Event) bool {
 
 		tv.lastMX, tv.lastMY, tv.lastButtons = rx, ry, buttons
 	}
-	return false
 }
 
 // sgrButton maps a mouse-button mask to its SGR/X10 report code (primary 0,

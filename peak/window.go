@@ -39,7 +39,7 @@ type View interface {
 	Draw(canvas)
 	ShowCursor(canvas)
 	Resize(w, h int)
-	HandleEvent(tcell.Event) bool
+	HandleEvent(tcell.Event)
 	PosAt(x, y int) Cursor // the buffer position shown at (x, y)
 
 	GetSelectedText() string
@@ -313,7 +313,7 @@ func (tv *TextView) prepareTyping() bool {
 	return false
 }
 
-func (tv *TextView) HandleEvent(ev tcell.Event) bool {
+func (tv *TextView) HandleEvent(ev tcell.Event) {
 	switch ev := ev.(type) {
 	case *tcell.EventKey:
 		switch ev.Key() {
@@ -451,7 +451,6 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 			tv.scroll.Pos = vrow - tv.h + 1
 		}
 		tv.scroll.Clamp(len(tv.layout), tv.h)
-		return false
 	case *tcell.EventMouse:
 		buttons := ev.Buttons()
 		if buttons != tcell.ButtonNone {
@@ -460,11 +459,11 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 		if tv.scrollable {
 			if buttons&tcell.WheelUp != 0 {
 				tv.Scroll(-1)
-				return false
+				return
 			}
 			if buttons&tcell.WheelDown != 0 {
 				tv.Scroll(1)
-				return false
+				return
 			}
 		}
 		mx, my := ev.Position()
@@ -490,7 +489,6 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 			}
 		}
 	}
-	return false
 }
 
 func (tv *TextView) AdvanceDragCursor(dir int) {

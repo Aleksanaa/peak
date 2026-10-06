@@ -254,7 +254,8 @@ func (e *Editor) HandleEvent(ev tcell.Event) (bool, bool) {
 				return e.Execute(nil, nil, "Look"), true
 			}
 		}
-		return e.focusedView.HandleEvent(ev), true
+		e.focusedView.HandleEvent(ev)
+		return false, true
 	case *tcell.EventMouse:
 		return e.handleMouse(ev), true
 	case *tcell.EventResize:

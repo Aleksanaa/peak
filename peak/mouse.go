@@ -290,7 +290,8 @@ func (e *Editor) clickTag(ev *tcell.EventMouse, tag View, col *Column, buttons t
 	if buttons == tcell.ButtonPrimary {
 		e.focusedView = tag
 	}
-	return tag.HandleEvent(ev)
+	tag.HandleEvent(ev)
+	return false
 }
 
 // scrollBar scrolls win's body with its scroll bar until release, top being
