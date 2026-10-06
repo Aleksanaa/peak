@@ -369,6 +369,53 @@ func TestUnmountRemovesBindEntry(t *testing.T) {
 	}
 }
 
+func TestUnmountRemovesMountEntry(t *testing.T) {
+	e, _, nsFs, _ := setupExecFsTest(t)
+	serverF, err := nsFs.OpenFile("srv/unmount-mount-srv", os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("OpenFile(srv): %v", err)
+	}
+	go vfs.NewNinePSrv(afero.NewMemMapFs()).ServeConn(serverF)
+
+	// The destination doesn't exist until mounted, so it is recorded without a
+	// trailing slash but normalized with one when unmounting.
+	dst := "/peak/execfs-test-unmount-mount"
+	writeControl(t, nsFs, "mount", "/peak/srv/unmount-mount-srv "+dst+"\n")
+	if !strings.Contains(e.ninep.ListMounts(), dst) {
+		t.Fatalf("pre-condition: mount entry missing before unmount")
+	}
+
+	writeControl(t, nsFs, "unmount", dst+"\n")
+
+	if listing := e.ninep.ListMounts(); strings.Contains(listing, dst) {
+		t.Errorf("mount entry still listed after unmount: %q", listing)
+	}
+}
+
+// The Bind command and a write to /bind must leave the same listing behind.
+func TestBindCommandListedLikeBindFile(t *testing.T) {
+	e, _, nsFs, _ := setupExecFsTest(t)
+	readBinds := func() string {
+		f, err := nsFs.OpenFile("bind", os.O_RDONLY, 0)
+		if err != nil {
+			t.Fatalf("open bind: %v", err)
+		}
+		defer f.Close()
+		data, _ := io.ReadAll(f)
+		return string(data)
+	}
+
+	src := t.TempDir()
+	writeControl(t, nsFs, "bind", src+" /peak/execfs-test-bind-file\n")
+	fromFile := readBinds()
+
+	e.ninep.Umount("/peak/execfs-test-bind-file")
+	e.Execute(nil, nil, "Bind "+src+" /peak/execfs-test-bind-file")
+	if fromCmd := readBinds(); fromCmd != fromFile {
+		t.Errorf("listing after Bind command = %q, want %q (as after writing /bind)", fromCmd, fromFile)
+	}
+}
+
 func TestUnmountFileBlankWriteNoop(t *testing.T) {
 	_, _, nsFs, _ := setupExecFsTest(t)
 	f, err := nsFs.OpenFile("unmount", os.O_WRONLY, 0)

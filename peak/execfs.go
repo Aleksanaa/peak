@@ -142,7 +142,6 @@ func (f *mountFile) WriteAt(p []byte, _ int64) (int, error) {
 	if f.conn != nil {
 		f.conn.RegisterCleanup(func() { f.editor.ninep.Umount(mountedPath) })
 	}
-	f.editor.ninep.record(&f.editor.ninep.mounts, parts[0], mountedPath)
 	return len(p), nil
 }
 
@@ -185,7 +184,6 @@ func (f *bindFile) WriteAt(p []byte, _ int64) (int, error) {
 	if err := f.editor.ninep.Bind(parts[0], parts[1]); err != nil {
 		return 0, err
 	}
-	f.editor.ninep.record(&f.editor.ninep.binds, normalizePath(parts[0], ""), normalizePath(parts[1], ""))
 	return len(p), nil
 }
 

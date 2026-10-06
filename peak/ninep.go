@@ -99,31 +99,23 @@ func (p *NineP) BroadcastPut(win *Window) {
 	p.bus.broadcast(fmt.Sprintf("put %d %s\n", win.ID, win.GetFilename()))
 }
 
-// Mount attaches a 9P server to path in the VFS. Returns the resolved source
-// Mount attaches a 9P server to path in the VFS. If socket can be opened as a
-// file in peak's own VFS it is treated as a virtual socket; otherwise it is
-// dialled as a Unix socket. Returns the resolved destination path. Callers
-// that want the mount to appear in /mount should record it themselves via
-// record().
+// Mount attaches a 9P server to path in the VFS and records it in /mount. If
+// socket can be opened as a file in peak's own VFS it is treated as a virtual
+// socket; otherwise it is dialled as a Unix socket. Returns the resolved
+// destination path.
 func (p *NineP) Mount(socket, path string) (string, error) {
+	var clientFs afero.Fs
 	if f, err := p.vfs.OpenFile(socket, os.O_RDONLY, 0); err == nil {
-		mountPath := normalizePath(path, "")
-		clientFs, err := vfs.NewNinePClientFsFromConn(f)
-		if err != nil {
+		if clientFs, err = vfs.NewNinePClientFsFromConn(f); err != nil {
 			f.Close()
 			return "", err
 		}
-		p.vfs.Mount(mountPath, clientFs)
-		return mountPath, nil
-	}
-	// Not in the VFS — dial as a real Unix socket.
-	socket = normalizePath(socket, "")
-	path = normalizePath(path, "")
-	clientFs, err := vfs.NewNinePClientFs("unix", socket)
-	if err != nil {
+	} else if clientFs, err = vfs.NewNinePClientFs("unix", normalizePath(socket, "")); err != nil {
 		return "", err
 	}
+	path = normalizePath(path, "")
 	p.vfs.Mount(path, clientFs)
+	p.record(&p.mounts, socket, path)
 	return path, nil
 }
 
@@ -136,13 +128,16 @@ func (p *NineP) Umount(path string) {
 	p.mountMu.Unlock()
 }
 
-// Bind overlays a source path onto dest in the VFS. The source may be any
-// path reachable through the composite VFS (internal or external). Callers
-// that want the bind to appear in /bind should record it via record().
+// Bind overlays a source path onto dest in the VFS and records it in /bind.
+// The source may be any path reachable through the composite VFS (internal
+// or external).
 func (p *NineP) Bind(src, dest string) error {
 	src = normalizePath(src, "")
 	dest = normalizePath(dest, "")
 	p.vfs.Mount(dest, afero.NewBasePathFs(p.vfs, src))
+	// Normalize again now that dest exists, so /bind lists it as a directory
+	// (with a trailing slash), as it always has.
+	p.record(&p.binds, normalizePath(src, ""), normalizePath(dest, ""))
 	return nil
 }
 
@@ -152,10 +147,14 @@ func (p *NineP) record(table *[]mountEntry, src, dst string) {
 	p.mountMu.Unlock()
 }
 
+// removeByDst drops the entries mounted at dst. Paths are compared cleaned:
+// normalizePath adds a trailing slash only once a path exists in the VFS, so
+// the same destination is spelled differently before and after mounting.
 func removeByDst(entries []mountEntry, dst string) []mountEntry {
+	dst = filepath.Clean(dst)
 	out := entries[:0]
 	for _, e := range entries {
-		if e.dst != dst {
+		if filepath.Clean(e.dst) != dst {
 			out = append(out, e)
 		}
 	}
