@@ -29,7 +29,6 @@ type TermView struct {
 	lastMY      int
 	lastButtons tcell.ButtonMask
 
-	selection Selection
 	selecting bool
 
 	contentHeight int
@@ -208,7 +207,7 @@ func (tv *TermView) Draw(s tcell.Screen) {
 				style = style.Blink(true)
 			}
 
-			if tv.selection.Contains(x, screenY, false) {
+			if tv.buffer.selection.Contains(x, screenY, false) {
 				style = style.Background(tv.editor.theme.SelectionBG).
 					Foreground(tv.editor.theme.SelectionFG)
 			}
@@ -329,7 +328,7 @@ func (tv *TermView) AdvanceDragCursor(dir int) {
 	if !tv.selecting {
 		return
 	}
-	tv.selection.End.y += dir
+	tv.buffer.selection.End.y += dir
 }
 
 func (tv *TermView) GetScroll() (scroll, total, visible int) {
@@ -345,12 +344,12 @@ func (tv *TermView) GetScroll() (scroll, total, visible int) {
 
 func (tv *TermView) Search(word string) int {
 	start := Cursor{0, 0}
-	if tv.selection.Active {
-		start = tv.selection.End
+	if tv.buffer.selection.Active {
+		start = tv.buffer.selection.End
 	}
 	line, sel, ok := Search(tv.GetBuffer(), word, start)
 	if ok {
-		tv.selection = sel
+		tv.buffer.selection = sel
 		return line
 	}
 	return -1
@@ -369,8 +368,8 @@ func (tv *TermView) GetClickWord(mx, my int) string {
 	rx, ry := mx-tv.x, my-tv.y
 	realRY := ry + tv.scroll.Pos
 
-	if tv.selection.Contains(rx, realRY, true) {
-		return GetTextInSelection(tv.GetBuffer(), tv.selection, true)
+	if tv.buffer.selection.Contains(rx, realRY, true) {
+		return tv.GetSelectedText()
 	}
 
 	limit := max(maxHistory, tv.h)
@@ -435,7 +434,8 @@ func (tv *TermView) GetScrollback() string {
 }
 
 func (tv *TermView) GetSelectedText() string {
-	return GetTextInSelection(tv.GetBuffer(), tv.selection, true)
+	b := tv.GetBuffer()
+	return GetTextInSelection(b, b.selection, true)
 }
 
 func (tv *TermView) HandleEvent(ev tcell.Event) bool {
@@ -477,9 +477,7 @@ func (tv *TermView) HandleEvent(ev tcell.Event) bool {
 
 			switch key {
 			case tcell.KeyEsc:
-				tv.state.Lock()
-				tv.selection.Active = false
-				tv.state.Unlock()
+				tv.buffer.selection.Active = false
 				return false
 			case tcell.KeyPgUp:
 				tv.Scroll(-tv.h)
@@ -560,19 +558,19 @@ func (tv *TermView) HandleEvent(ev tcell.Event) bool {
 			}
 
 			if buttons&tcell.ButtonPrimary != 0 {
-				tv.selection.Active = false
+				tv.buffer.selection.Active = false
 			}
 		} else {
 			if buttons&tcell.ButtonPrimary != 0 {
 				if !tv.selecting {
 					tv.selecting = true
-					tv.selection = Selection{Start: Cursor{rx, realRY}, End: Cursor{rx + 1, realRY}, Active: true}
+					tv.buffer.selection = Selection{Start: Cursor{rx, realRY}, End: Cursor{rx + 1, realRY}, Active: true}
 				}
-				tv.selection.End = Cursor{rx + 1, realRY}
+				tv.buffer.selection.End = Cursor{rx + 1, realRY}
 			} else if tv.selecting {
 				tv.selecting = false
-				if tv.selection.Start.y == tv.selection.End.y && tv.selection.End.x-tv.selection.Start.x <= 1 {
-					tv.selection.Active = false
+				if tv.buffer.selection.Start.y == tv.buffer.selection.End.y && tv.buffer.selection.End.x-tv.buffer.selection.Start.x <= 1 {
+					tv.buffer.selection.Active = false
 				}
 			}
 		}

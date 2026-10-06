@@ -3,6 +3,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -10,6 +11,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/gdamore/tcell/v3"
 )
 
 // Deleting a terminal window must end its child process, and the child must be
@@ -51,5 +54,53 @@ func TestRemoveTermWindowEndsProcess(t *testing.T) {
 			t.Fatalf("terminal child %d still exists after its window was removed", pid)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// A mouse selection in a terminal is the one every path sees: the chord path,
+// the Snarf/Cut commands (through the buffer) and /peak/<id>/rdsel. Selecting
+// past the end of the text must stop at the end of that line.
+func TestTermSelectionSeenByBufferPaths(t *testing.T) {
+	e, _, _ := setupMouseChordWindow(t)
+	col := e.columns[0]
+	termWin, err := col.AddTermWindow(" /tmp/-sh Zerox Del ", "printf 'hello world\\nsecond'; exec sleep 30", "/tmp")
+	if err != nil {
+		t.Skipf("cannot create term window: %v", err)
+	}
+	defer e.RemoveWindow(termWin)
+	col.Resize(col.x, col.y, col.w, col.h)
+	tv := termWin.body.(*TermView)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		tv.Layout()
+		if strings.Contains(tv.GetScrollback(), "second") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("terminal output never arrived: %q", tv.GetScrollback())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Drag across the first line and well past its end.
+	tv.HandleEvent(tcell.NewEventMouse(tv.x, tv.y, tcell.ButtonPrimary, 0))
+	tv.HandleEvent(tcell.NewEventMouse(tv.x+20, tv.y, tcell.ButtonPrimary, 0))
+	tv.HandleEvent(tcell.NewEventMouse(tv.x+20, tv.y, tcell.ButtonNone, 0))
+
+	const want = "hello world"
+	if got := tv.GetSelectedText(); got != want {
+		t.Errorf("GetSelectedText = %q, want %q", got, want)
+	}
+	if got := tv.GetBuffer().GetSelectedText(); got != want {
+		t.Errorf("buffer selection (Snarf/Cut commands) = %q, want %q", got, want)
+	}
+	f, err := newWindowFs(termWin).OpenFile("rdsel", os.O_RDONLY, 0)
+	if err != nil {
+		t.Fatalf("open rdsel: %v", err)
+	}
+	defer f.Close()
+	if data, _ := io.ReadAll(f); string(data) != want {
+		t.Errorf("rdsel = %q, want %q", data, want)
 	}
 }

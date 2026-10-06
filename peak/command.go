@@ -657,11 +657,6 @@ func (e *Editor) cmdEdit(col *Column, win *Window, cmd string) {
 		buf.cursor = end
 	}
 
-	if target.kind == WinTerm {
-		tv := target.body.(*TermView)
-		tv.selection = buf.selection
-	}
-
 	if pOut.Len() > 0 {
 		e.showError(col, target, "", pOut.String())
 	}

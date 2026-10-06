@@ -168,7 +168,9 @@ func (b *Buffer) ensureLSR() {
 	b.lsrunsVer = b.version
 }
 
-// RuneOffsetOfPos returns the rune offset in the buffer's flat text for position (line, col).
+// RuneOffsetOfPos returns the rune offset in the buffer's flat text for position
+// (line, col). A col past the end of its line means the end of that line (a
+// terminal selection can extend into blank cells past the text).
 func (b *Buffer) RuneOffsetOfPos(line, col int) int {
 	b.ensureLSR()
 	if line < 0 {
@@ -178,7 +180,7 @@ func (b *Buffer) RuneOffsetOfPos(line, col int) int {
 		line = len(b.lsruns) - 1
 		col = len(b.lines[line])
 	}
-	return b.lsruns[line] + col
+	return b.lsruns[line] + min(col, len(b.lines[line]))
 }
 
 func (b *Buffer) SetText(content string) {
