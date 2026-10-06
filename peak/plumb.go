@@ -26,16 +26,6 @@ func OpenExternal(path string) error {
 	return exec.Command(cmdName, path).Start()
 }
 
-// GetWordAt returns the word under the given x, y buffer coordinates.
-func (b *Buffer) GetWordAt(x, y int) string {
-	if y < 0 || y >= len(b.lines) {
-		return ""
-	}
-	line := b.lines[y]
-	start, end := GetWordBoundaries(x, len(line), func(i int) rune { return line[i] })
-	return string(line[start:end])
-}
-
 // Plumb attempts to handle a string (path or search).
 func (e *Editor) Plumb(win *Window, word string) bool {
 	word = strings.TrimSpace(word)

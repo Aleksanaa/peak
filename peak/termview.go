@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/aleksana/peak/internal/quote"
 	"github.com/aleksana/peak/internal/session"
 	terminal "github.com/aleksana/peak/peak/term"
 	"github.com/atotto/clipboard"
@@ -354,33 +353,10 @@ func (tv *TermView) ShowLineAt(lineNum int) {
 	tv.scroll.Clamp(total, visible)
 }
 
-func (tv *TermView) GetClickWord(rx, ry int) string {
-	realRY := ry + tv.scroll.Pos
-
-	if tv.buffer.selection.Contains(rx, realRY, true) {
-		return quote.Unquote(tv.GetSelectedText())
-	}
-
-	limit := max(maxHistory, tv.h)
-	if realRY < 0 || realRY >= limit {
-		return ""
-	}
-
-	tv.state.Lock()
-	start, end := GetWordBoundaries(rx, tv.w, func(x int) rune {
-		c, _, _, _ := tv.state.Cell(x, realRY)
-		return c
-	})
-	var sb strings.Builder
-	for x := start; x < end; x++ {
-		c, _, _, _ := tv.state.Cell(x, realRY)
-		if c != 0 {
-			sb.WriteRune(c)
-		}
-	}
-	tv.state.Unlock()
-	// Quoted text stands for its contents, as if they were selected.
-	return quote.Unquote(strings.TrimSpace(sb.String()))
+// PosAt returns the position of the cell at (x, y) in the scrollback buffer,
+// where a line has a rune for each cell.
+func (tv *TermView) PosAt(x, y int) Cursor {
+	return Cursor{x, y + tv.scroll.Pos}
 }
 
 func (tv *TermView) GetBuffer() *Buffer {

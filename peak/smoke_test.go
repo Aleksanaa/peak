@@ -2181,3 +2181,24 @@ func TestColumnGutterAllButtonsStartDrag(t *testing.T) {
 		})
 	}
 }
+
+// A tag whose text no longer fits on one line grows, and the body moves down
+// to make room.
+func TestTagGrowsWithItsText(t *testing.T) {
+	e, _ := setupTest(t, 30, 20)
+	col := NewColumn(0, 1, 30, 19, e)
+	e.columns = append(e.columns, col)
+	win := col.AddWindow(" /tmp/a Del ", "body")
+	e.resize()
+	if win.tag.h != 1 {
+		t.Fatalf("tag height = %d, want 1", win.tag.h)
+	}
+
+	win.tag.buffer.SetText(" /tmp/a Del Get Put Undo Redo Snarf Zerox ")
+	if win.tag.h != 2 {
+		t.Fatalf("tag height after it outgrew one line = %d, want 2", win.tag.h)
+	}
+	if _, _, visible := win.body.GetScroll(); visible != win.h-2 {
+		t.Errorf("body height = %d, want %d", visible, win.h-2)
+	}
+}

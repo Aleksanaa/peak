@@ -278,7 +278,7 @@ func (e *Editor) dragColumn(col *Column) {
 // clickTag handles a primary/middle/secondary click on the global tag (col nil)
 // or a column tag. It executes/plumbs a clicked word or starts a tag selection.
 func (e *Editor) clickTag(ev *tcell.EventMouse, tag View, col *Column, buttons tcell.ButtonMask) bool {
-	word := tag.GetClickWord(ev.Position())
+	_, _, word := clickRange(tag.GetBuffer(), tag.PosAt(ev.Position()))
 	if word != "" {
 		if buttons == tcell.ButtonMiddle {
 			return e.Execute(col, nil, word)
@@ -349,8 +349,8 @@ func (e *Editor) clickWindow(ev *tcell.EventMouse, t mouseTarget, buttons tcell.
 	target.HandleEvent(ev)
 	var word string
 	if buttons&(tcell.ButtonMiddle|tcell.ButtonSecondary) != 0 && (!target.IsRaw() || ev.Modifiers()&tcell.ModCtrl != 0) {
-		if word = target.GetClickWord(t.x, t.y); word != "" {
-			q0, q1 := win.clickWordOffsets(target, t.x, t.y, word)
+		var q0, q1 int
+		if q0, q1, word = clickRange(target.GetBuffer(), target.PosAt(t.x, t.y)); word != "" {
 			if buttons&tcell.ButtonMiddle != 0 {
 				win.broadcastEvent('M', 'x', q0, q1, 0, word)
 			} else {

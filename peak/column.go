@@ -183,7 +183,7 @@ func (c *Column) GrowModerate(win *Window) {
 		return
 	}
 	idx := slices.Index(c.windows, win)
-	bodyH := win.h - win.tagHeight()
+	bodyH := win.h - win.tag.h
 	target := min(win.h+max(min(5, win.h), bodyH/2), c.h-1)
 	needed := target - win.h
 	if needed <= 0 {
@@ -282,12 +282,12 @@ func (c *Column) moveWindow(win *Window, y, origH int) {
 	}
 	prev := wins[idx-1]
 	combinedH := prev.h + win.h
-	if y < prev.y+prev.tagHeight() {
+	if y < prev.y+prev.tag.h {
 		wins[idx], wins[idx-1] = wins[idx-1], wins[idx]
 		wins[idx-1].explicitHeight = origH
 		wins[idx].explicitHeight = combinedH - origH
 	} else {
-		newH := max(prev.tagHeight(), min(combinedH-win.tagHeight(), y-prev.y))
+		newH := max(prev.tag.h, min(combinedH-win.tag.h, y-prev.y))
 		if newH == prev.explicitHeight {
 			return
 		}

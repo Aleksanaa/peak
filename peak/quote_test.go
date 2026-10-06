@@ -51,7 +51,7 @@ func TestPlumbQuotedNameFromListing(t *testing.T) {
 	col.Resize(col.rect)
 
 	tv := win.bodyTextView()
-	word := tv.GetClickWord(5, 0) // inside the quoted name
+	_, _, word := clickRange(tv.buffer, tv.PosAt(5, 0)) // inside the quoted name
 	if word != "my file.txt" {
 		t.Fatalf("click word = %q", word)
 	}
@@ -164,5 +164,35 @@ func TestCommandArguments(t *testing.T) {
 	}
 	if got := e.argFields(nil, "Mount `/srv/a b` /mnt"); !reflect.DeepEqual(got, []string{"/srv/a b", "/mnt"}) {
 		t.Errorf("argFields = %q", got)
+	}
+}
+
+// A click stands for one range, and the text it reports is that range's.
+func TestClickRange(t *testing.T) {
+	tests := []struct {
+		name   string
+		text   string
+		sel    [2]int // rune offsets of the selection, if any
+		at     int    // the column clicked
+		q0, q1 int
+		want   string
+	}{
+		{"word", "run foo bar", [2]int{}, 9, 8, 11, "bar"},
+		{"in the selection", "run foo bar here", [2]int{4, 11}, 9, 4, 11, "foo bar"},
+		{"blank, with a selection", "run foo  bar", [2]int{0, 3}, 8, 0, 3, "run"},
+		{"selection trimmed", "a  foo  b", [2]int{1, 8}, 4, 3, 6, "foo"},
+		{"quoted", "run `Tab 7` x", [2]int{}, 6, 5, 10, "Tab 7"},
+		{"selected quote", "run `Tab 7` x", [2]int{4, 11}, 6, 5, 10, "Tab 7"},
+		{"doubled backtick", "x a``b y", [2]int{}, 2, 2, 6, "a`b"},
+	}
+	for _, tt := range tests {
+		b := NewBuffer(tt.text)
+		if tt.sel[0] != tt.sel[1] {
+			b.SetSelection(b.RuneOffsetToCursor(tt.sel[0]), b.RuneOffsetToCursor(tt.sel[1]))
+		}
+		q0, q1, text := clickRange(b, Cursor{tt.at, 0})
+		if q0 != tt.q0 || q1 != tt.q1 || text != tt.want {
+			t.Errorf("%s: clickRange = [%d, %d) %q, want [%d, %d) %q", tt.name, q0, q1, text, tt.q0, tt.q1, tt.want)
+		}
 	}
 }

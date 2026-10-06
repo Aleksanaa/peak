@@ -76,18 +76,41 @@ func IsWordChar(r rune) bool {
 	return r != 0 && !unicode.IsSpace(r)
 }
 
-// GetWordBoundaries returns the bounds [start, end) of the word around x. A word
-// is a field (see package quote), so a backtick-quoted name is one word.
-func GetWordBoundaries(x int, length int, getChar func(int) rune) (int, int) {
-	if x < 0 || x >= length {
-		return x, x
-	}
-	return quote.FieldAt(x, length, func(i int) rune {
-		if r := getChar(i); r != 0 {
-			return r
+// clickRange returns what a click at p in b stands for, as the rune offsets
+// [q0, q1) of b and their text. A click in the selection takes the
+// selection; so does a click on blank space, since we cannot set the mouse
+// cursor position like acme. Otherwise it takes the word at p: a field (see
+// package quote), so a backtick-quoted name is one word. Quoted text stands
+// for its contents, as if they were selected: the range is inside the
+// backticks and the text is unquoted.
+func clickRange(b *Buffer, p Cursor) (q0, q1 int, text string) {
+	start, end := p, p
+	if p.y >= 0 && p.y < len(b.lines) {
+		if line := b.lines[p.y]; p.x >= 0 && p.x < len(line) {
+			s, e := quote.FieldAt(p.x, len(line), func(i int) rune { return line[i] })
+			start, end = Cursor{s, p.y}, Cursor{e, p.y}
 		}
-		return ' ' // an empty terminal cell
-	})
+	}
+	if strings.TrimSpace(b.GetSelectedText()) != "" && (b.selection.Contains(p.x, p.y, false) || start == end) {
+		start, end = b.selection.Ordered()
+	}
+
+	q0, q1 = b.RuneOffsetOfPos(start.y, start.x), b.RuneOffsetOfPos(end.y, end.x)
+	r := b.RunesInRange(q0, q1)
+	for len(r) > 0 && unicode.IsSpace(r[0]) {
+		r, q0 = r[1:], q0+1
+	}
+	for len(r) > 0 && unicode.IsSpace(r[len(r)-1]) {
+		r, q1 = r[:len(r)-1], q1-1
+	}
+	text = string(r)
+	if f := quote.Unquote(text); f != text {
+		if strings.ContainsFunc(f, unicode.IsSpace) { // Quote wrapped it in backticks
+			q0, q1 = q0+1, q1-1
+		}
+		text = f
+	}
+	return q0, q1, text
 }
 
 // Search performs a two-pass search (forward from start, then wrap around).

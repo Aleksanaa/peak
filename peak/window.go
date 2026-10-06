@@ -29,7 +29,7 @@ type VisualLine struct {
 }
 
 // A View is a tag or body. It knows only its own size: positions it is given,
-// in mouse events and GetClickWord, are in its own coordinates, and it draws
+// in mouse events and PosAt, are in its own coordinates, and it draws
 // on a canvas of its own.
 type View interface {
 	// Layout computes visual-line wrapping and synchronises scroll position.
@@ -40,7 +40,7 @@ type View interface {
 	ShowCursor(canvas)
 	Resize(w, h int)
 	HandleEvent(tcell.Event) bool
-	GetClickWord(x, y int) string
+	PosAt(x, y int) Cursor // the buffer position shown at (x, y)
 
 	GetSelectedText() string
 	GetBuffer() *Buffer
@@ -267,22 +267,21 @@ func (tv *TextView) Draw(cv canvas) {
 	cv.fill(rect{0, vrow, tv.w, tv.h - vrow}, tv.colors.style())
 }
 
-func (tv *TextView) GetClickWord(x, y int) string {
+func (tv *TextView) PosAt(x, y int) Cursor {
 	bx, by := tv.visualToBuffer(x, y+tv.scroll.Pos)
-	sel := strings.TrimSpace(tv.buffer.GetSelectedText())
-	word := strings.TrimSpace(tv.buffer.GetWordAt(bx, by))
-	// A click in the selection takes the selection; so does a click on blank
-	// space, since we cannot set the mouse cursor position like acme.
-	if sel != "" && (tv.buffer.selection.Contains(bx, by, false) || word == "") {
-		word = sel
-	}
-	// Quoted text stands for its contents, as if they were selected.
-	return quote.Unquote(word)
+	return Cursor{bx, by}
 }
 
 func (tv *TextView) ShowCursor(cv canvas) {
 	vx, vrow := tv.bufferToVisual(tv.buffer.cursor.x, tv.buffer.cursor.y)
 	cv.showCursor(max(0, min(vx, tv.w-1)), vrow-tv.scroll.Pos)
+}
+
+// fit gives tv width w and the height its text needs at that width.
+func (tv *TextView) fit(w int) {
+	tv.w = w
+	tv.UpdateLayout()
+	tv.h = max(1, len(tv.layout))
 }
 
 func (tv *TextView) Resize(w, h int) {
@@ -470,20 +469,19 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 		}
 		mx, my := ev.Position()
 		if buttons != tcell.ButtonNone {
-			bx, by := tv.visualToBuffer(mx, my+tv.scroll.Pos)
+			p := tv.PosAt(mx, my)
 			if buttons == tcell.ButtonPrimary && !tv.drag {
 				tv.buffer.ClearSelection()
 			}
 			if buttons == tcell.ButtonPrimary {
 				if !tv.drag {
-					tv.drag, tv.buffer.cursor = true, Cursor{bx, by}
-					tv.buffer.SetSelection(tv.buffer.cursor, tv.buffer.cursor)
+					tv.drag, tv.buffer.cursor = true, p
+					tv.buffer.SetSelection(p, p)
 				} else {
-					tv.buffer.cursor = Cursor{bx, by}
-					tv.buffer.selection.End = Cursor{bx, by}
+					tv.buffer.cursor, tv.buffer.selection.End = p, p
 				}
 			} else if !tv.buffer.selection.Active {
-				tv.buffer.cursor = Cursor{bx, by}
+				tv.buffer.cursor = p
 			}
 		} else {
 			tv.drag = false
@@ -568,7 +566,7 @@ type Window struct {
 }
 
 func (w *Window) PreferredSize() int { return w.explicitHeight }
-func (w *Window) MinSize() int       { return w.tagHeight() }
+func (w *Window) MinSize() int       { return w.tag.h }
 
 // The handle and the scroll bar share the window's first column, beside the
 // tag and the body.
@@ -688,10 +686,11 @@ func newWindow(tag string, parent *Column, editor *Editor, w int) *Window {
 		tag:    NewTextView(tag, w-1, 1, &editor.theme, &editor.theme.Tag, false, false),
 		parent: parent, editor: editor,
 	}
+	win.tag.fit(w - 1)
 	win.tag.buffer.onMutate = func(_, _, _ int, _ string) {
-		prev := len(win.tag.layout)
-		win.tag.UpdateLayout()
-		if len(win.tag.layout) != prev {
+		h := win.tag.h
+		win.tag.fit(win.w - 1)
+		if win.tag.h != h {
 			win.reflow()
 		}
 	}
@@ -853,38 +852,8 @@ func (win *Window) SetName(name string) {
 	win.tag.buffer.SetText(" " + quote.Quote(name) + rest)
 }
 
-// clickWordOffsets returns the rune offsets [q0, q1) of word in the target view.
-func (win *Window) clickWordOffsets(target View, x, y int, word string) (q0, q1 int) {
-	tv, ok := target.(*TextView)
-	if !ok {
-		return 0, len([]rune(word))
-	}
-	bx, by := tv.visualToBuffer(x, y+tv.scroll.Pos)
-	if by < 0 || by >= len(tv.buffer.lines) {
-		return 0, len([]rune(word))
-	}
-	line := tv.buffer.lines[by]
-	wStart, wEnd := GetWordBoundaries(bx, len(line), func(i int) rune { return line[i] })
-	// Quoted text stands for its contents: the range is inside the backticks.
-	if raw := string(line[wStart:wEnd]); quote.Unquote(raw) != raw {
-		wStart, wEnd = wStart+1, wEnd-1
-	}
-	q0 = tv.buffer.RuneOffsetOfPos(by, wStart)
-	q1 = tv.buffer.RuneOffsetOfPos(by, wEnd)
-	return
-}
-
-func (win *Window) tagHeight() int {
-	h := len(win.tag.layout)
-	if h < 1 {
-		return 1
-	}
-	return h
-}
-
 func (win *Window) reflow() {
-	win.tag.Resize(win.w-1, 0)
-	win.tag.h = win.tagHeight()
+	win.tag.fit(win.w - 1)
 	r := win.bodyRect()
 	win.body.Resize(r.w, r.h)
 }
