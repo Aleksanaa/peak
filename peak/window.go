@@ -41,17 +41,15 @@ type View interface {
 	Resize(w, h int)
 	HandleEvent(tcell.Event)
 	PosAt(x, y int) Cursor // the buffer position shown at (x, y)
-
 	GetBuffer() *Buffer
 	Scroll(n int)
+	// AdvanceDragCursor moves the end of a sweep under way by one line in
+	// direction dir, as the view scrolls under it.
+	AdvanceDragCursor(dir int)
 	GetScroll() (scroll, total, visible int)
 	Search(word string) int
 	ShowLineAt(lineNum int)
 	IsRaw() bool
-}
-
-type dragCursor interface {
-	AdvanceDragCursor(dir int)
 }
 
 type TextView struct {

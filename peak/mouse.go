@@ -227,9 +227,7 @@ func scrollStep(win *Window, dir, n int) {
 		return
 	}
 	win.body.Scroll(dir * n)
-	if dc, ok := win.body.(dragCursor); ok {
-		dc.AdvanceDragCursor(dir)
-	}
+	win.body.AdvanceDragCursor(dir)
 }
 
 // dragWindow moves win by its handle with the pointer, within or across
