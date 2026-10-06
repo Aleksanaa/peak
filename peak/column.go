@@ -36,7 +36,6 @@ type Column struct {
 	windows       []*Window
 	editor        *Editor
 	gutter        *Gutter
-	onExec        func(*Column, *Window, string) bool
 	explicitWidth int
 	winCache      []DrawNode
 	maximized     *Window
@@ -65,7 +64,7 @@ func (c *Column) syncChildren() {
 	}
 }
 
-func NewColumn(x, y, w, h int, editor *Editor, onExec func(*Column, *Window, string) bool) *Column {
+func NewColumn(x, y, w, h int, editor *Editor) *Column {
 	tagStyle := tcell.StyleDefault.Background(editor.theme.ColTagBG).Foreground(editor.theme.ColTagFG)
 	tag := NewTextView(" New Zerox Win Delcol ", x+1, y, w-1, 1, tagStyle, true, false)
 	tag.style = func() tcell.Style {
@@ -83,7 +82,6 @@ func NewColumn(x, y, w, h int, editor *Editor, onExec func(*Column, *Window, str
 		tag:      tag,
 		editor:   editor,
 		gutter:   gutter,
-		onExec:   onExec,
 	}
 	return c
 }
@@ -110,7 +108,7 @@ func (c *Column) AddWindow(tagText, bodyText string, preset ...*WindowSession) *
 		tagText = " ./untitled.txt Get Put Undo Redo Snarf Zerox Del "
 	}
 	c.maximized = nil
-	newWin := NewWindow(tagText, bodyText, c, c.editor, c.x, c.y, c.w, 0, c.onExec)
+	newWin := NewWindow(tagText, bodyText, c, c.editor, c.x, c.y, c.w, 0)
 	newWin.ID = c.editor.nextWinID
 	c.editor.nextWinID++
 
@@ -153,7 +151,7 @@ func (c *Column) AddTermWindow(tagText, cmd, dir string, preset ...*WindowSessio
 	}
 
 	c.maximized = nil
-	newWin, err := NewTermWindow(tagText, c, c.editor, c.x, c.y, c.w, 0, cmd, dir, c.onExec)
+	newWin, err := NewTermWindow(tagText, c, c.editor, c.x, c.y, c.w, 0, cmd, dir)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +167,7 @@ func (c *Column) AddTermWindow(tagText, cmd, dir string, preset ...*WindowSessio
 
 func (c *Column) AddSessionTermWindow(title string, sess session.Session) (*Window, error) {
 	c.maximized = nil
-	newWin, err := newTermWindowFromSession(" "+title+" Zerox Del ", sess, c, c.editor, c.x, c.y, c.w, 0, c.onExec)
+	newWin, err := newTermWindowFromSession(" "+title+" Zerox Del ", sess, c, c.editor, c.x, c.y, c.w, 0)
 	if err != nil {
 		return nil, err
 	}

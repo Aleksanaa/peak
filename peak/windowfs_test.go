@@ -20,7 +20,7 @@ import (
 func setupWindowTest(t *testing.T) (*Editor, *Column, *Window, tcell.Screen) {
 	t.Helper()
 	e, s := setupTest(t, 120, 30)
-	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e)
 	e.columns = append(e.columns, col)
 	win := col.AddWindow(" /tmp/test.txt Get Put Del ", "hello world\n")
 	e.ActivateWindow(win)
@@ -551,75 +551,32 @@ func TestWindowFsEventWriteOnlyNoSub(t *testing.T) {
 	}
 }
 
-func TestWindowFsEventSuppression(t *testing.T) {
-	e, col, win, _ := setupWindowTest(t)
-	wfs := newWindowFs(win)
-
-	// Open event file (read) — this subscribes and suppresses x/l actions
-	evF, err := wfs.OpenFile("event", os.O_RDONLY, 0)
-	if err != nil {
-		t.Fatalf("open event: %v", err)
-	}
-	defer evF.Close()
-
-	if len(win.eventSubs) == 0 {
-		t.Fatal("expected subscriber after opening event file")
-	}
-
-	executed := false
-	win.onExec = func(_ *Column, _ *Window, _ string) bool {
-		executed = true
-		return true
-	}
-
-	// Simulate a middle-click execute via the window handler
-	e.Call(func() {
-		win.broadcastEvent('M', 'x', 0, 3, 0, "Get")
-		// When subscribers present, the editor should NOT call onExec itself
-	})
-
-	// Give any spurious call time to arrive
-	time.Sleep(30 * time.Millisecond)
-
-	if executed {
-		t.Error("onExec was called despite active event subscriber (suppression failed)")
-	}
-	_ = col
-}
-
+// Writing an x event back to the event file runs it as a command.
 func TestWindowFsEventBounceback(t *testing.T) {
-	e, col, win, _ := setupWindowTest(t)
-	wfs := newWindowFs(win)
+	e, _, win, _ := setupWindowTest(t)
 
-	evF, err := wfs.OpenFile("event", os.O_RDWR, 0)
+	evF, err := newWindowFs(win).OpenFile("event", os.O_RDWR, 0)
 	if err != nil {
 		t.Fatalf("open event rdwr: %v", err)
 	}
 	defer evF.Close()
 
-	done := make(chan struct{}, 1)
-	win.onExec = func(_ *Column, _ *Window, cmd string) bool {
-		if cmd == "Get" {
-			select {
-			case done <- struct{}{}:
-			default:
-			}
-		}
-		return true
-	}
-
-	// Write a v2 x event back. This re-dispatches it as if the tool decided to let the editor handle it.
-	if _, err := evF.Write(wevent.Format(wevent.Event{Origin: 'M', Type: 'x', Q0: 0, Q1: 3, Text: "Get"})); err != nil {
+	if _, err := evF.Write(wevent.Format(wevent.Event{Origin: 'M', Type: 'x', Q0: 0, Q1: 5, Text: "Tab 7"})); err != nil {
 		t.Fatalf("write v2 event: %v", err)
 	}
 
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Error("onExec was not called after bounce-back write")
+	deadline := time.Now().Add(time.Second)
+	for {
+		var tab int
+		e.Call(func() { tab = win.bodyTextView().tabWidth })
+		if tab == 7 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("tab width = %d after bounced-back \"Tab 7\", want 7", tab)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
-	_ = col
-	_ = e
 }
 
 func TestWindowFsEventWriteRejectsLegacy(t *testing.T) {
@@ -649,7 +606,7 @@ func subscribeGlobal(e *Editor) *eventSub {
 
 func TestLifecycleEventsNewClose(t *testing.T) {
 	e, s := setupTest(t, 120, 30)
-	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e)
 	e.columns = append(e.columns, col)
 	e.resize()
 	_ = s
@@ -685,7 +642,7 @@ func TestLifecycleEventsNewClose(t *testing.T) {
 
 func TestLifecycleEventsFocus(t *testing.T) {
 	e, s := setupTest(t, 120, 30)
-	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e)
 	e.columns = append(e.columns, col)
 	e.resize()
 	_ = s
@@ -725,7 +682,7 @@ func TestLifecycleEventsGetPut(t *testing.T) {
 	defer os.Remove(tmp.Name())
 
 	e, s := setupTest(t, 120, 30)
-	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e)
 	e.columns = append(e.columns, col)
 	win := col.AddWindow(" "+tmp.Name()+" Get Put Del ", "")
 	e.ActivateWindow(win)
@@ -863,7 +820,7 @@ func TestWindowFsDirListing(t *testing.T) {
 
 func TestEventScannerIntegration(t *testing.T) {
 	e, s := setupTest(t, 120, 30)
-	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e)
 	e.columns = append(e.columns, col)
 	e.resize()
 	_ = s

@@ -124,7 +124,7 @@ func (f *winCtlFile) WriteAt(p []byte, _ int64) (int, error) {
 		return len(p), nil
 	}
 	win, col := f.win, f.win.parent
-	win.editor.callCh <- func() { win.onExec(col, win, cmd) }
+	win.editor.callCh <- func() { win.editor.Execute(col, win, cmd) }
 	return len(p), nil
 }
 

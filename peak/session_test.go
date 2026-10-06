@@ -12,7 +12,7 @@ import (
 func newTestEditorWithColumn(t *testing.T) (*Editor, *Column) {
 	t.Helper()
 	e, _ := setupTest(t, 200, 50)
-	col := NewColumn(0, 1, 200, 49, e, e.Execute)
+	col := NewColumn(0, 1, 200, 49, e)
 	col.explicitWidth = 200
 	e.columns = append(e.columns, col)
 	e.resize()
@@ -403,9 +403,9 @@ func TestEditorDumpSkipsWinOut(t *testing.T) {
 
 func TestEditorDumpColumnIndex(t *testing.T) {
 	e, _ := setupTest(t, 200, 50)
-	col0 := NewColumn(0, 1, 100, 49, e, e.Execute)
+	col0 := NewColumn(0, 1, 100, 49, e)
 	col0.explicitWidth = 100
-	col1 := NewColumn(100, 1, 100, 49, e, e.Execute)
+	col1 := NewColumn(100, 1, 100, 49, e)
 	col1.explicitWidth = 100
 	e.columns = append(e.columns, col0, col1)
 	e.resize()
@@ -484,7 +484,7 @@ func TestEditorLoadClearsExistingColumns(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "session.json")
 	e.Dump(dest)
 	// add another column to make state diverge
-	extra := NewColumn(0, 1, 50, 49, e, e.Execute)
+	extra := NewColumn(0, 1, 50, 49, e)
 	extra.explicitWidth = 50
 	e.columns = append(e.columns, extra)
 
@@ -584,9 +584,9 @@ func TestEditorRoundTripDirtyFile(t *testing.T) {
 
 func TestEditorRoundTripMultipleColumns(t *testing.T) {
 	e, _ := setupTest(t, 200, 50)
-	col0 := NewColumn(0, 1, 100, 49, e, e.Execute)
+	col0 := NewColumn(0, 1, 100, 49, e)
 	col0.explicitWidth = 100
-	col1 := NewColumn(100, 1, 100, 49, e, e.Execute)
+	col1 := NewColumn(100, 1, 100, 49, e)
 	col1.explicitWidth = 100
 	e.columns = append(e.columns, col0, col1)
 	e.resize()

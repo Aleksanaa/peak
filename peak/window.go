@@ -616,7 +616,6 @@ type Window struct {
 	handle         *Handle
 	parent         *Column
 	editor         *Editor
-	onExec         func(*Column, *Window, string) bool
 	explicitHeight int
 
 	kind          WinKind
@@ -743,7 +742,7 @@ func (win *Window) colorAtFunc() func(int) (tcell.Color, bool) {
 	}
 }
 
-func newWindow(tag string, parent *Column, editor *Editor, x, y, w, h int, onExec func(*Column, *Window, string) bool) *Window {
+func newWindow(tag string, parent *Column, editor *Editor, x, y, w, h int) *Window {
 	tagStyle := tcell.StyleDefault.Background(editor.theme.TagBG).Foreground(editor.theme.TagFG)
 	handle := &Handle{BaseView: BaseView{x: x, y: y, w: 1, h: 1}, color: editor.theme.Handle}
 	bodyView := &BodyView{TreeNode: TreeNode{BaseView: BaseView{x: x + 1, y: y + 1, w: w - 1, h: h - 1}}}
@@ -754,7 +753,7 @@ func newWindow(tag string, parent *Column, editor *Editor, x, y, w, h int, onExe
 	win := &Window{
 		TreeNode: TreeNode{BaseView: BaseView{x: x, y: y, w: w, h: h}},
 		tag:      NewTextView(tag, x+1, y, w-1, 1, tagStyle, false, false),
-		parent:   parent, editor: editor, onExec: onExec,
+		parent:   parent, editor: editor,
 		handle: handle, bodyView: bodyView,
 	}
 	win.tag.theme = &editor.theme
@@ -771,12 +770,12 @@ func newWindow(tag string, parent *Column, editor *Editor, x, y, w, h int, onExe
 	return win
 }
 
-func NewTermWindow(tag string, parent *Column, editor *Editor, x, y, w, h int, cmd, dir string, onExec func(*Column, *Window, string) bool) (*Window, error) {
+func NewTermWindow(tag string, parent *Column, editor *Editor, x, y, w, h int, cmd, dir string) (*Window, error) {
 	sess, err := session.NewLocal(cmd, dir)
 	if err != nil {
 		return nil, err
 	}
-	win, err := newTermWindowFromSession(tag, sess, parent, editor, x, y, w, h, onExec)
+	win, err := newTermWindowFromSession(tag, sess, parent, editor, x, y, w, h)
 	if err != nil {
 		return nil, err
 	}
@@ -784,8 +783,8 @@ func NewTermWindow(tag string, parent *Column, editor *Editor, x, y, w, h int, c
 	return win, nil
 }
 
-func newTermWindowFromSession(tag string, sess session.Session, parent *Column, editor *Editor, x, y, w, h int, onExec func(*Column, *Window, string) bool) (*Window, error) {
-	win := newWindow(tag, parent, editor, x, y, w, h, onExec)
+func newTermWindowFromSession(tag string, sess session.Session, parent *Column, editor *Editor, x, y, w, h int) (*Window, error) {
+	win := newWindow(tag, parent, editor, x, y, w, h)
 	term, err := NewTermView(editor, sess, x+1, y+1, w-1, h-1, func() {
 		editor.RemoveWindow(win)
 	})
@@ -838,9 +837,9 @@ func newTermWindowFromSession(tag string, sess session.Session, parent *Column, 
 	return win, nil
 }
 
-func NewWindow(tag, body string, parent *Column, editor *Editor, x, y, w, h int, onExec func(*Column, *Window, string) bool) *Window {
+func NewWindow(tag, body string, parent *Column, editor *Editor, x, y, w, h int) *Window {
 	bodyStyle := tcell.StyleDefault.Background(editor.theme.BodyBG).Foreground(editor.theme.BodyFG)
-	win := newWindow(tag, parent, editor, x, y, w, h, onExec)
+	win := newWindow(tag, parent, editor, x, y, w, h)
 	tv := NewTextView(body, x+1, y+1, w-1, h-1, bodyStyle, false, true)
 	tv.theme = &editor.theme
 	tv.style = func() tcell.Style {

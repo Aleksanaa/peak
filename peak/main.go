@@ -157,7 +157,7 @@ func (e *Editor) Init(numCols int, args []string, sessionFile string) {
 		if i == numCols-1 {
 			w = e.w - (i * colWidth)
 		}
-		col := NewColumn(i*colWidth, 1, w, e.h-1, e, e.Execute)
+		col := NewColumn(i*colWidth, 1, w, e.h-1, e)
 		col.explicitWidth = w
 		e.columns = append(e.columns, col)
 	}

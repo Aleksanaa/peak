@@ -11,7 +11,7 @@ func setupMouseChordWindow(t *testing.T) (*Editor, *Window, *TextView) {
 	t.Helper()
 
 	e, _ := setupTest(t, 80, 24)
-	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e)
 	e.columns = append(e.columns, col)
 	win := col.AddWindow(" /tmp/chord.txt Get Put Del ", "alpha beta")
 	col.Resize(col.x, col.y, col.w, col.h)
@@ -299,7 +299,7 @@ func TestChordAllowedInTerminal(t *testing.T) {
 
 func TestChordSuppressedInFullScreenTerminal(t *testing.T) {
 	e, _ := setupTest(t, 80, 24)
-	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e)
 	e.columns = append(e.columns, col)
 
 	// A child that switches to the alternate screen (DECSET 1049) and stays

@@ -287,7 +287,7 @@ func (e *Editor) clickWindow(ev *tcell.EventMouse, t mouseTarget, mx, my int, bu
 		return false
 	}
 	if buttons&tcell.ButtonMiddle != 0 {
-		return win.onExec(win.parent, win, word)
+		return e.Execute(win.parent, win, word)
 	}
 	return e.Plumb(win, word)
 }

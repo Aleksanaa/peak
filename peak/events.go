@@ -157,7 +157,7 @@ func (f *winEventFile) dispatchWriteEvent(ev wevent.Event) error {
 	switch ev.Type {
 	case 'x':
 		col, text := win.parent, ev.Text
-		win.editor.callCh <- func() { win.onExec(col, win, text) }
+		win.editor.callCh <- func() { win.editor.Execute(col, win, text) }
 	case 'l':
 		text := ev.Text
 		win.editor.callCh <- func() { win.editor.Plumb(win, text) }

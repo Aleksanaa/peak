@@ -177,10 +177,10 @@ func TestNewColClick(t *testing.T) {
 
 	// Initialize with 2 columns as in main.go
 	leftWidth := e.w / 2
-	colLeft := NewColumn(0, 1, leftWidth, e.h-1, e, e.Execute)
+	colLeft := NewColumn(0, 1, leftWidth, e.h-1, e)
 	e.columns = append(e.columns, colLeft)
 
-	colRight := NewColumn(leftWidth, 1, e.w-leftWidth, e.h-1, e, e.Execute)
+	colRight := NewColumn(leftWidth, 1, e.w-leftWidth, e.h-1, e)
 	e.columns = append(e.columns, colRight)
 
 	e.resize()
@@ -222,7 +222,7 @@ func TestNewColClick(t *testing.T) {
 func TestHelpClick(t *testing.T) {
 	e, s := setupTest(t, 100, 24)
 
-	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e)
 	e.columns = append(e.columns, col)
 
 	e.resize()
@@ -261,7 +261,7 @@ func TestDelColClick(t *testing.T) {
 	// Start with 3 columns
 	colWidth := e.w / 3
 	for i := 0; i < 3; i++ {
-		col := NewColumn(i*colWidth, 1, colWidth, e.h-1, e, e.Execute)
+		col := NewColumn(i*colWidth, 1, colWidth, e.h-1, e)
 		e.columns = append(e.columns, col)
 	}
 
@@ -347,7 +347,7 @@ func TestPipeOutputAfterEdit(t *testing.T) {
 func TestZeroxClick(t *testing.T) {
 	e, s := setupTest(t, 100, 24)
 
-	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e)
 	e.columns = append(e.columns, col)
 
 	win := col.AddWindow(" test.txt Zerox ", "Hello Zerox")
@@ -384,7 +384,7 @@ func TestZeroxClick(t *testing.T) {
 func TestGetDirClick(t *testing.T) {
 	e, s := setupTest(t, 100, 100)
 
-	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e)
 	e.columns = append(e.columns, col)
 
 	// Create window with /peak/doc as the name
@@ -482,7 +482,7 @@ func TestDragWindow(t *testing.T) {
 	// Create 3 columns
 	colWidth := e.w / 3
 	for i := 0; i < 3; i++ {
-		col := NewColumn(i*colWidth, 1, colWidth, e.h-1, e, e.Execute)
+		col := NewColumn(i*colWidth, 1, colWidth, e.h-1, e)
 		e.columns = append(e.columns, col)
 	}
 
@@ -560,7 +560,7 @@ func TestDragWindow(t *testing.T) {
 func TestDragWindowInternal(t *testing.T) {
 	e, s := setupTest(t, 120, 60)
 
-	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e)
 	e.columns = append(e.columns, col)
 
 	w1 := col.AddWindow(" w1 ", "c1")
@@ -609,7 +609,7 @@ func TestWindowSwapAllDirections(t *testing.T) {
 	newSetup := func(t *testing.T) (*Editor, *Column, *Window, *Window, *Window) {
 		t.Helper()
 		e, _ := setupTest(t, 120, 60)
-		col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+		col := NewColumn(0, 1, e.w, e.h-1, e)
 		e.columns = append(e.columns, col)
 		w1 := col.AddWindow(" w1 ", "c1")
 		w2 := col.AddWindow(" w2 ", "c2")
@@ -709,11 +709,11 @@ func TestColumnSwapAllDirections(t *testing.T) {
 		t.Helper()
 		e, _ := setupTest(t, 120, 30)
 		colW := e.w / 3
-		c1 := NewColumn(0, 1, colW, e.h-1, e, e.Execute)
+		c1 := NewColumn(0, 1, colW, e.h-1, e)
 		c1.explicitWidth = colW
-		c2 := NewColumn(colW, 1, colW, e.h-1, e, e.Execute)
+		c2 := NewColumn(colW, 1, colW, e.h-1, e)
 		c2.explicitWidth = colW
-		c3 := NewColumn(2*colW, 1, e.w-2*colW, e.h-1, e, e.Execute)
+		c3 := NewColumn(2*colW, 1, e.w-2*colW, e.h-1, e)
 		c3.explicitWidth = e.w - 2*colW
 		e.columns = append(e.columns, c1, c2, c3)
 		e.resize()
@@ -808,7 +808,7 @@ func TestColumnSwapAllDirections(t *testing.T) {
 func TestSimpleEdit(t *testing.T) {
 	e, s := setupTest(t, 100, 24)
 
-	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e)
 	e.columns = append(e.columns, col)
 
 	e.resize()
@@ -920,7 +920,7 @@ func TestSimpleEdit(t *testing.T) {
 func TestExternalCommand(t *testing.T) {
 	e, s := setupTest(t, 120, 30)
 
-	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e)
 	e.columns = append(e.columns, col)
 
 	e.resize()
@@ -1007,7 +1007,7 @@ func TestExternalCommand(t *testing.T) {
 func TestSimplePlumb(t *testing.T) {
 	e, s := setupTest(t, 100, 30)
 
-	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e)
 	e.columns = append(e.columns, col)
 
 	e.resize()
@@ -1095,7 +1095,7 @@ func TestSimplePlumb(t *testing.T) {
 
 func TestPlumbLineCol(t *testing.T) {
 	e, s := setupTest(t, 100, 30)
-	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e)
 	e.columns = append(e.columns, col)
 	e.resize()
 	e.Draw()
@@ -1360,7 +1360,7 @@ func TestTextViewWheelScrollPreservedAcrossDraws(t *testing.T) {
 	// Manual wheel-scroll must not be reset by SyncScroll during the
 	// next Draw cycle.
 	e, s := setupTest(t, 40, 20)
-	col := NewColumn(0, 1, 40, 19, e, e.Execute)
+	col := NewColumn(0, 1, 40, 19, e)
 	e.columns = append(e.columns, col)
 
 	var lines []string
@@ -1398,8 +1398,8 @@ func TestTextViewWheelScrollPreservedAcrossDraws(t *testing.T) {
 func TestDragWindowBetweenColumns(t *testing.T) {
 	e, s := setupTest(t, 120, 40)
 
-	col0 := NewColumn(0, 1, 60, e.h-1, e, e.Execute)
-	col1 := NewColumn(60, 1, 60, e.h-1, e, e.Execute)
+	col0 := NewColumn(0, 1, 60, e.h-1, e)
+	col1 := NewColumn(60, 1, 60, e.h-1, e)
 	e.columns = append(e.columns, col0, col1)
 
 	w1 := col0.AddWindow(" w1 ", "left")
@@ -1449,8 +1449,8 @@ func TestDragWindowBetweenColumns(t *testing.T) {
 func TestColumnDragPreservesBackground(t *testing.T) {
 	e, s := setupTest(t, 120, 24)
 
-	col0 := NewColumn(0, 1, 60, e.h-1, e, e.Execute)
-	col1 := NewColumn(60, 1, 60, e.h-1, e, e.Execute)
+	col0 := NewColumn(0, 1, 60, e.h-1, e)
+	col1 := NewColumn(60, 1, 60, e.h-1, e)
 	e.columns = append(e.columns, col0, col1)
 
 	col1.AddWindow(" win ", "hello")
@@ -1495,7 +1495,7 @@ func TestColumnDragPreservesBackground(t *testing.T) {
 func TestDelcolLeavesBlank(t *testing.T) {
 	e, s := setupTest(t, 100, 24)
 
-	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e)
 	e.columns = append(e.columns, col)
 	col.AddWindow(" win ", "content")
 
@@ -1544,8 +1544,8 @@ func TestDelcolNarrowNoExtraTagRow(t *testing.T) {
 	// and there must be no stale tag-background rows.
 	e, s := setupTest(t, 80, 100)
 
-	col0 := NewColumn(0, 1, e.w/2, e.h-1, e, e.Execute)
-	col1 := NewColumn(e.w/2, 1, e.w-e.w/2, e.h-1, e, e.Execute)
+	col0 := NewColumn(0, 1, e.w/2, e.h-1, e)
+	col1 := NewColumn(e.w/2, 1, e.w-e.w/2, e.h-1, e)
 	e.columns = append(e.columns, col0, col1)
 	w := col1.AddWindow("", "")
 	e.ActivateWindow(w)
@@ -1586,7 +1586,7 @@ func TestDelcolNarrowNoExtraTagRow(t *testing.T) {
 
 func TestDragSelectAtBottomEdgeSetsScrollWin(t *testing.T) {
 	e, s := setupTest(t, 80, 20)
-	col := NewColumn(0, 1, 80, 19, e, e.Execute)
+	col := NewColumn(0, 1, 80, 19, e)
 	e.columns = append(e.columns, col)
 
 	lines := make([]string, 30)
@@ -1625,7 +1625,7 @@ func TestDragSelectAtBottomEdgeSetsScrollWin(t *testing.T) {
 
 func TestDragSelectTickExtendsSelection(t *testing.T) {
 	e, s := setupTest(t, 80, 20)
-	col := NewColumn(0, 1, 80, 19, e, e.Execute)
+	col := NewColumn(0, 1, 80, 19, e)
 	e.columns = append(e.columns, col)
 
 	lines := make([]string, 30)
@@ -1669,7 +1669,7 @@ func TestDragSelectTickExtendsSelection(t *testing.T) {
 
 func TestDragSelectInTagDoesNotScrollBody(t *testing.T) {
 	e, s := setupTest(t, 80, 20)
-	col := NewColumn(0, 1, 80, 19, e, e.Execute)
+	col := NewColumn(0, 1, 80, 19, e)
 	e.columns = append(e.columns, col)
 
 	lines := make([]string, 30)
@@ -1756,7 +1756,7 @@ func TestEscToggleSelection(t *testing.T) {
 
 func TestDragSelectStopsAtLastLine(t *testing.T) {
 	e, s := setupTest(t, 80, 20)
-	col := NewColumn(0, 1, 80, 19, e, e.Execute)
+	col := NewColumn(0, 1, 80, 19, e)
 	e.columns = append(e.columns, col)
 
 	// 3 lines fit exactly in a small body — leave room for tag row.
@@ -1816,7 +1816,7 @@ func verifyNoWindowOverlap(t *testing.T, col *Column) {
 // without collapsing anyone and without triggering maximize.
 func TestHandleButton1GrowsModerate(t *testing.T) {
 	e, _ := setupTest(t, 120, 40)
-	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e)
 	e.columns = append(e.columns, col)
 
 	col.AddWindow(" w1 ", "c1")
@@ -1857,7 +1857,7 @@ func TestHandleButton1GrowsModerate(t *testing.T) {
 // all other windows are pushed entirely off-screen below the column bottom.
 func TestHandleButton2Maximizes(t *testing.T) {
 	e, _ := setupTest(t, 120, 40)
-	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e)
 	e.columns = append(e.columns, col)
 
 	col.AddWindow(" w1 ", "c1")
@@ -1901,7 +1901,7 @@ func TestHandleButton2Maximizes(t *testing.T) {
 // with the clicked window taking the largest share.
 func TestHandleButton3GrowsExitsMaximize(t *testing.T) {
 	e, _ := setupTest(t, 120, 40)
-	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e)
 	e.columns = append(e.columns, col)
 
 	col.AddWindow(" w1 ", "c1")
@@ -1950,7 +1950,7 @@ func TestHandleButton3GrowsExitsMaximize(t *testing.T) {
 // handle moves/swaps the window without triggering maximize.
 func TestHandleButton2DragMovesWindow(t *testing.T) {
 	e, _ := setupTest(t, 120, 60)
-	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e)
 	e.columns = append(e.columns, col)
 
 	w1 := col.AddWindow(" w1 ", "c1")
@@ -1990,7 +1990,7 @@ func TestHandleButton2DragMovesWindow(t *testing.T) {
 // handle moves/swaps the window without triggering grow.
 func TestHandleButton3DragMovesWindow(t *testing.T) {
 	e, _ := setupTest(t, 120, 60)
-	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e)
 	e.columns = append(e.columns, col)
 
 	w1 := col.AddWindow(" w1 ", "c1")
@@ -2024,7 +2024,7 @@ func TestHandleButton3DragMovesWindow(t *testing.T) {
 // window clears col.maximized and restores normal layout for remaining windows.
 func TestRemoveMaximizedWindowClearsFlag(t *testing.T) {
 	e, _ := setupTest(t, 120, 40)
-	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e)
 	e.columns = append(e.columns, col)
 
 	w1 := col.AddWindow(" w1 ", "c1")
@@ -2058,9 +2058,9 @@ func TestRemoveMaximizedWindowClearsFlag(t *testing.T) {
 // restores normal on-screen layout for windows left behind.
 func TestMoveMaximizedWindowClearsSourceFlag(t *testing.T) {
 	e, _ := setupTest(t, 120, 40)
-	col0 := NewColumn(0, 1, 60, e.h-1, e, e.Execute)
+	col0 := NewColumn(0, 1, 60, e.h-1, e)
 	col0.explicitWidth = 60
-	col1 := NewColumn(60, 1, 60, e.h-1, e, e.Execute)
+	col1 := NewColumn(60, 1, 60, e.h-1, e)
 	col1.explicitWidth = 60
 	e.columns = append(e.columns, col0, col1)
 
@@ -2117,9 +2117,9 @@ func TestColumnGutterAllButtonsStartDrag(t *testing.T) {
 		}[btn]
 		t.Run(name, func(t *testing.T) {
 			e, _ := setupTest(t, 120, 30)
-			col0 := NewColumn(0, 1, 60, e.h-1, e, e.Execute)
+			col0 := NewColumn(0, 1, 60, e.h-1, e)
 			col0.explicitWidth = 60
-			col1 := NewColumn(60, 1, 60, e.h-1, e, e.Execute)
+			col1 := NewColumn(60, 1, 60, e.h-1, e)
 			col1.explicitWidth = 60
 			e.columns = append(e.columns, col0, col1)
 			e.resize()

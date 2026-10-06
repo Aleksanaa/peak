@@ -21,7 +21,7 @@ import (
 func setupExecFsTest(t *testing.T) (*Editor, *Column, *peakNamespaceFs, tcell.Screen) {
 	t.Helper()
 	e, s := setupTest(t, 120, 30)
-	col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+	col := NewColumn(0, 1, e.w, e.h-1, e)
 	e.columns = append(e.columns, col)
 	e.resize()
 	return e, col, e.ninep.nsFs, s

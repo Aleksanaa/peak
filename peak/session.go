@@ -299,13 +299,13 @@ func (e *Editor) Load(file string) error {
 	// Pass 1: create columns so e.resize() can compute their dimensions.
 	for _, cs := range s.Columns {
 		w := max(5, cs.WidthPct*e.w/100)
-		col := NewColumn(0, 1, w, e.h-1, e, e.Execute)
+		col := NewColumn(0, 1, w, e.h-1, e)
 		col.explicitWidth = w
 		col.tag.buffer.SetText(cs.Tag)
 		e.columns = append(e.columns, col)
 	}
 	if len(e.columns) == 0 {
-		col := NewColumn(0, 1, e.w, e.h-1, e, e.Execute)
+		col := NewColumn(0, 1, e.w, e.h-1, e)
 		col.explicitWidth = e.w
 		e.columns = append(e.columns, col)
 	}
