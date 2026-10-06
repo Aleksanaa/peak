@@ -18,7 +18,8 @@ import (
 const maxHistory = 1000
 
 type TermView struct {
-	BaseView
+	w, h        int
+	scroll      ScrollState
 	state       terminal.State
 	vt          *terminal.VT
 	session     session.Session
@@ -67,18 +68,15 @@ func (tv *TermView) Layout() {
 	tv.SyncScroll()
 }
 
-func NewTermView(editor *Editor, sess session.Session, x, y, w, h int, onClose func()) (*TermView, error) {
+// NewTermView returns a terminal running sess, sized by its first Resize.
+func NewTermView(editor *Editor, sess session.Session, onClose func()) (*TermView, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	tv := &TermView{
-		BaseView: BaseView{
-			x: x, y: y, w: w, h: h,
-		},
-		session:       sess,
-		onClose:       onClose,
-		editor:        editor,
-		cancel:        cancel,
-		contentHeight: h,
-		buffer:        NewBuffer(""),
+		session: sess,
+		onClose: onClose,
+		editor:  editor,
+		cancel:  cancel,
+		buffer:  NewBuffer(""),
 	}
 	tv.scroll.AutoScroll = true
 
@@ -123,9 +121,6 @@ func NewTermView(editor *Editor, sess session.Session, x, y, w, h int, onClose f
 		}
 	}
 
-	// Initial resize
-	tv.Resize(x, y, w, h)
-
 	go func() {
 		defer cancel()
 		for {
@@ -155,7 +150,7 @@ func NewTermView(editor *Editor, sess session.Session, x, y, w, h int, onClose f
 	return tv, nil
 }
 
-func (tv *TermView) Draw(s tcell.Screen) {
+func (tv *TermView) Draw(cv canvas) {
 	w, h := tv.w, tv.h
 	if w <= 0 || h <= 0 {
 		return
@@ -212,7 +207,7 @@ func (tv *TermView) Draw(s tcell.Screen) {
 				style = style.Background(tv.editor.theme.Selection.BG).
 					Foreground(tv.editor.theme.Selection.FG)
 			}
-			s.Put(tv.x+x, tv.y+y, string(char), style)
+			cv.put(x, y, string(char), style)
 		}
 	}
 }
@@ -228,19 +223,13 @@ func (tv *TermView) toTcellColor(c terminal.Color) tcell.Color {
 	return color.PaletteColor(int(c))
 }
 
-func (tv *TermView) ShowCursor(s tcell.Screen) {
+func (tv *TermView) ShowCursor(cv canvas) {
 	tv.state.Lock()
 	defer tv.state.Unlock()
 	if tv.state.CursorVisible() {
 		cx, cy := tv.state.Cursor()
-		// Relative to view
-		ry := cy - tv.scroll.Pos
-		if cx >= 0 && cx < tv.w && ry >= 0 && ry < tv.h {
-			s.ShowCursor(tv.x+cx, tv.y+ry)
-			return
-		}
+		cv.showCursor(cx, cy-tv.scroll.Pos)
 	}
-	s.HideCursor()
 }
 
 func (tv *TermView) updateContentHeight() {
@@ -278,11 +267,11 @@ func (tv *TermView) updateContentHeight() {
 	tv.contentHeight = lastLine
 }
 
-func (tv *TermView) Resize(x, y, w, h int) {
-	if tv.x == x && tv.y == y && tv.w == w && tv.h == h {
+func (tv *TermView) Resize(w, h int) {
+	if tv.w == w && tv.h == h {
 		return
 	}
-	tv.x, tv.y, tv.w, tv.h = x, y, w, h
+	tv.w, tv.h = w, h
 	// Always keep emulator at maxHistory to avoid losing Primary buffer data
 	// when switching screens or resizing.
 	tv.vt.Resize(w, max(maxHistory, h))
@@ -365,8 +354,7 @@ func (tv *TermView) ShowLineAt(lineNum int) {
 	tv.scroll.Clamp(total, visible)
 }
 
-func (tv *TermView) GetClickWord(mx, my int) string {
-	rx, ry := mx-tv.x, my-tv.y
+func (tv *TermView) GetClickWord(rx, ry int) string {
 	realRY := ry + tv.scroll.Pos
 
 	if tv.buffer.selection.Contains(rx, realRY, true) {
@@ -495,8 +483,7 @@ func (tv *TermView) HandleEvent(ev tcell.Event) bool {
 		tv.session.Write([]byte(keyToEscSeq(e)))
 		return false
 	case *tcell.EventMouse:
-		mx, my := e.Position()
-		rx, ry := mx-tv.x, my-tv.y
+		rx, ry := e.Position()
 		realRY := ry + tv.scroll.Pos
 
 		buttons := e.Buttons()
@@ -527,12 +514,12 @@ func (tv *TermView) HandleEvent(ev tcell.Event) bool {
 				}
 				tv.Scroll(dir)
 			}
-			tv.lastMX, tv.lastMY, tv.lastButtons = mx, my, buttons
+			tv.lastMX, tv.lastMY, tv.lastButtons = rx, ry, buttons
 			return false
 		}
 
 		if isMouseMode && !ctrlPressed && !tv.selecting {
-			motion := mx != tv.lastMX || my != tv.lastMY
+			motion := rx != tv.lastMX || ry != tv.lastMY
 			handled := false
 			isMotion, isRelease := false, false
 			btnReport := 0
@@ -577,7 +564,7 @@ func (tv *TermView) HandleEvent(ev tcell.Event) bool {
 			}
 		}
 
-		tv.lastMX, tv.lastMY, tv.lastButtons = mx, my, buttons
+		tv.lastMX, tv.lastMY, tv.lastButtons = rx, ry, buttons
 	}
 	return false
 }

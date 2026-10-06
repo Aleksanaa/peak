@@ -67,8 +67,11 @@ func TestTermSelectionSeenByBufferPaths(t *testing.T) {
 	if err != nil {
 		t.Skipf("cannot create term window: %v", err)
 	}
-	defer e.RemoveWindow(termWin)
-	col.Resize(col.x, col.y, col.w, col.h)
+	// Reading rdsel below goes through e.Call, after which the harness draws on
+	// its own goroutine; remove the window there too, not alongside that draw.
+	defer e.Call(func() { e.RemoveWindow(termWin) })
+
+	col.Resize(col.rect)
 	tv := termWin.body.(*TermView)
 
 	deadline := time.Now().Add(5 * time.Second)
@@ -84,9 +87,9 @@ func TestTermSelectionSeenByBufferPaths(t *testing.T) {
 	}
 
 	// Drag across the first line and well past its end.
-	tv.HandleEvent(tcell.NewEventMouse(tv.x, tv.y, tcell.ButtonPrimary, 0))
-	tv.HandleEvent(tcell.NewEventMouse(tv.x+20, tv.y, tcell.ButtonPrimary, 0))
-	tv.HandleEvent(tcell.NewEventMouse(tv.x+20, tv.y, tcell.ButtonNone, 0))
+	tv.HandleEvent(tcell.NewEventMouse(0, 0, tcell.ButtonPrimary, 0))
+	tv.HandleEvent(tcell.NewEventMouse(20, 0, tcell.ButtonPrimary, 0))
+	tv.HandleEvent(tcell.NewEventMouse(20, 0, tcell.ButtonNone, 0))
 
 	const want = "hello world"
 	if got := tv.GetSelectedText(); got != want {

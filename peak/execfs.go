@@ -88,7 +88,7 @@ func (fs *peakNamespaceFs) WalkRedirect(dir, name string) (string, os.FileInfo, 
 			}
 			win = col.AddWindow(" New ", "")
 			fs.editor.ActivateWindow(win)
-			col.Resize(col.x, col.y, col.w, col.h)
+			col.Resize(col.rect)
 		})
 		if win == nil {
 			return "", nil, false

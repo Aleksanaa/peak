@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"image"
 	"log"
 	"os"
 	"path/filepath"
@@ -42,15 +43,16 @@ type Theme struct {
 
 // Editor is the main application state.
 type Editor struct {
-	TreeNode
+	w, h          int
+	lastSize      int
 	redrawCh      chan struct{} // capacity-1; 9P goroutines signal after state changes
 	callCh        chan func()   // buffered; background goroutines dispatch UI callbacks
 	screen        tcell.Screen
 	tag           *TextView
 	columns       []*Column
-	columnNodes   []DrawNode
 	active        *Window
 	dragView      View
+	dragOrigin    image.Point // where dragView is on screen
 	dragWin       *Window
 	dragWinOrigH  int
 	dragWinButton tcell.ButtonMask
@@ -63,18 +65,10 @@ type Editor struct {
 	scrollAmount    int
 	scrollDir       int
 	scrollStartTime time.Time
-	lastClickY      int
 	theme           Theme
 	nextWinID       int
 	ninep           *NineP
 	gesture         mouseGesture
-}
-
-func (e *Editor) syncChildren() {
-	e.children = []DrawNode{e.tag}
-	for _, c := range e.columns {
-		e.children = append(e.children, c)
-	}
 }
 
 // Redraw signals the main loop to redraw on the next iteration.
@@ -149,7 +143,6 @@ func (e *Editor) Init(numCols int, args []string, sessionFile string) {
 		e.columns = append(e.columns, col)
 	}
 	e.resize()
-	e.syncChildren()
 
 	if sessionFile != "" {
 		if err := e.Load(sessionFile); err != nil {
@@ -191,7 +184,7 @@ func (e *Editor) setup(s tcell.Screen) {
 		log.Printf("theme: %v", err)
 	}
 
-	e.tag = NewTextView(" NewCol Help Exit ", 0, 0, e.w, 1, &e.theme, &e.theme.GlobalTag, true, false)
+	e.tag = NewTextView(" NewCol Help Exit ", e.w, 1, &e.theme, &e.theme.GlobalTag, true, false)
 	e.focusedView = e.tag
 }
 
@@ -244,15 +237,16 @@ func (e *Editor) Run() {
 
 // trackDragScroll sets or clears scrollWin when a drag selection reaches a
 // view edge, so the 50ms timer keeps extending the selection automatically.
-func (e *Editor) trackDragScroll(view View, my int) {
+// y is the pointer's row in the view.
+func (e *Editor) trackDragScroll(view View, y int) {
 	if e.active == nil || view != e.active.body {
 		return
 	}
-	bv := e.active.bodyView
+	_, _, h := view.GetScroll()
 	var dir int
-	if my >= bv.y+bv.h-1 {
+	if y >= h-1 {
 		dir = 1
-	} else if my <= bv.y {
+	} else if y <= 0 {
 		dir = -1
 	}
 	if dir != 0 {
@@ -266,22 +260,29 @@ func (e *Editor) trackDragScroll(view View, my int) {
 
 func (e *Editor) Draw() {
 	e.screen.Clear()
-	e.syncChildren()
-	e.WalkLayout()
-	e.WalkDraw(e.screen)
-	e.focusedView.ShowCursor(e.screen)
+	e.screen.HideCursor()
+	cv := canvas{e.screen, 0, 0, e.w, e.h}
+	e.drawView(e.tag, cv.sub(rect{0, 0, e.w, 1}))
+	for _, c := range e.columns {
+		c.Draw(cv.sub(c.rect))
+	}
 	e.screen.Show()
 }
 
+// drawView lays out and draws v on cv, with the cursor if v has the focus.
+func (e *Editor) drawView(v View, cv canvas) {
+	v.Layout()
+	v.Draw(cv)
+	if v == e.focusedView {
+		v.ShowCursor(cv)
+	}
+}
+
 func (e *Editor) HandleEvent(ev tcell.Event) (bool, bool) {
-	if me, ok := ev.(*tcell.EventMouse); ok {
-		if me.Buttons() != tcell.ButtonNone {
-			_, my := me.Position()
-			e.lastClickY = my
-		} else if e.dragCol == nil && e.dragWin == nil && e.dragView == nil && e.scrollWin == nil && !e.gesture.chorded {
-			// Skip redraw on mouse moves with no buttons/drag/scroll
-			return false, false
-		}
+	if me, ok := ev.(*tcell.EventMouse); ok && me.Buttons() == tcell.ButtonNone &&
+		e.dragCol == nil && e.dragWin == nil && e.dragView == nil && e.scrollWin == nil && !e.gesture.chorded {
+		// Skip redraw on mouse moves with no buttons/drag/scroll
+		return false, false
 	}
 
 	switch ev := ev.(type) {
@@ -346,6 +347,7 @@ func (e *Editor) moveColumnTo(col *Column, mx int) {
 	e.resize()
 }
 
+// moveWindowTo drags win to the screen position (mx, my).
 func (e *Editor) moveWindowTo(win *Window, mx, my int) {
 	colIdx := slices.Index(e.columns, win.parent)
 	cur := e.columns[colIdx]
@@ -366,34 +368,35 @@ func (e *Editor) moveWindowTo(win *Window, mx, my int) {
 		if cur.maximized == win {
 			cur.maximized = nil
 		}
-		cur.Resize(cur.x, cur.y, cur.w, cur.h)
+		cur.Resize(cur.rect)
 		win.parent, win.explicitHeight = toCol, 0
 		newIdx := 0
 		for _, w := range toCol.windows {
-			if my < w.y+w.h/2 {
+			if my-toCol.y < w.y+w.h/2 {
 				break
 			}
 			newIdx++
 		}
 		toCol.windows = slices.Insert(toCol.windows, newIdx, win)
-		toCol.Resize(toCol.x, toCol.y, toCol.w, toCol.h)
+		toCol.Resize(toCol.rect)
 		e.dragWinOrigH = win.explicitHeight
 		e.dragWinStartY = -1 // window moved columns; suppress grow-on-release
 		return
 	}
 
+	y := my - cur.y // in the column
 	wins := cur.windows
 	idx := slices.Index(wins, win)
 	n := len(wins)
 
-	if idx < n-1 && my > wins[idx+1].y {
+	if idx < n-1 && y > wins[idx+1].y {
 		delta := e.dragWinOrigH - win.explicitHeight
 		wins[idx], wins[idx+1] = wins[idx+1], wins[idx]
 		wins[idx+1].explicitHeight = e.dragWinOrigH
 		if idx > 0 {
 			wins[idx-1].explicitHeight -= delta
 		}
-		cur.Resize(cur.x, cur.y, cur.w, cur.h)
+		cur.Resize(cur.rect)
 		return
 	}
 	if idx == 0 {
@@ -401,38 +404,31 @@ func (e *Editor) moveWindowTo(win *Window, mx, my int) {
 	}
 	prev := wins[idx-1]
 	combinedH := prev.h + win.h
-	if my < prev.y+prev.tagHeight() {
+	if y < prev.y+prev.tagHeight() {
 		wins[idx], wins[idx-1] = wins[idx-1], wins[idx]
 		wins[idx-1].explicitHeight = e.dragWinOrigH
 		wins[idx].explicitHeight = combinedH - e.dragWinOrigH
 	} else {
-		newH := max(prev.tagHeight(), min(combinedH-win.tagHeight(), my-prev.y))
+		newH := max(prev.tagHeight(), min(combinedH-win.tagHeight(), y-prev.y))
+
 		if newH == prev.explicitHeight {
 			return
 		}
 		win.explicitHeight += prev.explicitHeight - newH
 		prev.explicitHeight = newH
 	}
-	cur.Resize(cur.x, cur.y, cur.w, cur.h)
+	cur.Resize(cur.rect)
 }
 
 func (e *Editor) resize() {
-	e.tag.Resize(0, 0, e.w, 1)
-
-	if cap(e.columnNodes) < len(e.columns) {
-		e.columnNodes = make([]DrawNode, len(e.columns))
-	}
-	nodes := e.columnNodes[:len(e.columns)]
-	for i, col := range e.columns {
-		nodes[i] = col
-	}
-	sizes := distribute(nodes, e.w, e.lastSize)
+	e.tag.Resize(e.w, 1)
+	sizes := distribute(e.columns, e.w, e.lastSize)
 	e.lastSize = e.w
 
 	x := 0
 	for i, col := range e.columns {
 		col.explicitWidth = sizes[i]
-		col.Resize(x, 1, sizes[i], e.h-1)
+		col.Resize(rect{x, 1, sizes[i], e.h - 1})
 		x += sizes[i]
 	}
 }

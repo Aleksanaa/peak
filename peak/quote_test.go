@@ -48,10 +48,10 @@ func TestPlumbQuotedNameFromListing(t *testing.T) {
 		t.Fatalf("listing = %q", listing)
 	}
 	win := e.createWindow(col, toDir(dir), listing, true, false, -1, 0)
-	col.Resize(col.x, col.y, col.w, col.h)
+	col.Resize(col.rect)
 
 	tv := win.bodyTextView()
-	word := tv.GetClickWord(tv.x+5, tv.y) // inside the quoted name
+	word := tv.GetClickWord(5, 0) // inside the quoted name
 	if word != "my file.txt" {
 		t.Fatalf("click word = %q", word)
 	}
@@ -112,7 +112,7 @@ func TestExecuteQuotedClick(t *testing.T) {
 	for _, selected := range []bool{false, true} {
 		e, col := newTestEditorWithColumn(t)
 		win := col.AddWindow(tagText("/tmp/exec.txt", "Del"), "run `Tab 7` here")
-		col.Resize(col.x, col.y, col.w, col.h)
+		col.Resize(col.rect)
 		tv := win.bodyTextView()
 		if selected {
 			tv.buffer.SetSelection(Cursor{4, 0}, Cursor{11, 0})
@@ -120,8 +120,9 @@ func TestExecuteQuotedClick(t *testing.T) {
 		sub := newEventSub()
 		win.eventSubs = append(win.eventSubs, sub)
 
-		e.HandleEvent(tcell.NewEventMouse(tv.x+8, tv.y, tcell.ButtonMiddle, 0))
-		e.HandleEvent(tcell.NewEventMouse(tv.x+8, tv.y, tcell.ButtonNone, 0))
+		p := screenAt(e, tv)
+		e.HandleEvent(tcell.NewEventMouse(p.X+8, p.Y, tcell.ButtonMiddle, 0))
+		e.HandleEvent(tcell.NewEventMouse(p.X+8, p.Y, tcell.ButtonNone, 0))
 
 		if tv.tabWidth != 7 {
 			t.Errorf("selected=%v: tab width = %d, want 7 (the click should run \"Tab 7\")", selected, tv.tabWidth)

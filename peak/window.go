@@ -28,16 +28,20 @@ type VisualLine struct {
 	Start, End int
 }
 
+// A View is a tag or body. It knows only its own size: positions it is given,
+// in mouse events and GetClickWord, are in its own coordinates, and it draws
+// on a canvas of its own.
 type View interface {
 	// Layout computes visual-line wrapping and synchronises scroll position.
 	// Must be called once per frame before Draw, and after every Resize.
 	// Must not paint anything.
 	Layout()
-	Draw(tcell.Screen)
-	ShowCursor(tcell.Screen)
-	Resize(x, y, w, h int)
+	Draw(canvas)
+	ShowCursor(canvas)
+	Resize(w, h int)
 	HandleEvent(tcell.Event) bool
-	GetClickWord(mx, my int) string
+	GetClickWord(x, y int) string
+
 	GetSelectedText() string
 	GetBuffer() *Buffer
 	Scroll(n int)
@@ -52,7 +56,8 @@ type dragCursor interface {
 }
 
 type TextView struct {
-	BaseView
+	w, h          int
+	scroll        ScrollState
 	buffer        *Buffer
 	drag          bool
 	singleLine    bool
@@ -74,11 +79,9 @@ func (tv *TextView) IsRaw() bool {
 	return false
 }
 
-func NewTextView(text string, x, y, w, h int, theme *Theme, colors *colorPair, singleLine, scrollable bool) *TextView {
+func NewTextView(text string, w, h int, theme *Theme, colors *colorPair, singleLine, scrollable bool) *TextView {
 	tv := &TextView{
-		BaseView: BaseView{
-			x: x, y: y, w: w, h: h,
-		},
+		w: w, h: h,
 		buffer:      NewBuffer(text),
 		theme:       theme,
 		colors:      colors,
@@ -218,10 +221,8 @@ func (tv *TextView) visualToBuffer(vx, vidx int) (int, int) {
 	return bx, vl.BufferLine
 }
 
-func (tv *TextView) Draw(s tcell.Screen) {
+func (tv *TextView) Draw(cv canvas) {
 	selStyle := tv.theme.Selection.style()
-	spaces := strings.Repeat(" ", tv.w)
-
 	vrow := 0
 	for lidx := tv.scroll.Pos; lidx < len(tv.layout) && vrow < tv.h; lidx++ {
 		vl, vcol := tv.layout[lidx], 0
@@ -234,7 +235,7 @@ func (tv *TextView) Draw(s tcell.Screen) {
 		if tv.colorAt != nil {
 			lineRuneBase = tv.buffer.RuneOffsetOfPos(vl.BufferLine, vl.Start)
 		}
-		for idx := vl.Start; idx < vl.End && vcol < tv.w; idx++ {
+		for idx := vl.Start; idx < vl.End; idx++ {
 			r, style := line[idx], lineStyle
 			if tv.buffer.selection.Contains(idx, vl.BufferLine, false) {
 				style = selStyle
@@ -246,33 +247,28 @@ func (tv *TextView) Draw(s tcell.Screen) {
 
 			width := tv.runeWidth(r, vcol)
 			if r == '\t' {
-				for k := 0; k < width && vcol < tv.w; k++ {
-					s.Put(tv.x+vcol, tv.y+vrow, " ", style)
-					vcol++
-				}
+				cv.fill(rect{vcol, vrow, width, 1}, style)
 			} else {
 				str := string(r)
 				if unicode.IsMark(r) || unicode.Is(unicode.Cf, r) || unicode.IsControl(r) {
 					str = "□"
 				}
-				s.Put(tv.x+vcol, tv.y+vrow, str, style)
-				vcol += width
+				cv.put(vcol, vrow, str, style)
 			}
+			vcol += width
 		}
 		eolStyle := lineStyle
 		if tv.buffer.selection.Contains(vl.End, vl.BufferLine, false) {
 			eolStyle = selStyle
 		}
-		s.PutStrStyled(tv.x+vcol, tv.y+vrow, spaces[:tv.w-vcol], eolStyle)
+		cv.fill(rect{vcol, vrow, tv.w - vcol, 1}, eolStyle)
 		vrow++
 	}
-	for ; vrow < tv.h; vrow++ {
-		s.PutStrStyled(tv.x, tv.y+vrow, spaces, tv.colors.style())
-	}
+	cv.fill(rect{0, vrow, tv.w, tv.h - vrow}, tv.colors.style())
 }
 
-func (tv *TextView) GetClickWord(mx, my int) string {
-	bx, by := tv.visualToBuffer(mx-tv.x, my-tv.y+tv.scroll.Pos)
+func (tv *TextView) GetClickWord(x, y int) string {
+	bx, by := tv.visualToBuffer(x, y+tv.scroll.Pos)
 	sel := strings.TrimSpace(tv.buffer.GetSelectedText())
 	word := strings.TrimSpace(tv.buffer.GetWordAt(bx, by))
 	// A click in the selection takes the selection; so does a click on blank
@@ -284,26 +280,16 @@ func (tv *TextView) GetClickWord(mx, my int) string {
 	return quote.Unquote(word)
 }
 
-func (tv *TextView) ShowCursor(s tcell.Screen) {
+func (tv *TextView) ShowCursor(cv canvas) {
 	vx, vrow := tv.bufferToVisual(tv.buffer.cursor.x, tv.buffer.cursor.y)
-	if vrow >= tv.scroll.Pos && vrow < tv.scroll.Pos+tv.h {
-		if vx >= tv.w {
-			vx = tv.w - 1
-		}
-		if vx < 0 {
-			vx = 0
-		}
-		s.ShowCursor(tv.x+vx, tv.y+(vrow-tv.scroll.Pos))
-	} else {
-		s.HideCursor()
-	}
+	cv.showCursor(max(0, min(vx, tv.w-1)), vrow-tv.scroll.Pos)
 }
 
-func (tv *TextView) Resize(x, y, w, h int) {
-	if tv.x == x && tv.y == y && tv.w == w && tv.h == h {
+func (tv *TextView) Resize(w, h int) {
+	if tv.w == w && tv.h == h {
 		return
 	}
-	tv.x, tv.y, tv.w, tv.h = x, y, w, h
+	tv.w, tv.h = w, h
 	tv.UpdateLayout()
 }
 
@@ -484,7 +470,7 @@ func (tv *TextView) HandleEvent(ev tcell.Event) bool {
 		}
 		mx, my := ev.Position()
 		if buttons != tcell.ButtonNone {
-			bx, by := tv.visualToBuffer(mx-tv.x, my-tv.y+tv.scroll.Pos)
+			bx, by := tv.visualToBuffer(mx, my+tv.scroll.Pos)
 			if buttons == tcell.ButtonPrimary && !tv.drag {
 				tv.buffer.ClearSelection()
 			}
@@ -560,58 +546,11 @@ func (tv *TextView) ShowLineAt(lineNum int) {
 	tv.SyncScroll()
 }
 
-type Handle struct {
-	BaseView
-	color tcell.Color
-}
-
-func (hd *Handle) Draw(s tcell.Screen) {
-	style := tcell.StyleDefault.Background(hd.color).Foreground(color.Black)
-	for i := 0; i < hd.h; i++ {
-		s.Put(hd.x, hd.y+i, " ", style)
-	}
-}
-func (hd *Handle) Resize(x, y, w, h int) { hd.x, hd.y, hd.w, hd.h = x, y, w, h }
-
-type Scrollbar struct {
-	BaseView
-	thumb        *tcell.Color
-	scrollPos    int
-	totalLines   int
-	visibleLines int
-}
-
-func (sb *Scrollbar) Draw(s tcell.Screen) {
-	if sb.visibleLines == 0 || sb.totalLines <= sb.visibleLines {
-		return
-	}
-	thumbHeight := max(1, (sb.visibleLines*sb.visibleLines)/sb.totalLines)
-	thumbStart := min(sb.visibleLines-thumbHeight, (sb.scrollPos*sb.visibleLines)/sb.totalLines)
-	for i := 0; i < thumbHeight; i++ {
-		s.Put(sb.x, sb.y+thumbStart+i, " ", tcell.StyleDefault.Background(*sb.thumb))
-	}
-}
-func (sb *Scrollbar) Resize(x, y, w, h int) { sb.x, sb.y, sb.w, sb.h = x, y, w, h }
-
-type BodyView struct {
-	TreeNode
-	content View
-	scroll  *Scrollbar
-}
-
-func (bv *BodyView) Resize(x, y, w, h int) {
-	bv.x, bv.y, bv.w, bv.h = x, y, w, h
-	bv.scroll.Resize(x, y, 1, h)
-	bv.content.Resize(x+1, y, w-1, h)
-}
-
 type Window struct {
-	TreeNode
+	rect           // in the column
 	ID             int
 	tag            *TextView
 	body           View
-	bodyView       *BodyView
-	handle         *Handle
 	parent         *Column
 	editor         *Editor
 	explicitHeight int
@@ -628,32 +567,33 @@ type Window struct {
 	spans []colorSpan
 }
 
-func (w *Window) Layout()            {}
-func (w *Window) Draw(tcell.Screen)  {}
 func (w *Window) PreferredSize() int { return w.explicitHeight }
 func (w *Window) MinSize() int       { return w.tagHeight() }
 
-func (w *Window) WalkDraw(s tcell.Screen) {
-	w.tag.underlineLast = w.editor.active == w
+// The handle and the scroll bar share the window's first column, beside the
+// tag and the body.
+func (w *Window) tagRect() rect  { return rect{1, 0, w.w - 1, w.tag.h} }
+func (w *Window) bodyRect() rect { return rect{1, w.tag.h, w.w - 1, max(0, w.h-w.tag.h)} }
 
-	handleColor := w.editor.theme.Handle
+func (w *Window) Draw(cv canvas) {
+	theme := &w.editor.theme
+	handle := theme.Handle
 	switch w.kind {
 	case WinOut, WinTerm:
-		handleColor = w.editor.theme.HandleError
+		handle = theme.HandleError
 	case WinFile:
 		if w.IsDirty() {
-			handleColor = w.editor.theme.HandleDirty
+			handle = theme.HandleDirty
 		} else if w.writable {
-			handleColor = w.editor.theme.HandleWritable
+			handle = theme.HandleWritable
 		} else {
-			handleColor = w.editor.theme.HandleUnwritable
+			handle = theme.HandleUnwritable
 		}
 	}
-	w.handle.color = handleColor
+	cv.fill(rect{0, 0, 1, w.tag.h}, tcell.StyleDefault.Background(handle).Foreground(color.Black))
 
-	w.tag.Layout()
-	w.tag.Draw(s)
-	w.handle.Draw(s)
+	w.tag.underlineLast = w.editor.active == w
+	w.editor.drawView(w.tag, cv.sub(w.tagRect()))
 
 	if tv, ok := w.body.(*TextView); ok {
 		tv.colorAt = nil
@@ -661,12 +601,13 @@ func (w *Window) WalkDraw(s tcell.Screen) {
 			tv.colorAt = w.colorAtFunc()
 		}
 	}
+	w.editor.drawView(w.body, cv.sub(w.bodyRect()))
 
-	w.body.Layout()
-	sb := w.bodyView.scroll
-	sb.scrollPos, sb.totalLines, sb.visibleLines = w.body.GetScroll()
-	w.bodyView.scroll.Draw(s)
-	w.body.Draw(s)
+	if scroll, total, visible := w.body.GetScroll(); visible > 0 && total > visible {
+		thumb := max(1, visible*visible/total)
+		at := min(visible-thumb, scroll*visible/total)
+		cv.fill(rect{0, w.tag.h + at, 1, thumb}, tcell.StyleDefault.Background(theme.ScrollThumb))
+	}
 }
 
 // broadcastEvent delivers a counted event record to all open event file subscribers.
@@ -740,18 +681,12 @@ func (win *Window) colorAtFunc() func(int) (tcell.Color, bool) {
 	}
 }
 
-func newWindow(tag string, parent *Column, editor *Editor, x, y, w, h int) *Window {
-	handle := &Handle{BaseView: BaseView{x: x, y: y, w: 1, h: 1}, color: editor.theme.Handle}
-	bodyView := &BodyView{TreeNode: TreeNode{BaseView: BaseView{x: x + 1, y: y + 1, w: w - 1, h: h - 1}}}
-	bodyView.scroll = &Scrollbar{
-		BaseView: BaseView{x: x + 1, y: y + 1, w: 1, h: h - 1},
-		thumb:    &editor.theme.ScrollThumb,
-	}
+// newWindow returns a window of width w, to be placed by its column.
+func newWindow(tag string, parent *Column, editor *Editor, w int) *Window {
 	win := &Window{
-		TreeNode: TreeNode{BaseView: BaseView{x: x, y: y, w: w, h: h}},
-		tag:      NewTextView(tag, x+1, y, w-1, 1, &editor.theme, &editor.theme.Tag, false, false),
-		parent:   parent, editor: editor,
-		handle: handle, bodyView: bodyView,
+		rect:   rect{w: w},
+		tag:    NewTextView(tag, w-1, 1, &editor.theme, &editor.theme.Tag, false, false),
+		parent: parent, editor: editor,
 	}
 	win.tag.buffer.onMutate = func(_, _, _ int, _ string) {
 		prev := len(win.tag.layout)
@@ -763,12 +698,12 @@ func newWindow(tag string, parent *Column, editor *Editor, x, y, w, h int) *Wind
 	return win
 }
 
-func NewTermWindow(tag string, parent *Column, editor *Editor, x, y, w, h int, cmd, dir string) (*Window, error) {
+func NewTermWindow(tag string, parent *Column, editor *Editor, w int, cmd, dir string) (*Window, error) {
 	sess, err := session.NewLocal(cmd, dir)
 	if err != nil {
 		return nil, err
 	}
-	win, err := newTermWindowFromSession(tag, sess, parent, editor, x, y, w, h)
+	win, err := newTermWindowFromSession(tag, sess, parent, editor, w)
 	if err != nil {
 		return nil, err
 	}
@@ -776,9 +711,9 @@ func NewTermWindow(tag string, parent *Column, editor *Editor, x, y, w, h int, c
 	return win, nil
 }
 
-func newTermWindowFromSession(tag string, sess session.Session, parent *Column, editor *Editor, x, y, w, h int) (*Window, error) {
-	win := newWindow(tag, parent, editor, x, y, w, h)
-	term, err := NewTermView(editor, sess, x+1, y+1, w-1, h-1, func() {
+func newTermWindowFromSession(tag string, sess session.Session, parent *Column, editor *Editor, w int) (*Window, error) {
+	win := newWindow(tag, parent, editor, w)
+	term, err := NewTermView(editor, sess, func() {
 		editor.RemoveWindow(win)
 	})
 	if err != nil {
@@ -787,7 +722,6 @@ func newTermWindowFromSession(tag string, sess session.Session, parent *Column, 
 	}
 	win.kind = WinTerm
 	win.body = term
-	win.bodyView.content = term
 	filename := win.GetFilename()
 	suffix := ""
 	if base := filepath.Base(filename); strings.HasPrefix(base, "-") {
@@ -830,11 +764,10 @@ func newTermWindowFromSession(tag string, sess session.Session, parent *Column, 
 	return win, nil
 }
 
-func NewWindow(tag, body string, parent *Column, editor *Editor, x, y, w, h int) *Window {
-	win := newWindow(tag, parent, editor, x, y, w, h)
-	tv := NewTextView(body, x+1, y+1, w-1, h-1, &editor.theme, &editor.theme.Body, false, true)
+func NewWindow(tag, body string, parent *Column, editor *Editor, w int) *Window {
+	win := newWindow(tag, parent, editor, w)
+	tv := NewTextView(body, w-1, 0, &editor.theme, &editor.theme.Body, false, true)
 	win.body = tv
-	win.bodyView.content = tv
 	tv.buffer.onMutate = func(q0, q1Old, q1New int, text string) {
 		win.adjustSpans(q0, q1Old, q1New)
 		win.addrQ0 = adjustPoint(win.addrQ0, q0, q1Old, q1New)
@@ -921,12 +854,12 @@ func (win *Window) SetName(name string) {
 }
 
 // clickWordOffsets returns the rune offsets [q0, q1) of word in the target view.
-func (win *Window) clickWordOffsets(target View, mx, my int, word string) (q0, q1 int) {
+func (win *Window) clickWordOffsets(target View, x, y int, word string) (q0, q1 int) {
 	tv, ok := target.(*TextView)
 	if !ok {
 		return 0, len([]rune(word))
 	}
-	bx, by := tv.visualToBuffer(mx-tv.x, my-tv.y+tv.scroll.Pos)
+	bx, by := tv.visualToBuffer(x, y+tv.scroll.Pos)
 	if by < 0 || by >= len(tv.buffer.lines) {
 		return 0, len([]rune(word))
 	}
@@ -941,10 +874,6 @@ func (win *Window) clickWordOffsets(target View, mx, my int, word string) (q0, q
 	return
 }
 
-func (win *Window) Contains(x, y int) bool {
-	return x >= win.x && x < win.x+win.w && y >= win.y && y < win.y+win.h
-}
-
 func (win *Window) tagHeight() int {
 	h := len(win.tag.layout)
 	if h < 1 {
@@ -954,15 +883,14 @@ func (win *Window) tagHeight() int {
 }
 
 func (win *Window) reflow() {
-	win.tag.Resize(win.x+1, win.y, win.w-1, 0)
-	th := win.tagHeight()
-	win.tag.h = th
-	win.handle.Resize(win.x, win.y, 1, th)
-	bh := max(0, win.h-th)
-	win.bodyView.Resize(win.x, win.y+th, win.w, bh)
+	win.tag.Resize(win.w-1, 0)
+	win.tag.h = win.tagHeight()
+	r := win.bodyRect()
+	win.body.Resize(r.w, r.h)
 }
 
-func (win *Window) Resize(x, y, w, h int) {
-	win.x, win.y, win.w, win.h = x, y, w, h
+// Resize places the window at r in its column.
+func (win *Window) Resize(r rect) {
+	win.rect = r
 	win.reflow()
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"image"
 	"time"
 
 	"github.com/gdamore/tcell/v3"
@@ -20,6 +21,7 @@ type mouseTarget struct {
 	col  *Column
 	win  *Window
 	view View // the tag/body content view; nil for handles and the scroll gutter
+	x, y int  // the position in the innermost of view, win and col that was hit
 }
 
 // mouseGesture tracks the in-progress mouse gesture across events: the previous
@@ -32,40 +34,46 @@ type mouseGesture struct {
 	chorded    bool
 }
 
-// resolveTarget hit-tests (mx, my) against the editor layout and returns the
-// column/window/content view under it. Every routing and chording decision
-// starts here; dispatch makes the two chrome sub-distinctions (handle vs.
-// scroll gutter, column handle vs. miss) from the pointers it returns.
-func (e *Editor) resolveTarget(mx, my int) mouseTarget {
-	if my == 0 {
-		return mouseTarget{view: e.tag}
+// resolveTarget hit-tests the screen position (x, y) against the editor
+// layout and returns the column/window/content view under it. Every routing
+// and chording decision starts here; dispatch makes the two chrome
+// sub-distinctions (handle vs. scroll gutter, column handle vs. miss) from
+// the pointers and position it returns. Each container hit-tests its
+// children in its own coordinates.
+func (e *Editor) resolveTarget(x, y int) mouseTarget {
+	if y == 0 {
+		return mouseTarget{view: e.tag, x: x, y: y}
 	}
 	for _, col := range e.columns {
-		if !col.Contains(mx, my) {
-			continue
+		if col.contains(x, y) {
+			return col.hit(x-col.x, y-col.y)
 		}
-		if my == col.tag.y {
-			if mx == col.x {
-				return mouseTarget{col: col} // column handle
-			}
-			return mouseTarget{col: col, view: col.tag}
-		}
-		for _, win := range col.windows {
-			if !win.Contains(mx, my) {
-				continue
-			}
-			win.tag.UpdateLayout()
-			if mx == win.x {
-				return mouseTarget{col: col, win: win} // handle rows / scroll gutter
-			}
-			if my < win.y+win.tagHeight() {
-				return mouseTarget{col: col, win: win, view: win.tag}
-			}
-			return mouseTarget{col: col, win: win, view: win.body}
-		}
-		return mouseTarget{col: col} // inside the column, off every window
 	}
 	return mouseTarget{}
+}
+
+func (c *Column) hit(x, y int) mouseTarget {
+	if t := c.tagRect(); t.contains(x, y) {
+		return mouseTarget{col: c, view: c.tag, x: x - t.x, y: y - t.y}
+	}
+	for _, win := range c.windows {
+		if win.contains(x, y) {
+			t := win.hit(x-win.x, y-win.y)
+			t.col = c
+			return t
+		}
+	}
+	return mouseTarget{col: c, x: x, y: y} // the column handle, or off every window
+}
+
+func (w *Window) hit(x, y int) mouseTarget {
+	if t := w.tagRect(); t.contains(x, y) {
+		return mouseTarget{win: w, view: w.tag, x: x - t.x, y: y - t.y}
+	}
+	if b := w.bodyRect(); b.contains(x, y) {
+		return mouseTarget{win: w, view: w.body, x: x - b.x, y: y - b.y}
+	}
+	return mouseTarget{win: w, x: x, y: y} // handle rows / scroll gutter
 }
 
 // chordTargetOf reports the view eligible for chording at a resolved target and
@@ -152,16 +160,24 @@ func (e *Editor) handleMouse(ev *tcell.EventMouse) bool {
 		return false
 	}
 	if e.dragView != nil {
+		ev := relative(ev, e.dragOrigin)
 		quit := e.dragView.HandleEvent(ev)
 		if buttons == tcell.ButtonNone {
 			e.dragView = nil
 		} else if buttons&tcell.ButtonPrimary != 0 {
-			e.trackDragScroll(e.dragView, my)
+			_, y := ev.Position()
+			e.trackDragScroll(e.dragView, y)
 		}
 		return quit
 	}
 
 	return e.dispatchPress(ev, mx, my, buttons)
+}
+
+// relative returns ev as seen from origin.
+func relative(ev *tcell.EventMouse, origin image.Point) *tcell.EventMouse {
+	x, y := ev.Position()
+	return tcell.NewEventMouse(x-origin.X, y-origin.Y, ev.Buttons(), ev.Modifiers())
 }
 
 // dispatchPress handles a fresh press: it arms chording on a primary-only press
@@ -181,17 +197,18 @@ func (e *Editor) dispatchPress(ev *tcell.EventMouse, mx, my int, buttons tcell.B
 
 	switch {
 	case t.view != nil: // a content region: global/column/window tag or window body
+		// The view sees the event in its own coordinates, as it does any
+		// drag the press starts.
+		e.dragOrigin = image.Pt(mx-t.x, my-t.y)
+		ev := relative(ev, e.dragOrigin)
 		if t.win != nil {
-			return e.clickWindow(ev, t, mx, my, buttons)
+			return e.clickWindow(ev, t, buttons)
 		}
-		if t.col != nil {
-			return e.clickTag(ev, t.col.tag, t.col, mx, my, buttons)
-		}
-		return e.clickTag(ev, e.tag, nil, mx, my, buttons)
+		return e.clickTag(ev, t.view, t.col, buttons)
 
 	case t.win != nil: // window chrome: handle in the tag rows, scroll gutter below
 		win := t.win
-		if my < win.y+win.tagHeight() {
+		if t.y < win.tag.h {
 			if held {
 				e.dragWin = win
 				e.dragWinOrigH = win.explicitHeight
@@ -201,10 +218,10 @@ func (e *Editor) dispatchPress(ev *tcell.EventMouse, mx, my int, buttons tcell.B
 				e.focusedView = win.tag
 			}
 		} else {
-			e.scrollWindow(win, my, buttons)
+			e.scrollWindow(win, t.y-win.tag.h, buttons)
 		}
 
-	case t.col != nil && my == t.col.tag.y && mx == t.col.x: // column handle
+	case t.col != nil && t.x == 0 && t.y == 0: // column handle
 		if held {
 			e.dragCol = t.col
 			e.dragColOrigW = t.col.explicitWidth
@@ -215,8 +232,8 @@ func (e *Editor) dispatchPress(ev *tcell.EventMouse, mx, my int, buttons tcell.B
 
 // clickTag handles a primary/middle/secondary click on the global tag (col nil)
 // or a column tag. It executes/plumbs a clicked word or starts a tag selection.
-func (e *Editor) clickTag(ev *tcell.EventMouse, tag *TextView, col *Column, mx, my int, buttons tcell.ButtonMask) bool {
-	word := tag.GetClickWord(mx, my)
+func (e *Editor) clickTag(ev *tcell.EventMouse, tag View, col *Column, buttons tcell.ButtonMask) bool {
+	word := tag.GetClickWord(ev.Position())
 	if word != "" {
 		if buttons == tcell.ButtonMiddle {
 			return e.Execute(col, nil, word)
@@ -233,10 +250,10 @@ func (e *Editor) clickTag(ev *tcell.EventMouse, tag *TextView, col *Column, mx, 
 
 // scrollWindow implements the window scroll gutter: Button1 scrolls up,
 // Button3 scrolls down (both auto-repeat via the main-loop timer), Button2
-// jumps to a position proportional to the click.
-func (e *Editor) scrollWindow(win *Window, my int, buttons tcell.ButtonMask) {
-	th := win.tagHeight()
-	amount := my - (win.y + th) + 1
+// jumps to a position proportional to the click. row is the clicked row of
+// the body.
+func (e *Editor) scrollWindow(win *Window, row int, buttons tcell.ButtonMask) {
+	amount := row + 1
 	switch {
 	case buttons&tcell.ButtonPrimary != 0:
 		if e.scrollWin == nil {
@@ -252,7 +269,7 @@ func (e *Editor) scrollWindow(win *Window, my int, buttons tcell.ButtonMask) {
 		e.scrollWin, e.scrollAmount, e.scrollDir = win, amount, 1
 	case buttons&tcell.ButtonMiddle != 0:
 		if scroll, total, visible := win.body.GetScroll(); visible > 0 && total > 0 {
-			newScroll := ((my - (win.y + th)) * total) / visible
+			newScroll := (row * total) / visible
 			win.body.Scroll(newScroll - scroll)
 		}
 	}
@@ -260,7 +277,7 @@ func (e *Editor) scrollWindow(win *Window, my int, buttons tcell.ButtonMask) {
 
 // clickWindow handles a click in a window's tag or body: it activates the
 // window, starts a selection, and executes/plumbs a Button2/Button3 word.
-func (e *Editor) clickWindow(ev *tcell.EventMouse, t mouseTarget, mx, my int, buttons tcell.ButtonMask) bool {
+func (e *Editor) clickWindow(ev *tcell.EventMouse, t mouseTarget, buttons tcell.ButtonMask) bool {
 	win, target := t.win, t.view
 	if buttons == tcell.ButtonPrimary {
 		e.ActivateWindow(win)
@@ -273,8 +290,8 @@ func (e *Editor) clickWindow(ev *tcell.EventMouse, t mouseTarget, mx, my int, bu
 	target.HandleEvent(ev)
 	var word string
 	if buttons&(tcell.ButtonMiddle|tcell.ButtonSecondary) != 0 && (!target.IsRaw() || ev.Modifiers()&tcell.ModCtrl != 0) {
-		if word = target.GetClickWord(mx, my); word != "" {
-			q0, q1 := win.clickWordOffsets(target, mx, my, word)
+		if word = target.GetClickWord(t.x, t.y); word != "" {
+			q0, q1 := win.clickWordOffsets(target, t.x, t.y, word)
 			if buttons&tcell.ButtonMiddle != 0 {
 				win.broadcastEvent('M', 'x', q0, q1, 0, word)
 			} else {

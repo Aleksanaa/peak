@@ -16,7 +16,6 @@ func newTestEditorWithColumn(t *testing.T) (*Editor, *Column) {
 	col.explicitWidth = 200
 	e.columns = append(e.columns, col)
 	e.resize()
-	e.syncChildren()
 	return e, col
 }
 
@@ -26,7 +25,7 @@ func addFileWindow(t *testing.T, col *Column, tag, body string) *Window {
 	win.kind = WinFile
 	win.writable = true
 	win.savedVersion = win.bodyTextView().buffer.version
-	col.Resize(col.x, col.y, col.w, col.h)
+	col.Resize(col.rect)
 	return win
 }
 
@@ -285,7 +284,7 @@ func makeTextWindow(t *testing.T, col *Column, body string) *Window {
 	win := col.AddWindow(" /tmp/f.go Get Put Del ", body)
 	win.kind = WinFile
 	win.savedVersion = win.bodyTextView().buffer.version
-	col.Resize(col.x, col.y, col.w, col.h) // computes layout
+	col.Resize(col.rect) // computes layout
 	return win
 }
 
@@ -409,7 +408,6 @@ func TestEditorDumpColumnIndex(t *testing.T) {
 	col1.explicitWidth = 100
 	e.columns = append(e.columns, col0, col1)
 	e.resize()
-	e.syncChildren()
 
 	addFileWindow(t, col1, " /tmp/b.go Get Put Del ", "")
 
@@ -590,7 +588,6 @@ func TestEditorRoundTripMultipleColumns(t *testing.T) {
 	col1.explicitWidth = 100
 	e.columns = append(e.columns, col0, col1)
 	e.resize()
-	e.syncChildren()
 
 	addFileWindow(t, col0, " /tmp/a.go Get Put Del ", "")
 	addFileWindow(t, col1, " /tmp/b.go Get Put Del ", "")

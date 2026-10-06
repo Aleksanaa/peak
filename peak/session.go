@@ -309,7 +309,6 @@ func (e *Editor) Load(file string) error {
 		e.columns = append(e.columns, col)
 	}
 	e.resize()
-	e.syncChildren()
 
 	// Pass 2: add windows now that col.h is set for height calculation.
 	type pending struct {
@@ -334,7 +333,7 @@ func (e *Editor) Load(file string) error {
 	}
 
 	for _, col := range e.columns {
-		col.Resize(col.x, col.y, col.w, col.h)
+		col.Resize(col.rect)
 	}
 	// Restore scroll and cursor after Resize so UpdateLayout has computed the
 	// layout and the ratio-based scroll recalculation doesn't clobber them.

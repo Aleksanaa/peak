@@ -179,7 +179,7 @@ func (e *Editor) OpenLine(win *Window, path string, line, col int, binaryFallbac
 		if target != nil {
 			newWin := target.AddWindow(" New ", "")
 			e.ActivateWindow(newWin)
-			target.Resize(target.x, target.y, target.w, target.h)
+			target.Resize(target.rect)
 		}
 		return
 	}
@@ -220,7 +220,7 @@ func (e *Editor) createWindow(target *Column, full string, content string, isDir
 	newWin := target.AddWindow(tagText(full, "Get Put Undo Redo Snarf Zerox Del"), content)
 	e.ActivateWindow(newWin)
 	newWin.loaded(isDir, writable)
-	target.Resize(target.x, target.y, target.w, target.h)
+	target.Resize(target.rect)
 	if line >= 0 {
 		newWin.bodyTextView().GotoLineCol(line, col)
 	}
@@ -355,7 +355,7 @@ func (e *Editor) RemoveWindow(target *Window) {
 	if col.maximized == target {
 		col.maximized = nil
 	}
-	col.Resize(col.x, col.y, col.w, col.h)
+	col.Resize(col.rect)
 	if e.active == target {
 		if len(col.windows) > 0 {
 			e.active = col.windows[0]
@@ -454,7 +454,7 @@ func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {
 		return
 	}
 	e.ActivateWindow(newWin)
-	targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
+	targetCol.Resize(targetCol.rect)
 }
 
 func (e *Editor) openRemoteTermWindow(targetCol *Column, win *Window, mountPath, sessRel, dir string) {
@@ -497,7 +497,7 @@ func (e *Editor) openRemoteTermWindow(targetCol *Column, win *Window, mountPath,
 			return
 		}
 		e.ActivateWindow(newWin)
-		targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
+		targetCol.Resize(targetCol.rect)
 	})
 }
 
@@ -520,7 +520,7 @@ func (e *Editor) cmdZerox(col *Column, win *Window) {
 			newWin.markSaved(newTv.buffer.version)
 		}
 		e.ActivateWindow(newWin)
-		target.parent.Resize(target.parent.x, target.parent.y, target.parent.w, target.parent.h)
+		target.parent.Resize(target.parent.rect)
 	} else if target.kind == WinTerm {
 		e.cmdWin(col, target, "Win")
 	}
@@ -540,7 +540,7 @@ func (e *Editor) cmdSort(col *Column, win *Window) {
 		return targetCol.windows[i].GetFilename() < targetCol.windows[j].GetFilename()
 	})
 
-	targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
+	targetCol.Resize(targetCol.rect)
 }
 
 func (e *Editor) cmdTab(col *Column, win *Window, cmd string) {
@@ -680,7 +680,7 @@ func (e *Editor) findOrCreateErrorWindow(col *Column, win *Window, dir string) *
 	newWin := targetCol.AddWindow(tagText(errName, "Get Del"), "")
 	newWin.kind = WinOut
 	e.ActivateWindow(newWin)
-	targetCol.Resize(targetCol.x, targetCol.y, targetCol.w, targetCol.h)
+	targetCol.Resize(targetCol.rect)
 	return newWin
 }
 

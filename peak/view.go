@@ -58,12 +58,6 @@ type ScrollState struct {
 	AutoScroll bool
 }
 
-// BaseView provides common fields and methods for all views.
-type BaseView struct {
-	x, y, w, h int
-	scroll     ScrollState
-}
-
 func (s *ScrollState) Clamp(total, visible int) {
 	s.Pos = max(0, min(total, s.Pos))
 }
