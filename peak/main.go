@@ -312,76 +312,27 @@ func (e *Editor) moveColumnTo(col *Column, mx, origW int) {
 }
 
 // moveWindowTo drags win, origH high when the drag began, to the screen
-// position (mx, my). It reports whether win moved to another column.
-func (e *Editor) moveWindowTo(win *Window, mx, my, origH int) (moved bool) {
-	colIdx := slices.Index(e.columns, win.parent)
-	cur := e.columns[colIdx]
-
-	var toCol *Column
-	if colIdx < len(e.columns)-1 && mx >= cur.x+cur.w {
-		toCol = e.columns[colIdx+1]
-	} else if colIdx > 0 {
-		prev := e.columns[colIdx-1]
-		if mx < prev.x+prev.w-prev.w/4 {
-			toCol = prev
+// position (mx, my): into the next or previous column once the pointer is
+// far enough into it, otherwise within its own. It reports whether win moved
+// to another column.
+func (e *Editor) moveWindowTo(win *Window, mx, my, origH int) bool {
+	cur := win.parent
+	i := slices.Index(e.columns, cur)
+	var to *Column
+	if i < len(e.columns)-1 && mx >= cur.x+cur.w {
+		to = e.columns[i+1]
+	} else if i > 0 {
+		if prev := e.columns[i-1]; mx < prev.x+prev.w-prev.w/4 {
+			to = prev
 		}
 	}
-
-	if toCol != nil {
-		i := slices.Index(cur.windows, win)
-		cur.windows = slices.Delete(cur.windows, i, i+1)
-		if cur.maximized == win {
-			cur.maximized = nil
-		}
-		cur.Resize(cur.rect)
-		win.parent, win.explicitHeight = toCol, 0
-		newIdx := 0
-		for _, w := range toCol.windows {
-			if my-toCol.y < w.y+w.h/2 {
-				break
-			}
-			newIdx++
-		}
-		toCol.windows = slices.Insert(toCol.windows, newIdx, win)
-		toCol.Resize(toCol.rect)
-		return true
-	}
-
-	y := my - cur.y // in the column
-	wins := cur.windows
-	idx := slices.Index(wins, win)
-	n := len(wins)
-
-	if idx < n-1 && y > wins[idx+1].y {
-		delta := origH - win.explicitHeight
-		wins[idx], wins[idx+1] = wins[idx+1], wins[idx]
-		wins[idx+1].explicitHeight = origH
-		if idx > 0 {
-			wins[idx-1].explicitHeight -= delta
-		}
-		cur.Resize(cur.rect)
+	if to == nil {
+		cur.moveWindow(win, my-cur.y, origH)
 		return false
 	}
-	if idx == 0 {
-		return false
-	}
-	prev := wins[idx-1]
-	combinedH := prev.h + win.h
-	if y < prev.y+prev.tagHeight() {
-		wins[idx], wins[idx-1] = wins[idx-1], wins[idx]
-		wins[idx-1].explicitHeight = origH
-		wins[idx].explicitHeight = combinedH - origH
-	} else {
-		newH := max(prev.tagHeight(), min(combinedH-win.tagHeight(), y-prev.y))
-
-		if newH == prev.explicitHeight {
-			return false
-		}
-		win.explicitHeight += prev.explicitHeight - newH
-		prev.explicitHeight = newH
-	}
-	cur.Resize(cur.rect)
-	return false
+	cur.remove(win)
+	to.insert(win, my-to.y)
+	return true
 }
 
 func (e *Editor) resize() {

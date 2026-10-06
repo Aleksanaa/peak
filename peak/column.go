@@ -238,3 +238,61 @@ func (c *Column) GrowFull(win *Window) {
 	}
 	c.Resize(c.rect)
 }
+
+// remove takes win out of the column and lays out the rest.
+func (c *Column) remove(win *Window) {
+	i := slices.Index(c.windows, win)
+	c.windows = slices.Delete(c.windows, i, i+1)
+	if c.maximized == win {
+		c.maximized = nil
+	}
+	c.Resize(c.rect)
+}
+
+// insert adds win, from another column, at row y of the column: before the
+// first window whose middle is below y.
+func (c *Column) insert(win *Window, y int) {
+	i := 0
+	for i < len(c.windows) && y >= c.windows[i].y+c.windows[i].h/2 {
+		i++
+	}
+	win.parent, win.explicitHeight = c, 0
+	c.windows = slices.Insert(c.windows, i, win)
+	c.Resize(c.rect)
+}
+
+// moveWindow drags win, origH high when the drag began, to row y of the
+// column. Past the top of the next window, win swaps with it; above the tag
+// of the previous one, win swaps with that; otherwise win's top follows y.
+func (c *Column) moveWindow(win *Window, y, origH int) {
+	wins := c.windows
+	idx := slices.Index(wins, win)
+	if idx < len(wins)-1 && y > wins[idx+1].y {
+		delta := origH - win.explicitHeight
+		wins[idx], wins[idx+1] = wins[idx+1], wins[idx]
+		wins[idx+1].explicitHeight = origH
+		if idx > 0 {
+			wins[idx-1].explicitHeight -= delta
+		}
+		c.Resize(c.rect)
+		return
+	}
+	if idx == 0 {
+		return
+	}
+	prev := wins[idx-1]
+	combinedH := prev.h + win.h
+	if y < prev.y+prev.tagHeight() {
+		wins[idx], wins[idx-1] = wins[idx-1], wins[idx]
+		wins[idx-1].explicitHeight = origH
+		wins[idx].explicitHeight = combinedH - origH
+	} else {
+		newH := max(prev.tagHeight(), min(combinedH-win.tagHeight(), y-prev.y))
+		if newH == prev.explicitHeight {
+			return
+		}
+		win.explicitHeight += prev.explicitHeight - newH
+		prev.explicitHeight = newH
+	}
+	c.Resize(c.rect)
+}
