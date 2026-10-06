@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"image"
 	"log"
 	"os"
 	"path/filepath"
@@ -43,32 +42,26 @@ type Theme struct {
 
 // Editor is the main application state.
 type Editor struct {
-	w, h          int
-	lastSize      int
-	redrawCh      chan struct{} // capacity-1; 9P goroutines signal after state changes
-	callCh        chan func()   // buffered; background goroutines dispatch UI callbacks
-	screen        tcell.Screen
-	tag           *TextView
-	columns       []*Column
-	active        *Window
-	dragView      View
-	dragOrigin    image.Point // where dragView is on screen
-	dragWin       *Window
-	dragWinOrigH  int
-	dragWinButton tcell.ButtonMask
-	dragWinStartY int
-	dragCol       *Column
-	dragColOrigW  int
-	focusedView   View
+	w, h        int
+	lastSize    int
+	redrawCh    chan struct{} // capacity-1; 9P goroutines signal after state changes
+	callCh      chan func()   // buffered; background goroutines dispatch UI callbacks
+	screen      tcell.Screen
+	tag         *TextView
+	columns     []*Column
+	active      *Window
+	focusedView View
 
-	scrollWin       *Window
-	scrollAmount    int
-	scrollDir       int
-	scrollStartTime time.Time
-	theme           Theme
-	nextWinID       int
-	ninep           *NineP
-	gesture         mouseGesture
+	// capture, while a press's gesture lasts, receives its later mouse
+	// events; it reports whether the gesture goes on.
+	capture func(*tcell.EventMouse) bool
+	// repeat, while a held button auto-scrolls, runs every tick.
+	repeat func()
+
+	theme     Theme
+	nextWinID int
+	ninep     *NineP
+	gesture   mouseGesture
 }
 
 // Redraw signals the main loop to redraw on the next iteration.
@@ -196,7 +189,7 @@ func (e *Editor) Run() {
 	for {
 		var timer *time.Timer
 		var tick <-chan time.Time
-		if e.scrollWin != nil {
+		if e.repeat != nil {
 			timer = time.NewTimer(50 * time.Millisecond)
 			tick = timer.C
 		}
@@ -218,43 +211,12 @@ func (e *Editor) Run() {
 		case <-e.redrawCh:
 			e.Draw()
 		case <-tick:
-			if e.scrollWin != nil && time.Since(e.scrollStartTime) > 200*time.Millisecond {
-				scroll, total, visible := e.scrollWin.body.GetScroll()
-				if !(e.scrollDir > 0 && scroll+visible >= total) {
-					e.scrollWin.body.Scroll(e.scrollDir * e.scrollAmount)
-					if dc, ok := e.scrollWin.body.(dragCursor); ok {
-						dc.AdvanceDragCursor(e.scrollDir)
-					}
-				}
-				e.Draw()
-			}
+			e.repeat()
+			e.Draw()
 		}
 		if timer != nil {
 			timer.Stop()
 		}
-	}
-}
-
-// trackDragScroll sets or clears scrollWin when a drag selection reaches a
-// view edge, so the 50ms timer keeps extending the selection automatically.
-// y is the pointer's row in the view.
-func (e *Editor) trackDragScroll(view View, y int) {
-	if e.active == nil || view != e.active.body {
-		return
-	}
-	_, _, h := view.GetScroll()
-	var dir int
-	if y >= h-1 {
-		dir = 1
-	} else if y <= 0 {
-		dir = -1
-	}
-	if dir != 0 {
-		e.scrollWin = e.active
-		e.scrollAmount, e.scrollDir = 1, dir
-		e.scrollStartTime = time.Time{} // zero bypasses the 200ms delay
-	} else if e.scrollWin != nil && e.scrollWin.body == view {
-		e.scrollWin = nil
 	}
 }
 
@@ -280,7 +242,7 @@ func (e *Editor) drawView(v View, cv canvas) {
 
 func (e *Editor) HandleEvent(ev tcell.Event) (bool, bool) {
 	if me, ok := ev.(*tcell.EventMouse); ok && me.Buttons() == tcell.ButtonNone &&
-		e.dragCol == nil && e.dragWin == nil && e.dragView == nil && e.scrollWin == nil && !e.gesture.chorded {
+		e.capture == nil && !e.gesture.chorded {
 		// Skip redraw on mouse moves with no buttons/drag/scroll
 		return false, false
 	}
@@ -313,14 +275,16 @@ func (e *Editor) ActivateWindow(win *Window) {
 	}
 }
 
-func (e *Editor) moveColumnTo(col *Column, mx int) {
+// moveColumnTo drags col, origW wide when the drag began, to the screen
+// column mx.
+func (e *Editor) moveColumnTo(col *Column, mx, origW int) {
 	idx := slices.Index(e.columns, col)
 	n := len(e.columns)
 
 	if idx < n-1 && mx > e.columns[idx+1].x+e.columns[idx+1].w/2 {
-		delta := e.dragColOrigW - col.explicitWidth
+		delta := origW - col.explicitWidth
 		e.columns[idx], e.columns[idx+1] = e.columns[idx+1], e.columns[idx]
-		e.columns[idx+1].explicitWidth = e.dragColOrigW
+		e.columns[idx+1].explicitWidth = origW
 		if idx > 0 {
 			e.columns[idx-1].explicitWidth -= delta
 		}
@@ -334,8 +298,8 @@ func (e *Editor) moveColumnTo(col *Column, mx int) {
 	combinedW := prev.w + col.w
 	if mx < prev.x+2 {
 		e.columns[idx], e.columns[idx-1] = e.columns[idx-1], e.columns[idx]
-		e.columns[idx-1].explicitWidth = e.dragColOrigW
-		e.columns[idx].explicitWidth = combinedW - e.dragColOrigW
+		e.columns[idx-1].explicitWidth = origW
+		e.columns[idx].explicitWidth = combinedW - origW
 	} else {
 		newW := max(5, min(combinedW-5, mx-prev.x))
 		if newW == prev.explicitWidth {
@@ -347,8 +311,9 @@ func (e *Editor) moveColumnTo(col *Column, mx int) {
 	e.resize()
 }
 
-// moveWindowTo drags win to the screen position (mx, my).
-func (e *Editor) moveWindowTo(win *Window, mx, my int) {
+// moveWindowTo drags win, origH high when the drag began, to the screen
+// position (mx, my). It reports whether win moved to another column.
+func (e *Editor) moveWindowTo(win *Window, mx, my, origH int) (moved bool) {
 	colIdx := slices.Index(e.columns, win.parent)
 	cur := e.columns[colIdx]
 
@@ -379,9 +344,7 @@ func (e *Editor) moveWindowTo(win *Window, mx, my int) {
 		}
 		toCol.windows = slices.Insert(toCol.windows, newIdx, win)
 		toCol.Resize(toCol.rect)
-		e.dragWinOrigH = win.explicitHeight
-		e.dragWinStartY = -1 // window moved columns; suppress grow-on-release
-		return
+		return true
 	}
 
 	y := my - cur.y // in the column
@@ -390,34 +353,35 @@ func (e *Editor) moveWindowTo(win *Window, mx, my int) {
 	n := len(wins)
 
 	if idx < n-1 && y > wins[idx+1].y {
-		delta := e.dragWinOrigH - win.explicitHeight
+		delta := origH - win.explicitHeight
 		wins[idx], wins[idx+1] = wins[idx+1], wins[idx]
-		wins[idx+1].explicitHeight = e.dragWinOrigH
+		wins[idx+1].explicitHeight = origH
 		if idx > 0 {
 			wins[idx-1].explicitHeight -= delta
 		}
 		cur.Resize(cur.rect)
-		return
+		return false
 	}
 	if idx == 0 {
-		return
+		return false
 	}
 	prev := wins[idx-1]
 	combinedH := prev.h + win.h
 	if y < prev.y+prev.tagHeight() {
 		wins[idx], wins[idx-1] = wins[idx-1], wins[idx]
-		wins[idx-1].explicitHeight = e.dragWinOrigH
-		wins[idx].explicitHeight = combinedH - e.dragWinOrigH
+		wins[idx-1].explicitHeight = origH
+		wins[idx].explicitHeight = combinedH - origH
 	} else {
 		newH := max(prev.tagHeight(), min(combinedH-win.tagHeight(), y-prev.y))
 
 		if newH == prev.explicitHeight {
-			return
+			return false
 		}
 		win.explicitHeight += prev.explicitHeight - newH
 		prev.explicitHeight = newH
 	}
 	cur.Resize(cur.rect)
+	return false
 }
 
 func (e *Editor) resize() {

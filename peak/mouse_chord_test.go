@@ -27,11 +27,12 @@ func press(e *Editor, x, y int, buttons tcell.ButtonMask) {
 	e.HandleEvent(tcell.NewEventMouse(x, y, buttons, 0))
 }
 
-// chordTarget hit-tests the top-left corner of v and reports the chordable
-// view there.
+// chordTarget hit-tests the top-left corner of v and reports the view a chord
+// there would act on, and its window.
 func chordTarget(e *Editor, v any) (View, *Window) {
 	p := screenAt(e, v)
-	return e.chordTargetOf(e.resolveTarget(p.X, p.Y))
+	t := e.resolveTarget(p.X, p.Y)
+	return t.view, t.win
 }
 
 func TestMouseChordSweepMiddleCutsBodyText(t *testing.T) {
@@ -248,10 +249,8 @@ func TestChordTargetRejectsNonTextAreas(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotTV, gotWin := e.chordTargetOf(e.resolveTarget(tt.x, tt.y))
-
-			if gotTV != nil || gotWin != nil {
-				t.Fatalf("chordTarget(%d, %d) = (%p, %p), want (nil, nil)", tt.x, tt.y, gotTV, gotWin)
+			if v := e.resolveTarget(tt.x, tt.y).view; v != nil {
+				t.Fatalf("view at (%d, %d) = %p, want none to chord on", tt.x, tt.y, v)
 			}
 		})
 	}

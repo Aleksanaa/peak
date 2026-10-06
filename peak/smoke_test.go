@@ -506,7 +506,7 @@ func TestDragWindow(t *testing.T) {
 
 	// 1. Drag W1 (Col 0) to Col 2: cross one boundary at a time.
 	e.HandleEvent(tcell.NewEventMouse(0, 2, tcell.ButtonPrimary, 0))
-	if e.dragWin != w1 {
+	if e.capture == nil {
 		t.Fatal("Failed to start dragging w1")
 	}
 	// Step into Col 1 (past col0's right edge at x=colWidth)
@@ -518,7 +518,7 @@ func TestDragWindow(t *testing.T) {
 	// 2. Drag W2 (Col 1) to Col 0
 	// W2's handle is at (40, 2) on screen
 	e.HandleEvent(tcell.NewEventMouse(colWidth, 2, tcell.ButtonPrimary, 0))
-	if e.dragWin != w2 {
+	if e.capture == nil {
 		t.Fatal("Failed to start dragging w2")
 	}
 	// Left threshold: mx < col0.x+col0.w-col0.w/4 = 40-10 = 30; use x=5.
@@ -527,7 +527,7 @@ func TestDragWindow(t *testing.T) {
 
 	// 3. Drag W3 (Col 1, now alone at top) to Col 2
 	e.HandleEvent(tcell.NewEventMouse(colWidth, 2, tcell.ButtonPrimary, 0))
-	if e.dragWin != w3 {
+	if e.capture == nil {
 		t.Fatal("Failed to start dragging w3")
 	}
 	e.HandleEvent(tcell.NewEventMouse(2*colWidth+5, 20, tcell.ButtonPrimary, 0))
@@ -580,7 +580,7 @@ func TestDragWindowInternal(t *testing.T) {
 	// 1. Drag W1 (idx 0) below W2.
 	// Drag W1 by its handle and drop it in W2's body area.
 	e.HandleEvent(tcell.NewEventMouse(0, screenAt(e, w1).Y, tcell.ButtonPrimary, 0))
-	if e.dragWin != w1 {
+	if e.capture == nil {
 		t.Fatal("drag w1 failed")
 	}
 	// Drag past W2's midpoint to trigger swap-right
@@ -595,7 +595,7 @@ func TestDragWindowInternal(t *testing.T) {
 	// Current: [w2, w1, w3]
 	// We drop it in W1's tag area
 	e.HandleEvent(tcell.NewEventMouse(0, screenAt(e, w3).Y, tcell.ButtonPrimary, 0))
-	if e.dragWin != w3 {
+	if e.capture == nil {
 		t.Fatal("drag w3 failed")
 	}
 	e.HandleEvent(tcell.NewEventMouse(0, screenAt(e, w1).Y, tcell.ButtonPrimary, 0))
@@ -1414,7 +1414,7 @@ func TestDragWindowBetweenColumns(t *testing.T) {
 
 	// Drag w2 from col1 to col0, below w1.
 	e.HandleEvent(tcell.NewEventMouse(60, 2, tcell.ButtonPrimary, 0))
-	if e.dragWin != w2 {
+	if e.capture == nil {
 		t.Fatal("failed to start dragging w2")
 	}
 	e.HandleEvent(tcell.NewEventMouse(10, 15, tcell.ButtonPrimary, 0))
@@ -1429,7 +1429,7 @@ func TestDragWindowBetweenColumns(t *testing.T) {
 	// Drag w2 back to col1.
 	w2HandleY := screenAt(e, w2).Y
 	e.HandleEvent(tcell.NewEventMouse(0, w2HandleY, tcell.ButtonPrimary, 0))
-	if e.dragWin != w2 {
+	if e.capture == nil {
 		t.Fatal("failed to start dragging w2 back")
 	}
 	e.HandleEvent(tcell.NewEventMouse(70, 10, tcell.ButtonPrimary, 0))
@@ -1463,7 +1463,7 @@ func TestColumnDragPreservesBackground(t *testing.T) {
 
 	// Drag col1's column tag handle at (60, 1) left by 7 cells.
 	e.HandleEvent(tcell.NewEventMouse(60, 1, tcell.ButtonPrimary, 0))
-	if e.dragCol != col1 {
+	if e.capture == nil {
 		t.Fatal("failed to start column drag")
 	}
 	e.HandleEvent(tcell.NewEventMouse(7, 1, tcell.ButtonPrimary, 0))
@@ -1471,8 +1471,8 @@ func TestColumnDragPreservesBackground(t *testing.T) {
 
 	// Drag col1's handle back to 60.
 	e.HandleEvent(tcell.NewEventMouse(7, 1, tcell.ButtonPrimary, 0))
-	if e.dragCol != col1 {
-		t.Fatalf("expected dragCol=col1 after second start, got %v", e.dragCol)
+	if e.capture == nil {
+		t.Fatal("failed to start the second column drag")
 	}
 	e.HandleEvent(tcell.NewEventMouse(60, 1, tcell.ButtonPrimary, 0))
 	e.HandleEvent(tcell.NewEventMouse(60, 1, tcell.ButtonNone, 0))
@@ -1610,17 +1610,19 @@ func TestDragSelectAtBottomEdgeSetsScrollWin(t *testing.T) {
 	// Move to the bottom edge.
 	e.HandleEvent(tcell.NewEventMouse(bodyX, bodyY+bodyH-1, tcell.ButtonPrimary, 0))
 
-	if e.scrollWin != win {
-		t.Fatalf("at bottom edge: scrollWin = %v, want win", e.scrollWin)
+	if e.repeat == nil {
+		t.Fatal("at bottom edge: no auto-scroll")
 	}
-	if e.scrollDir != 1 {
-		t.Errorf("at bottom edge: scrollDir = %d, want 1", e.scrollDir)
+	before := tv.scroll.Pos
+	e.repeat()
+	if tv.scroll.Pos != before+1 {
+		t.Errorf("at bottom edge: a tick scrolled from %d to %d, want down by 1", before, tv.scroll.Pos)
 	}
 
-	// Move back into the middle — scrollWin must be cleared.
+	// Move back into the middle: the auto-scroll stops.
 	e.HandleEvent(tcell.NewEventMouse(bodyX, bodyY+bodyH/2, tcell.ButtonPrimary, 0))
-	if e.scrollWin != nil {
-		t.Errorf("after moving to middle: scrollWin should be nil")
+	if e.repeat != nil {
+		t.Errorf("after moving to middle: auto-scroll should stop")
 	}
 
 	_ = s
@@ -1644,20 +1646,19 @@ func TestDragSelectTickExtendsSelection(t *testing.T) {
 	tv := win.bodyTextView()
 	bodyX, bodyY, bodyH := screenAt(e, tv).X, screenAt(e, tv).Y, tv.h
 
-	// Start drag and drag to bottom edge (sets scrollWin + dir=1).
+	// Start drag and drag to bottom edge, which arms the auto-scroll.
 	e.HandleEvent(tcell.NewEventMouse(bodyX, bodyY, tcell.ButtonPrimary, 0))
 	e.HandleEvent(tcell.NewEventMouse(bodyX, bodyY+bodyH-1, tcell.ButtonPrimary, 0))
 
-	if e.scrollWin != win {
-		t.Fatal("scrollWin not set after dragging to bottom edge")
+	if e.repeat == nil {
+		t.Fatal("no auto-scroll after dragging to bottom edge")
 	}
 
 	wantScrollPos := tv.scroll.Pos + 1
 	wantEndY := tv.buffer.selection.End.y + 1
 
-	// Simulate one timer tick: scroll then advance the drag cursor.
-	win.body.Scroll(e.scrollDir * e.scrollAmount)
-	win.body.(dragCursor).AdvanceDragCursor(e.scrollDir)
+	// One timer tick scrolls and advances the drag cursor.
+	e.repeat()
 
 	if tv.scroll.Pos != wantScrollPos {
 		t.Errorf("after tick: scroll.Pos = %d, want %d", tv.scroll.Pos, wantScrollPos)
@@ -1690,8 +1691,8 @@ func TestDragSelectInTagDoesNotScrollBody(t *testing.T) {
 	e.HandleEvent(tcell.NewEventMouse(tag.X, tag.Y, tcell.ButtonPrimary, 0))
 	e.HandleEvent(tcell.NewEventMouse(tag.X+4, tag.Y, tcell.ButtonPrimary, 0))
 
-	if e.scrollWin != nil {
-		t.Error("dragging in tag must not set scrollWin")
+	if e.repeat != nil {
+		t.Error("dragging in tag must not auto-scroll")
 	}
 
 	_ = s
@@ -1779,12 +1780,8 @@ func TestDragSelectStopsAtLastLine(t *testing.T) {
 	scrollBefore := tv.scroll.Pos
 	endYBefore := tv.buffer.selection.End.y
 
-	// Simulate a tick: boundary guard must prevent scroll and selection extension.
-	scroll, total, visible := win.body.GetScroll()
-	if !(e.scrollDir > 0 && scroll+visible >= total) {
-		win.body.Scroll(e.scrollDir * e.scrollAmount)
-		win.body.(dragCursor).AdvanceDragCursor(e.scrollDir)
-	}
+	// A tick at the boundary must neither scroll nor extend the selection.
+	e.repeat()
 
 	if tv.scroll.Pos != scrollBefore {
 		t.Errorf("scroll.Pos changed from %d to %d; should stay at boundary", scrollBefore, tv.scroll.Pos)
@@ -1794,6 +1791,42 @@ func TestDragSelectStopsAtLastLine(t *testing.T) {
 	}
 
 	_ = s
+}
+
+// The scroll bar holds the mouse until release: Button3 scrolls down by the
+// rows down to the pointer and repeats while held, and moving the held pointer
+// onto the body acts there no more than a drag elsewhere does.
+func TestScrollBarHoldsMouse(t *testing.T) {
+	e, _ := setupTest(t, 80, 20)
+	col := NewColumn(0, 1, 80, 19, e)
+	e.columns = append(e.columns, col)
+	lines := make([]string, 100)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("L%02d", i)
+	}
+	win := col.AddWindow(" test ", strings.Join(lines, "\n"))
+	e.resize()
+	e.Draw()
+
+	tv := win.bodyTextView()
+	bar, body := screenAt(e, win).X, screenAt(e, win.body)
+	e.HandleEvent(tcell.NewEventMouse(bar, body.Y+2, tcell.ButtonSecondary, 0))
+	if tv.scroll.Pos != 3 {
+		t.Fatalf("Button3 on the bar's third row scrolled to %d, want 3", tv.scroll.Pos)
+	}
+	if e.repeat == nil {
+		t.Fatal("holding Button3 on the bar should repeat")
+	}
+
+	e.HandleEvent(tcell.NewEventMouse(body.X+1, body.Y+4, tcell.ButtonSecondary, 0))
+	if tv.scroll.Pos != 3 || tv.buffer.cursor != (Cursor{}) {
+		t.Errorf("moving the held pointer onto the body acted there: scroll %d, cursor %v", tv.scroll.Pos, tv.buffer.cursor)
+	}
+
+	e.HandleEvent(tcell.NewEventMouse(body.X+1, body.Y+4, tcell.ButtonNone, 0))
+	if e.capture != nil || e.repeat != nil {
+		t.Error("release should end the scroll")
+	}
 }
 
 // --- window handle button 2/3 tests ---
@@ -1965,11 +1998,8 @@ func TestHandleButton2DragMovesWindow(t *testing.T) {
 
 	// Button2 press on w2's handle.
 	e.HandleEvent(tcell.NewEventMouse(screenAt(e, w2).X, screenAt(e, w2).Y, tcell.ButtonSecondary, 0))
-	if e.dragWin != w2 {
+	if e.capture == nil {
 		t.Fatal("Button2 on handle should start a window drag")
-	}
-	if e.dragWinButton != tcell.ButtonSecondary {
-		t.Fatalf("dragWinButton = %v, want Button2", e.dragWinButton)
 	}
 
 	// Drag past w3's midpoint to trigger a swap, then release at a different Y.
@@ -2004,7 +2034,7 @@ func TestHandleButton3DragMovesWindow(t *testing.T) {
 	e.Draw()
 
 	e.HandleEvent(tcell.NewEventMouse(screenAt(e, w2).X, screenAt(e, w2).Y, tcell.ButtonMiddle, 0))
-	if e.dragWin != w2 {
+	if e.capture == nil {
 		t.Fatal("Button3 on handle should start a window drag")
 	}
 
@@ -2082,7 +2112,7 @@ func TestMoveMaximizedWindowClearsSourceFlag(t *testing.T) {
 
 	// Drag w1 into col1 using Button1 (regular drag, past col0's right edge).
 	e.HandleEvent(tcell.NewEventMouse(screenAt(e, w1).X, screenAt(e, w1).Y, tcell.ButtonPrimary, 0))
-	if e.dragWin != w1 {
+	if e.capture == nil {
 		t.Fatal("failed to start dragging w1")
 	}
 	e.HandleEvent(tcell.NewEventMouse(col1.x+5, 10, tcell.ButtonPrimary, 0))
@@ -2130,20 +2160,23 @@ func TestColumnGutterAllButtonsStartDrag(t *testing.T) {
 
 			// Click col1's gutter at (col1.x, col1.y).
 			e.HandleEvent(tcell.NewEventMouse(col1.x, col1.y, btn, 0))
-			if e.dragCol != col1 {
-				t.Fatalf("%s on column gutter: dragCol = %v, want col1", name, e.dragCol)
+			if e.capture == nil {
+				t.Fatalf("%s on column gutter should start a column drag", name)
 			}
 
-			// Drag left — dragCol must persist while button held.
+			// Drag left: the drag lasts while the button is held.
 			e.HandleEvent(tcell.NewEventMouse(30, col1.y, btn, 0))
-			if e.dragCol == nil {
-				t.Fatalf("%s: dragCol cleared during drag", name)
+			if e.capture == nil {
+				t.Fatalf("%s: drag ended while the button was held", name)
+			}
+			if col1.x != 30 {
+				t.Errorf("%s: col1.x = %d after dragging to 30", name, col1.x)
 			}
 
-			// Release — dragCol must clear.
+			// Release ends the drag.
 			e.HandleEvent(tcell.NewEventMouse(30, col1.y, tcell.ButtonNone, 0))
-			if e.dragCol != nil {
-				t.Fatalf("%s: dragCol should be nil after release", name)
+			if e.capture != nil {
+				t.Fatalf("%s: drag should end on release", name)
 			}
 		})
 	}

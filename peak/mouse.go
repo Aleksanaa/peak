@@ -24,13 +24,12 @@ type mouseTarget struct {
 	x, y int  // the position in the innermost of view, win and col that was hit
 }
 
-// mouseGesture tracks the in-progress mouse gesture across events: the previous
+// mouseGesture tracks the chord layer of the gesture across events: the previous
 // button mask (to detect deltas) and the view where the primary was pressed,
 // which anchors a chord even if the pointer later moves away.
 type mouseGesture struct {
 	buttons    tcell.ButtonMask // buttons from the previous event
 	anchorView View             // the tag/body/terminal view the primary was pressed on
-	anchorWin  *Window
 	chorded    bool
 }
 
@@ -76,19 +75,6 @@ func (w *Window) hit(x, y int) mouseTarget {
 	return mouseTarget{win: w, x: x, y: y} // handle rows / scroll gutter
 }
 
-// chordTargetOf reports the view eligible for chording at a resolved target and
-// its owning window, or (nil, nil) if the hit is not a chordable content area.
-// Any content view chords: a text tag/body cuts and pastes its buffer, a
-// terminal body copies (Snarf) and pastes to the pty. Handles and the scroll
-// gutter have no view and are not chordable.
-func (e *Editor) chordTargetOf(t mouseTarget) (View, *Window) {
-	switch t.view.(type) {
-	case *TextView, *TermView:
-		return t.view, t.win
-	}
-	return nil, nil
-}
-
 // chordAllowed reports whether a chord may operate locally on the pressed view.
 // A full-screen terminal app forwards its buttons to the child program, so we
 // suppress local chording there — letting the child run its own chord — unless
@@ -129,46 +115,16 @@ func (e *Editor) handleMouse(ev *tcell.EventMouse) bool {
 		}
 	}
 
-	// Drag/scroll state machine. An active drag owns the gesture until release.
+	// A gesture under way owns the mouse until it ends; releasing the buttons
+	// stops any auto-scroll.
 	if buttons == tcell.ButtonNone {
-		e.scrollWin = nil
+		e.repeat = nil
 	}
-	if e.dragCol != nil {
-		if buttons&anyButton != 0 {
-			e.moveColumnTo(e.dragCol, mx)
-			return false
+	if e.capture != nil {
+		if !e.capture(ev) {
+			e.capture = nil
 		}
-		e.dragCol = nil
 		return false
-	}
-	if e.dragWin != nil {
-		if buttons&anyButton != 0 {
-			e.moveWindowTo(e.dragWin, mx, my)
-			return false
-		}
-		if e.dragWin.y == e.dragWinStartY {
-			switch e.dragWinButton {
-			case tcell.ButtonPrimary:
-				e.dragWin.parent.GrowModerate(e.dragWin)
-			case tcell.ButtonSecondary:
-				e.dragWin.parent.Maximize(e.dragWin)
-			case tcell.ButtonMiddle:
-				e.dragWin.parent.GrowFull(e.dragWin)
-			}
-		}
-		e.dragWin = nil
-		return false
-	}
-	if e.dragView != nil {
-		ev := relative(ev, e.dragOrigin)
-		quit := e.dragView.HandleEvent(ev)
-		if buttons == tcell.ButtonNone {
-			e.dragView = nil
-		} else if buttons&tcell.ButtonPrimary != 0 {
-			_, y := ev.Position()
-			e.trackDragScroll(e.dragView, y)
-		}
-		return quit
 	}
 
 	return e.dispatchPress(ev, mx, my, buttons)
@@ -186,10 +142,13 @@ func (e *Editor) dispatchPress(ev *tcell.EventMouse, mx, my int, buttons tcell.B
 	t := e.resolveTarget(mx, my)
 
 	// Anchor a potential chord to the view under a primary-only press, so a
-	// later second button operates on it even if the pointer has moved.
+	// later second button operates on it even if the pointer has moved. Any
+	// view chords: a text tag/body cuts and pastes its buffer, a terminal body
+	// copies (Snarf) and pastes to the pty. Handles and the scroll gutter have
+	// no view and do not chord.
 	if buttons&tcell.ButtonPrimary != 0 && buttons&(tcell.ButtonMiddle|tcell.ButtonSecondary) == 0 {
-		if v, win := e.chordTargetOf(t); v != nil && e.chordAllowed(v, ev) {
-			e.gesture.anchorView, e.gesture.anchorWin = v, win
+		if t.view != nil && e.chordAllowed(t.view, ev) {
+			e.gesture.anchorView = t.view
 		}
 	}
 
@@ -197,10 +156,13 @@ func (e *Editor) dispatchPress(ev *tcell.EventMouse, mx, my int, buttons tcell.B
 
 	switch {
 	case t.view != nil: // a content region: global/column/window tag or window body
-		// The view sees the event in its own coordinates, as it does any
-		// drag the press starts.
-		e.dragOrigin = image.Pt(mx-t.x, my-t.y)
-		ev := relative(ev, e.dragOrigin)
+		// The view sees the event in its own coordinates, as it does the rest
+		// of a sweep the press starts.
+		origin := image.Pt(mx-t.x, my-t.y)
+		if buttons == tcell.ButtonPrimary {
+			e.sweep(t.view, t.win, origin)
+		}
+		ev := relative(ev, origin)
 		if t.win != nil {
 			return e.clickWindow(ev, t, buttons)
 		}
@@ -210,24 +172,107 @@ func (e *Editor) dispatchPress(ev *tcell.EventMouse, mx, my int, buttons tcell.B
 		win := t.win
 		if t.y < win.tag.h {
 			if held {
-				e.dragWin = win
-				e.dragWinOrigH = win.explicitHeight
-				e.dragWinButton = buttons
-				e.dragWinStartY = win.y
-				e.ActivateWindow(win)
-				e.focusedView = win.tag
+				e.dragWindow(win, buttons)
 			}
-		} else {
-			e.scrollWindow(win, t.y-win.tag.h, buttons)
+		} else if held {
+			e.scrollBar(win, ev, my-(t.y-win.tag.h), buttons)
 		}
 
 	case t.col != nil && t.x == 0 && t.y == 0: // column handle
 		if held {
-			e.dragCol = t.col
-			e.dragColOrigW = t.col.explicitWidth
+			e.dragColumn(t.col)
 		}
 	}
 	return false
+}
+
+// sweep makes v, pressed at origin on screen, follow the pointer in its own
+// coordinates until release. A sweep in a window's body that reaches its top
+// or bottom row scrolls it, extending the selection.
+func (e *Editor) sweep(v View, win *Window, origin image.Point) {
+	e.capture = func(ev *tcell.EventMouse) bool {
+		ev = relative(ev, origin)
+		v.HandleEvent(ev)
+		if ev.Buttons() == tcell.ButtonNone {
+			return false
+		}
+		if ev.Buttons()&tcell.ButtonPrimary != 0 && win != nil && v == win.body {
+			_, y := ev.Position()
+			_, _, h := v.GetScroll()
+			e.repeat = nil
+			if dir := edge(y, h); dir != 0 {
+				e.repeat = func() { scrollStep(win, dir, 1) }
+			}
+		}
+		return true
+	}
+}
+
+// edge reports whether row y of a view h rows high is at its bottom (1), its
+// top (-1) or neither (0).
+func edge(y, h int) int {
+	switch {
+	case y >= h-1:
+		return 1
+	case y <= 0:
+		return -1
+	}
+	return 0
+}
+
+// scrollStep scrolls win's body n rows in direction dir, unless it is already
+// at the end, and extends a sweep under way along with it.
+func scrollStep(win *Window, dir, n int) {
+	if scroll, total, visible := win.body.GetScroll(); dir > 0 && scroll+visible >= total {
+		return
+	}
+	win.body.Scroll(dir * n)
+	if dc, ok := win.body.(dragCursor); ok {
+		dc.AdvanceDragCursor(dir)
+	}
+}
+
+// dragWindow moves win by its handle with the pointer, within or across
+// columns, until release. Released where it began, the window grows instead:
+// Button1 moderately, Button2 to the full column, Button3 to the only one
+// shown.
+func (e *Editor) dragWindow(win *Window, button tcell.ButtonMask) {
+	e.ActivateWindow(win)
+	e.focusedView = win.tag
+	origH, startY := win.explicitHeight, win.y
+	e.capture = func(ev *tcell.EventMouse) bool {
+		if ev.Buttons()&anyButton != 0 {
+			x, y := ev.Position()
+			if e.moveWindowTo(win, x, y, origH) {
+				origH, startY = win.explicitHeight, -1 // no growing in another column
+			}
+			return true
+		}
+		if win.y == startY {
+			switch button {
+			case tcell.ButtonPrimary:
+				win.parent.GrowModerate(win)
+			case tcell.ButtonSecondary:
+				win.parent.Maximize(win)
+			case tcell.ButtonMiddle:
+				win.parent.GrowFull(win)
+			}
+		}
+		return false
+	}
+}
+
+// dragColumn moves col by its handle with the pointer until release.
+func (e *Editor) dragColumn(col *Column) {
+	origW := col.explicitWidth
+	e.capture = func(ev *tcell.EventMouse) bool {
+		if ev.Buttons()&anyButton == 0 {
+			return false
+		}
+		x, _ := ev.Position()
+		e.moveColumnTo(col, x, origW)
+		return true
+	}
 }
 
 // clickTag handles a primary/middle/secondary click on the global tag (col nil)
@@ -243,35 +288,50 @@ func (e *Editor) clickTag(ev *tcell.EventMouse, tag View, col *Column, buttons t
 		}
 	}
 	if buttons == tcell.ButtonPrimary {
-		e.dragView, e.focusedView = tag, tag
+		e.focusedView = tag
 	}
 	return tag.HandleEvent(ev)
 }
 
-// scrollWindow implements the window scroll gutter: Button1 scrolls up,
-// Button3 scrolls down (both auto-repeat via the main-loop timer), Button2
-// jumps to a position proportional to the click. row is the clicked row of
-// the body.
-func (e *Editor) scrollWindow(win *Window, row int, buttons tcell.ButtonMask) {
-	amount := row + 1
+// scrollBar scrolls win's body with its scroll bar until release, top being
+// the screen row of the body's first line. Button1 scrolls up and Button3
+// down by as many rows as the pointer is from top, repeating while held;
+// Button2 jumps to the place in proportion to the pointer, following it.
+func (e *Editor) scrollBar(win *Window, ev *tcell.EventMouse, top int, buttons tcell.ButtonMask) {
+	dir := 0
 	switch {
 	case buttons&tcell.ButtonPrimary != 0:
-		if e.scrollWin == nil {
-			win.body.Scroll(-amount)
-			e.scrollStartTime = time.Now()
-		}
-		e.scrollWin, e.scrollAmount, e.scrollDir = win, amount, -1
+		dir = -1
 	case buttons&tcell.ButtonSecondary != 0:
-		if e.scrollWin == nil {
-			win.body.Scroll(amount)
-			e.scrollStartTime = time.Now()
+		dir = 1
+	}
+	amount := 0
+	follow := func(ev *tcell.EventMouse) {
+		_, y := ev.Position()
+		scroll, total, visible := win.body.GetScroll()
+		row := max(0, min(y-top, visible-1))
+		if dir != 0 {
+			amount = row + 1
+		} else if visible > 0 && total > 0 {
+			win.body.Scroll(row*total/visible - scroll)
 		}
-		e.scrollWin, e.scrollAmount, e.scrollDir = win, amount, 1
-	case buttons&tcell.ButtonMiddle != 0:
-		if scroll, total, visible := win.body.GetScroll(); visible > 0 && total > 0 {
-			newScroll := (row * total) / visible
-			win.body.Scroll(newScroll - scroll)
+	}
+
+	follow(ev)
+	if dir != 0 {
+		win.body.Scroll(dir * amount)
+		start := time.Now()
+		e.repeat = func() {
+			if time.Since(start) > 200*time.Millisecond {
+				scrollStep(win, dir, amount)
+			}
 		}
+	}
+	e.capture = func(ev *tcell.EventMouse) bool {
+		if ev.Buttons()&anyButton != 0 {
+			follow(ev)
+		}
+		return ev.Buttons() != tcell.ButtonNone
 	}
 }
 
@@ -284,7 +344,6 @@ func (e *Editor) clickWindow(ev *tcell.EventMouse, t mouseTarget, buttons tcell.
 		if t.view == win.tag {
 			e.focusedView = win.tag
 		}
-		e.dragView = e.focusedView
 	}
 
 	target.HandleEvent(ev)
@@ -318,7 +377,6 @@ func (e *Editor) clickWindow(ev *tcell.EventMouse, t mouseTarget, buttons tcell.
 // the release resets the drag state.
 func (e *Editor) fireChord(middle bool) {
 	g := &e.gesture
-	win := g.anchorWin
 	g.chorded = true
 
 	switch v := g.anchorView.(type) {
@@ -338,9 +396,6 @@ func (e *Editor) fireChord(middle bool) {
 		}
 	}
 
-	// A sweep that reached the view edge armed the auto-scroll timer; the chord
-	// ends the sweep, so stop it (the timer keys off scrollWin, not gesture).
-	if e.scrollWin == win {
-		e.scrollWin = nil
-	}
+	// The chord ends the sweep, and with it any auto-scroll at the view edge.
+	e.repeat = nil
 }
