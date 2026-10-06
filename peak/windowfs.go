@@ -128,9 +128,6 @@ func (f *winCtlFile) WriteAt(p []byte, _ int64) (int, error) {
 	return len(p), nil
 }
 
-func (f *winCtlFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
-func (f *winCtlFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(s), 0) }
-
 // ---- rdsel ----
 
 func newWinRdselFile(win *Window) *winRdselFile {

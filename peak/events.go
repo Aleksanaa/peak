@@ -165,9 +165,6 @@ func (f *winEventFile) dispatchWriteEvent(ev wevent.Event) error {
 	return nil
 }
 
-func (f *winEventFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
-func (f *winEventFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(s), 0) }
-
 func (f *winEventFile) Close() error {
 	if f.sub != nil {
 		win := f.win
@@ -329,6 +326,3 @@ func (f *winColorFile) Close() error {
 	f.win.editor.Call(func() { f.win.spans = newSpans })
 	return nil
 }
-
-func (f *winColorFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
-func (f *winColorFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(s), 0) }

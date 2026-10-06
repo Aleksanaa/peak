@@ -71,9 +71,6 @@ func (b *WriteBuffer) WriteAt(p []byte, off int64) (int, error) {
 	return len(p), nil
 }
 
-func (b *WriteBuffer) Write(p []byte) (int, error)       { return b.WriteAt(p, 0) }
-func (b *WriteBuffer) WriteString(s string) (int, error) { return b.WriteAt([]byte(s), 0) }
-
 // WriteOnlyFile is a FileStub that accumulates writes in Writes.
 // All reads return EOF.
 type WriteOnlyFile struct {
@@ -82,8 +79,6 @@ type WriteOnlyFile struct {
 }
 
 func (f *WriteOnlyFile) WriteAt(p []byte, off int64) (int, error) { return f.Writes.WriteAt(p, off) }
-func (f *WriteOnlyFile) Write(p []byte) (int, error)              { return f.Writes.WriteAt(p, 0) }
-func (f *WriteOnlyFile) WriteString(s string) (int, error)        { return f.Writes.WriteAt([]byte(s), 0) }
 
 // ReadWriteFile combines ReadonlyFile with a write buffer.
 // Reads serve from Data; writes accumulate in Writes for processing on Close.
@@ -93,8 +88,6 @@ type ReadWriteFile struct {
 }
 
 func (f *ReadWriteFile) WriteAt(p []byte, off int64) (int, error) { return f.Writes.WriteAt(p, off) }
-func (f *ReadWriteFile) Write(p []byte) (int, error)              { return f.Writes.WriteAt(p, 0) }
-func (f *ReadWriteFile) WriteString(s string) (int, error)        { return f.Writes.WriteAt([]byte(s), 0) }
 
 // FileEntry describes one file or directory in a NamespaceFs.
 type FileEntry struct {
@@ -208,8 +201,15 @@ type namedFile struct {
 	isDir bool
 }
 
-func (f *namedFile) Name() string       { return f.name }
+func (f *namedFile) Name() string { return f.name }
+
+// Namespace files implement writing once, as WriteAt; a plain Write lands at
+// offset 0, which is what every file served here expects.
+func (f *namedFile) Write(p []byte) (int, error)       { return f.File.WriteAt(p, 0) }
+func (f *namedFile) WriteString(s string) (int, error) { return f.File.WriteAt([]byte(s), 0) }
+
 func (f *namedFile) Unwrap() afero.File { return f.File }
+
 // SetConn forwards the connAwareFile hook to the inner file if it implements it.
 func (f *namedFile) SetConn(c ConnCleaner) {
 	if s, ok := f.File.(interface{ SetConn(ConnCleaner) }); ok {

@@ -145,9 +145,6 @@ func (f *mountFile) WriteAt(p []byte, _ int64) (int, error) {
 	return len(p), nil
 }
 
-func (f *mountFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
-func (f *mountFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(s), 0) }
-
 // ---- unmountFile ----
 
 // unmountFile implements /unmount: write a path to detach it from the VFS.
@@ -162,9 +159,6 @@ func (f *unmountFile) WriteAt(p []byte, _ int64) (int, error) {
 	}
 	return len(p), nil
 }
-
-func (f *unmountFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
-func (f *unmountFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(s), 0) }
 
 // ---- bindFile ----
 
@@ -186,9 +180,6 @@ func (f *bindFile) WriteAt(p []byte, _ int64) (int, error) {
 	}
 	return len(p), nil
 }
-
-func (f *bindFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
-func (f *bindFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(s), 0) }
 
 // indexSnap builds the /peak/index payload. Each open window produces one line:
 //
