@@ -461,10 +461,7 @@ func TestWindowFsErrorsSkipsTerminalWindow(t *testing.T) {
 	e, col, _, s := setupWindowTest(t)
 
 	// Pre-create a terminal window — even if named like an error path, it must not be reused
-	_, err := col.AddTermWindow(" /tmp/+Errors Zerox Del ", "sh", "/tmp")
-	if err != nil {
-		t.Skipf("cannot create term window: %v", err)
-	}
+	addTerm(t, col, " /tmp/+Errors Zerox Del ", "sh")
 	e.resize()
 
 	// Create a text window in /tmp to write errors from
@@ -749,10 +746,7 @@ func TestFindOrCreateErrorWindowSkipsTerminal(t *testing.T) {
 	e, col, _, _ := setupWindowTest(t)
 
 	// Pre-create a terminal window named /tmp/+Errors
-	termWin, err := col.AddTermWindow(" /tmp/+Errors Zerox Del ", "sh", "/tmp")
-	if err != nil {
-		t.Skipf("cannot create term window: %v", err)
-	}
+	termWin := addTerm(t, col, " /tmp/+Errors Zerox Del ", "sh")
 	e.resize()
 
 	// Create a source text window in /tmp

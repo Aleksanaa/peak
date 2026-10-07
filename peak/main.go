@@ -276,6 +276,13 @@ func (e *Editor) ActivateWindow(win *Window) {
 	}
 }
 
+// showWindow activates win, just added to its column, and lays the column out
+// around it.
+func (e *Editor) showWindow(win *Window) {
+	e.ActivateWindow(win)
+	win.parent.Resize(win.parent.rect)
+}
+
 // moveColumnTo drags col, origW wide when the drag began, to the screen
 // column mx.
 func (e *Editor) moveColumnTo(col *Column, mx, origW int) {

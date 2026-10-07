@@ -175,12 +175,7 @@ func (e *Editor) OpenLine(win *Window, path string, line, col int, binaryFallbac
 
 	// /peak/new creates a fresh text window, same semantics as walking the 9P /new path.
 	if full == "/peak/new" {
-		target := e.getTargetColumn(nil, win)
-		if target != nil {
-			newWin := target.AddWindow(" New ", "")
-			e.ActivateWindow(newWin)
-			target.Resize(target.rect)
-		}
+		e.showWindow(e.getTargetColumn(nil, win).AddWindow(" New ", ""))
 		return
 	}
 
@@ -218,9 +213,8 @@ func (e *Editor) OpenLine(win *Window, path string, line, col int, binaryFallbac
 
 func (e *Editor) createWindow(target *Column, full string, content string, isDir bool, writable bool, line, col int) *Window {
 	newWin := target.AddWindow(tagText(full, "Get Put Undo Redo Snarf Zerox Del"), content)
-	e.ActivateWindow(newWin)
 	newWin.loaded(isDir, writable)
-	target.Resize(target.rect)
+	e.showWindow(newWin)
 	if line >= 0 {
 		newWin.bodyTextView().GotoLineCol(line, col)
 	}
@@ -443,13 +437,24 @@ func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {
 		e.showError(targetCol, win, "", dir+": don't know how to open terminal window")
 		return
 	}
-	newWin, err := targetCol.AddTermWindow("", arg, dir)
+	var name string
+	if arg == "" {
+		if name, _ = os.Hostname(); name == "" {
+			name = "term"
+		}
+	} else {
+		name = filepath.Base(strings.Fields(arg)[0])
+	}
+	sess, err := session.NewLocal(arg, dir)
+	var newWin *Window
+	if err == nil {
+		newWin, err = targetCol.AddTermWindow(tagText(filepath.Join(dir, "-"+name), "Zerox Del"), arg, sess)
+	}
 	if err != nil {
 		e.showError(targetCol, win, "", err.Error())
 		return
 	}
-	e.ActivateWindow(newWin)
-	targetCol.Resize(targetCol.rect)
+	e.showWindow(newWin)
 }
 
 func (e *Editor) openRemoteTermWindow(targetCol *Column, win *Window, mountPath, sessRel, dir string) {
@@ -485,14 +490,12 @@ func (e *Editor) openRemoteTermWindow(targetCol *Column, win *Window, mountPath,
 	title := filepath.Join(dir, "-"+filepath.Base(mountPath))
 
 	e.Call(func() {
-		newWin, err := targetCol.AddSessionTermWindow(title, sess)
+		newWin, err := targetCol.AddTermWindow(tagText(title, "Zerox Del"), "", sess)
 		if err != nil {
-			sess.Close()
 			e.showError(targetCol, win, "", err.Error())
 			return
 		}
-		e.ActivateWindow(newWin)
-		targetCol.Resize(targetCol.rect)
+		e.showWindow(newWin)
 	})
 }
 
@@ -514,8 +517,7 @@ func (e *Editor) cmdZerox(col *Column, win *Window) {
 		} else {
 			newWin.markSaved(newTv.buffer.version)
 		}
-		e.ActivateWindow(newWin)
-		target.parent.Resize(target.parent.rect)
+		e.showWindow(newWin)
 	} else if target.kind == WinTerm {
 		e.cmdWin(col, target, "Win")
 	}
@@ -670,8 +672,7 @@ func (e *Editor) findOrCreateErrorWindow(col *Column, win *Window, dir string) *
 	targetCol := e.getTargetColumn(col, win)
 	newWin := targetCol.AddWindow(tagText(errName, "Get Del"), "")
 	newWin.kind = WinOut
-	e.ActivateWindow(newWin)
-	targetCol.Resize(targetCol.rect)
+	e.showWindow(newWin)
 	return newWin
 }
 

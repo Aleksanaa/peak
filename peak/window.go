@@ -400,14 +400,15 @@ func (win *Window) spanStyle(tv *TextView) func(line, col int, s tcell.Style) tc
 	}
 }
 
-// newWindow returns a window of width w, to be placed by its column.
-func newWindow(tag string, parent *Column, editor *Editor, w int) *Window {
+// newWindow returns a window in col with tag, for its body to be set.
+func newWindow(tag string, col *Column) *Window {
+	theme := &col.editor.theme
 	win := &Window{
-		rect:   rect{w: w},
-		tag:    NewTextView(tag, w-1, 1, &editor.theme, &editor.theme.Tag, false, false),
-		parent: parent, editor: editor,
+		rect:   rect{w: col.w},
+		tag:    NewTextView(tag, col.w-1, 1, theme, &theme.Tag, false, false),
+		parent: col, editor: col.editor,
 	}
-	win.tag.fit(w - 1)
+	win.tag.fit(col.w - 1)
 	win.tag.buffer.onMutate = func(_, _, _ int, _ string) {
 		h := win.tag.h
 		win.tag.fit(win.w - 1)
@@ -418,21 +419,32 @@ func newWindow(tag string, parent *Column, editor *Editor, w int) *Window {
 	return win
 }
 
-func NewTermWindow(tag string, parent *Column, editor *Editor, w int, cmd, dir string) (*Window, error) {
-	sess, err := session.NewLocal(cmd, dir)
-	if err != nil {
-		return nil, err
+// newTextWindow returns a window in col holding body as text.
+func newTextWindow(tag, body string, col *Column) *Window {
+	win := newWindow(tag, col)
+	theme := &col.editor.theme
+	tv := NewTextView(body, col.w-1, 0, theme, &theme.Body, false, true)
+	win.body = tv
+	tv.buffer.onMutate = func(q0, q1Old, q1New int, text string) {
+		win.adjustSpans(q0, q1Old, q1New)
+		win.addrQ0 = adjustPoint(win.addrQ0, q0, q1Old, q1New)
+		win.addrQ1 = adjustPoint(win.addrQ1, q0, q1Old, q1New)
+		tv.org = adjustPoint(tv.org, q0, q1Old, q1New)
+		if q1Old > q0 {
+			win.broadcastEvent('K', 'D', q0, q1Old, "")
+		}
+		if text != "" {
+			win.broadcastEvent('K', 'I', q0, q1New, text)
+		}
 	}
-	win, err := newTermWindowFromSession(tag, sess, parent, editor, w)
-	if err != nil {
-		return nil, err
-	}
-	win.body.(*TermView).cmd = cmd
-	return win, nil
+	return win
 }
 
-func newTermWindowFromSession(tag string, sess session.Session, parent *Column, editor *Editor, w int) (*Window, error) {
-	win := newWindow(tag, parent, editor, w)
+// newTermWindow returns a window in col with a terminal on sess, which
+// runs cmd. It closes sess if the terminal cannot start.
+func newTermWindow(tag, cmd string, sess session.Session, col *Column) (*Window, error) {
+	win := newWindow(tag, col)
+	editor := col.editor
 	term, err := NewTermView(editor, sess, func() {
 		editor.RemoveWindow(win)
 	})
@@ -440,6 +452,7 @@ func newTermWindowFromSession(tag string, sess session.Session, parent *Column, 
 		sess.Close()
 		return nil, err
 	}
+	term.cmd = cmd
 	win.kind = WinTerm
 	win.body = term
 	filename := win.GetFilename()
@@ -482,25 +495,6 @@ func newTermWindowFromSession(tag string, sess session.Session, parent *Column, 
 		}
 	}
 	return win, nil
-}
-
-func NewWindow(tag, body string, parent *Column, editor *Editor, w int) *Window {
-	win := newWindow(tag, parent, editor, w)
-	tv := NewTextView(body, w-1, 0, &editor.theme, &editor.theme.Body, false, true)
-	win.body = tv
-	tv.buffer.onMutate = func(q0, q1Old, q1New int, text string) {
-		win.adjustSpans(q0, q1Old, q1New)
-		win.addrQ0 = adjustPoint(win.addrQ0, q0, q1Old, q1New)
-		win.addrQ1 = adjustPoint(win.addrQ1, q0, q1Old, q1New)
-		tv.org = adjustPoint(tv.org, q0, q1Old, q1New)
-		if q1Old > q0 {
-			win.broadcastEvent('K', 'D', q0, q1Old, "")
-		}
-		if text != "" {
-			win.broadcastEvent('K', 'I', q0, q1New, text)
-		}
-	}
-	return win
 }
 
 // Close releases resources owned by the window's body. For a terminal it

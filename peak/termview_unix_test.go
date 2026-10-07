@@ -24,10 +24,7 @@ func TestRemoveTermWindowEndsProcess(t *testing.T) {
 	col := e.columns[0]
 
 	pidFile := filepath.Join(t.TempDir(), "pid")
-	termWin, err := col.AddTermWindow(" /tmp/-sh Zerox Del ", "echo $$ > "+pidFile+"; exec sleep 30", "/tmp")
-	if err != nil {
-		t.Skipf("cannot create term window: %v", err)
-	}
+	termWin := addTerm(t, col, " /tmp/-sh Zerox Del ", "echo $$ > "+pidFile+"; exec sleep 30")
 
 	var pid int
 	deadline := time.Now().Add(5 * time.Second)
@@ -65,10 +62,7 @@ func TestRemoveTermWindowEndsProcess(t *testing.T) {
 func TestTermSelectionSeenByBufferPaths(t *testing.T) {
 	e, _, _ := setupMouseChordWindow(t)
 	col := e.columns[0]
-	termWin, err := col.AddTermWindow(" /tmp/-sh Zerox Del ", "printf 'hello world\\nsecond'; exec sleep 30", "/tmp")
-	if err != nil {
-		t.Skipf("cannot create term window: %v", err)
-	}
+	termWin := addTerm(t, col, " /tmp/-sh Zerox Del ", "printf 'hello world\\nsecond'; exec sleep 30")
 	// Reading rdsel below goes through e.Call, after which the harness draws on
 	// its own goroutine; remove the window there too, not alongside that draw.
 	defer e.Call(func() { e.RemoveWindow(termWin) })
@@ -112,10 +106,7 @@ func TestTermSelectionSeenByBufferPaths(t *testing.T) {
 func runTerm(t *testing.T, cmd string, w, h int, want string) *TermView {
 	t.Helper()
 	e, col := newTestEditorWithColumn(t)
-	win, err := col.AddTermWindow(" /tmp/-sh Del ", cmd, "/tmp")
-	if err != nil {
-		t.Skipf("cannot create term window: %v", err)
-	}
+	win := addTerm(t, col, " /tmp/-sh Del ", cmd)
 	t.Cleanup(func() { e.Call(func() { e.RemoveWindow(win) }) })
 	tv := win.body.(*TermView)
 	tv.Resize(w, h)

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/aleksana/peak/internal/quote"
+	"github.com/aleksana/peak/internal/session"
 )
 
 const sessionVersion = 1
@@ -217,7 +218,7 @@ func (w *Window) saveState(colH int) WindowSession {
 	return ws
 }
 
-// applyPreset loads content into w from ws before the window is mounted.
+// applyPreset loads content into w from ws.
 func (w *Window) applyPreset(ws *WindowSession) {
 	filename, _ := quote.Cut(ws.Tag)
 	tv := w.bodyTextView()
@@ -320,15 +321,22 @@ func (e *Editor) Load(file string) error {
 		col := e.columns[i]
 		for _, ws := range cs.Windows {
 			var win *Window
-			switch ws.Kind {
-			case "term":
-				win, _ = col.AddTermWindow(ws.Tag, ws.TermCmd, ws.TermDir, &ws)
-			default:
-				win = col.AddWindow(ws.Tag, "", &ws)
+			if ws.Kind == "term" {
+				sess, err := session.NewLocal(ws.TermCmd, ws.TermDir)
+				if err == nil {
+					win, err = col.AddTermWindow(ws.Tag, ws.TermCmd, sess)
+				}
+				if err != nil {
+					continue
+				}
+			} else {
+				win = col.AddWindow(ws.Tag, "")
+				win.applyPreset(&ws)
 			}
-			if win != nil {
-				deferred = append(deferred, pending{win, ws})
+			if ws.HeightPct > 0 {
+				win.explicitHeight = max(win.MinSize(), ws.HeightPct*col.h/100)
 			}
+			deferred = append(deferred, pending{win, ws})
 		}
 	}
 

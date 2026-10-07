@@ -259,10 +259,7 @@ func TestChordTargetsTerminalWindow(t *testing.T) {
 	e, _, _ := setupMouseChordWindow(t)
 	col := e.columns[0]
 
-	termWin, err := col.AddTermWindow(" /tmp/-sh Zerox Del ", "sh", "/tmp")
-	if err != nil {
-		t.Skipf("cannot create term window: %v", err)
-	}
+	termWin := addTerm(t, col, " /tmp/-sh Zerox Del ", "sh")
 	col.Resize(col.rect)
 
 	term, ok := termWin.body.(*TermView)
@@ -292,10 +289,7 @@ func TestChordAllowedInTerminal(t *testing.T) {
 		t.Fatal("text view should always be chordable")
 	}
 
-	termWin, err := e.columns[0].AddTermWindow(" /tmp/-sh Zerox Del ", "sh", "/tmp")
-	if err != nil {
-		t.Skipf("cannot create term window: %v", err)
-	}
+	termWin := addTerm(t, e.columns[0], " /tmp/-sh Zerox Del ", "sh")
 	term := termWin.body.(*TermView)
 
 	// A plain shell isn't tracking the mouse, so the terminal chords locally,
@@ -316,10 +310,7 @@ func TestChordSuppressedInFullScreenTerminal(t *testing.T) {
 
 	// A child that switches to the alternate screen (DECSET 1049) and stays
 	// alive, i.e. a full-screen app that owns the mouse (e.g. a nested peak).
-	termWin, err := col.AddTermWindow(" /tmp/-sh Zerox Del ", "printf '\\033[?1049h'; sleep 30", "/tmp")
-	if err != nil {
-		t.Skipf("cannot create term window: %v", err)
-	}
+	termWin := addTerm(t, col, " /tmp/-sh Zerox Del ", "printf '\\033[?1049h'; sleep 30")
 	col.Resize(col.rect)
 	term := termWin.body.(*TermView)
 

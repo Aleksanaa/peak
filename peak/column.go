@@ -1,10 +1,7 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
 	"slices"
-	"strings"
 
 	"github.com/aleksana/peak/internal/session"
 	"github.com/gdamore/tcell/v3"
@@ -46,96 +43,41 @@ func NewColumn(x, y, w, h int, editor *Editor) *Column {
 	}
 }
 
-// contentInsertPos scans windows first-to-last and returns the index at which
-// a new window should be inserted and how many rows of empty space are available
-// there. Empty space is body rows with no content. Returns (len(windows), 0) if
-// no window has spare space.
-func (c *Column) contentInsertPos() (idx int, emptyH int) {
-	for i, win := range c.windows {
-		scroll, total, bodyH := win.body.GetScroll()
-		if empty := bodyH - max(0, total-scroll); empty >= win.MinSize() {
-			return i + 1, empty
-		}
-	}
-	return len(c.windows), 0
+// AddWindow adds a window holding body as text under tag.
+func (c *Column) AddWindow(tag, body string) *Window {
+	return c.add(newTextWindow(tag, body, c))
 }
 
-// AddWindow creates a file/dir window. With a preset the content is restored
-// atomically and the window is appended in session order; without one the
-// normal smart-insertion with space-stealing is used.
-func (c *Column) AddWindow(tagText, bodyText string, preset ...*WindowSession) *Window {
-	if tagText == "" {
-		tagText = " ./untitled.txt Get Put Undo Redo Snarf Zerox Del "
-	}
-	c.maximized = nil
-	newWin := NewWindow(tagText, bodyText, c, c.editor, c.w)
-	newWin.ID = c.editor.nextWinID
-	c.editor.nextWinID++
-
-	var ws *WindowSession
-	if len(preset) > 0 {
-		ws = preset[0]
-	}
-	if ws != nil {
-		newWin.applyPreset(ws)
-		if ws.HeightPct > 0 && c.h > 0 {
-			newWin.explicitHeight = max(newWin.MinSize(), ws.HeightPct*c.h/100)
-		}
-		c.windows = append(c.windows, newWin)
-	} else {
-		insertIdx, emptyH := c.contentInsertPos()
-		if emptyH > 0 {
-			src := c.windows[insertIdx-1]
-			src.explicitHeight = src.h - emptyH
-			newWin.explicitHeight = emptyH
-		}
-		c.windows = slices.Insert(c.windows, insertIdx, newWin)
-	}
-	c.editor.ninep.MountWindow(newWin)
-	return newWin
-}
-
-// AddTermWindow creates a terminal window. An optional preset sets the initial
-// height from the saved session.
-func (c *Column) AddTermWindow(tag, cmd, dir string, preset ...*WindowSession) (*Window, error) {
-	if tag == "" {
-		var name string
-		if cmd == "" {
-			if name, _ = os.Hostname(); name == "" {
-				name = "term"
-			}
-		} else {
-			name = filepath.Base(strings.Fields(cmd)[0])
-		}
-		tag = tagText(filepath.Join(dir, "-"+name), "Zerox Del")
-	}
-
-	c.maximized = nil
-	newWin, err := NewTermWindow(tag, c, c.editor, c.w, cmd, dir)
+// AddTermWindow adds a terminal on sess under tag. cmd is the command sess
+// runs, empty for a shell, kept to start it again in a later session.
+func (c *Column) AddTermWindow(tag, cmd string, sess session.Session) (*Window, error) {
+	win, err := newTermWindow(tag, cmd, sess, c)
 	if err != nil {
 		return nil, err
 	}
-	newWin.ID = c.editor.nextWinID
-	c.editor.nextWinID++
-	if len(preset) > 0 && preset[0] != nil && preset[0].HeightPct > 0 && c.h > 0 {
-		newWin.explicitHeight = max(newWin.MinSize(), preset[0].HeightPct*c.h/100)
-	}
-	c.windows = append(c.windows, newWin)
-	c.editor.ninep.MountWindow(newWin)
-	return newWin, nil
+	return c.add(win), nil
 }
 
-func (c *Column) AddSessionTermWindow(title string, sess session.Session) (*Window, error) {
-	c.maximized = nil
-	newWin, err := newTermWindowFromSession(tagText(title, "Zerox Del"), sess, c, c.editor, c.w)
-	if err != nil {
-		return nil, err
-	}
-	newWin.ID = c.editor.nextWinID
+// add gives win its ID and its place in the column: below the first window
+// whose body has rows to spare after its text, taking those rows, or else at
+// the bottom.
+func (c *Column) add(win *Window) *Window {
+	win.ID = c.editor.nextWinID
 	c.editor.nextWinID++
-	c.windows = append(c.windows, newWin)
-	c.editor.ninep.MountWindow(newWin)
-	return newWin, nil
+	c.maximized = nil
+	i := len(c.windows)
+	for j, w := range c.windows {
+		scroll, total, bodyH := w.body.GetScroll()
+		if spare := bodyH - max(0, total-scroll); spare >= w.MinSize() {
+			w.explicitHeight = w.h - spare
+			win.explicitHeight = spare
+			i = j + 1
+			break
+		}
+	}
+	c.windows = slices.Insert(c.windows, i, win)
+	c.editor.ninep.MountWindow(win)
+	return win
 }
 
 // Resize places the column at r in the editor and lays out its windows.

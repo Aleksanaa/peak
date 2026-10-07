@@ -3,8 +3,9 @@ package main
 import (
 	"image"
 	"testing"
-
 	"time"
+
+	"github.com/aleksana/peak/internal/session"
 )
 
 // Work the main goroutine waits on may itself Call into the main goroutine
@@ -57,4 +58,19 @@ func screenAt(e *Editor, v any) image.Point {
 		}
 	}
 	panic("not on screen")
+}
+
+// addTerm adds to col a terminal running cmd in /tmp, skipping the test
+// where none can start.
+func addTerm(t *testing.T, col *Column, tag, cmd string) *Window {
+	t.Helper()
+	sess, err := session.NewLocal(cmd, "/tmp")
+	if err == nil {
+		var win *Window
+		if win, err = col.AddTermWindow(tag, cmd, sess); err == nil {
+			return win
+		}
+	}
+	t.Skipf("cannot create term window: %v", err)
+	return nil
 }
