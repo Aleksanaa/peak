@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -971,8 +972,8 @@ func TestExternalCommand(t *testing.T) {
 	t.Logf("Output from uname -a: %q", output)
 
 	// 5. Compare with Go's uname -a
-	expected, _ := runLocalCommand("uname -a", "/tmp/", "/tmp/", "", 0)
-	expected = strings.TrimSpace(expected)
+	uname, _ := exec.Command("uname", "-a").Output()
+	expected := strings.TrimSpace(string(uname))
 	if output != expected {
 		t.Errorf("Expected output %q, got %q", expected, output)
 	}

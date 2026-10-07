@@ -717,19 +717,9 @@ func (e *Editor) runExternal(col *Column, win *Window, cmd string) {
 		return
 	}
 
-	pipechar := byte(0)
-	if len(cmd) > 0 && (cmd[0] == '<' || cmd[0] == '>' || cmd[0] == '|') {
-		pipechar = cmd[0]
-		cmd = strings.TrimSpace(cmd[1:])
-	}
-
-	filename := ""
-	winid := 0
-	if win != nil {
-		filename = win.GetFilename()
-		winid = win.ID
-	} else {
-		filename = getwd()
+	pipe := byte(0)
+	if strings.ContainsRune("<>|", rune(cmd[0])) {
+		pipe, cmd = cmd[0], strings.TrimSpace(cmd[1:])
 	}
 
 	// The output lands after the user may have edited the window; dot, kept
@@ -739,30 +729,43 @@ func (e *Editor) runExternal(col *Column, win *Window, cmd string) {
 	if win != nil {
 		buf := win.body.GetBuffer()
 		q0, q1 = buf.q0, buf.q1
-		if pipechar == '>' || pipechar == '|' {
+		if pipe == '>' || pipe == '|' {
 			input = buf.GetSelectedText()
 		}
 	}
 
-	go func() {
-		out, err := runCommand(cmd, filename, input, winid)
-		e.callCh <- func() {
-			if (pipechar == '<' || pipechar == '|') && win != nil {
-				win.body.GetBuffer().ReplaceRangeRunes(q0, q1, []rune(out))
-				if err != nil {
-					e.showError(col, win, getPathDir(filename), err.Error())
-				}
-				return
-			}
-			if err != nil || len(out) > 0 {
-				msg := out
-				if msg == "" && err != nil {
-					msg = err.Error()
-				}
-				e.showError(col, win, getPathDir(filename), msg)
-			}
+	e.run(win, cmd, input, func(out string, err error) {
+		if win != nil && (pipe == '<' || pipe == '|') {
+			win.body.GetBuffer().ReplaceRangeRunes(q0, q1, []rune(out))
+			out = ""
 		}
+		e.showOutput(col, win, out, err)
+	})
+}
+
+// run runs cmd for win, or for no window in peak's directory, in the
+// background, with input on its standard input. Then, on the main
+// goroutine, it calls done with what cmd printed and how it failed.
+func (e *Editor) run(win *Window, cmd, input string, done func(out string, err error)) {
+	path, winid := getwd(), 0
+	if win != nil {
+		path, winid = win.GetFilename(), win.ID
+	}
+	go func() {
+		out, err := runCommand(cmd, path, input, winid)
+		e.callCh <- func() { done(out, err) }
 	}()
+}
+
+// showOutput shows what a command run for win printed, or else how it
+// failed, in the window's +Errors.
+func (e *Editor) showOutput(col *Column, win *Window, out string, err error) {
+	if out == "" && err != nil {
+		out = err.Error()
+	}
+	if out != "" {
+		e.showError(col, win, "", out)
+	}
 }
 
 func (e *Editor) RemoveColumn(c *Column) {

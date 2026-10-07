@@ -3,13 +3,14 @@ package main
 import (
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
-	"al.essio.dev/pkg/shellescape"
 	"github.com/aleksana/peak/internal/quote"
 	"github.com/aleksana/peak/internal/vfs/afero"
 )
@@ -211,56 +212,32 @@ func listDir(path string) (string, error) {
 	return strings.Join(names, "\n"), nil
 }
 
-// runCommand runs a command with sh -c and returns the output and error.
+// runCommand runs cmd with sh -c for the window named path, numbered winid,
+// with input on its standard input, and returns what it printed. In a
+// directory a file server mounts, the server runs it, through its run file,
+// which takes no input. In a local one it runs here, with $samfile and
+// $winid naming the window, as acme does.
 func runCommand(cmd, path, input string, winid int) (string, error) {
 	dir := getPathDir(path)
 	if mountPath, mountFs := ns.FindMount(dir); mountPath != "" {
-		relPath, _ := filepath.Rel(mountPath, dir)
-		if runF, err := mountFs.OpenFile("run", os.O_RDWR, 0); err == nil {
-			out, rerr := remoteRun(runF, toDir(relPath), cmd)
-			runF.Close()
-			return out, rerr
+		if f, err := mountFs.OpenFile("run", os.O_RDWR, 0); err == nil {
+			defer f.Close()
+			relPath, _ := filepath.Rel(mountPath, dir)
+			if _, err := f.WriteAt([]byte(toDir(relPath)+"\n"+cmd+"\n"), 0); err != nil {
+				return "", err
+			}
+			out, err := io.ReadAll(io.NewSectionReader(f, 0, math.MaxInt64))
+			return string(out), err
 		}
 	}
-	if localDir, ok := ns.ResolveLocalPath(dir); ok {
-		return runLocalCommand(cmd, path, localDir, input, winid)
+	localDir, ok := ns.ResolveLocalPath(dir)
+	if !ok {
+		return "", fmt.Errorf("%s: don't know how to run command", path)
 	}
-	return "", fmt.Errorf("%s: don't know how to run command", path)
-}
-
-func remoteRun(f afero.File, relPath, cmd string) (string, error) {
-	if _, err := f.WriteAt([]byte(relPath+"\n"+cmd+"\n"), 0); err != nil {
-		return "", err
-	}
-	var sb strings.Builder
-	buf := make([]byte, 4096)
-	var off int64
-	for {
-		n, err := f.ReadAt(buf, off)
-		if n > 0 {
-			sb.Write(buf[:n])
-			off += int64(n)
-		}
-		if err != nil {
-			break
-		}
-	}
-	return sb.String(), nil
-}
-
-// runLocalCommand executes a command on the local OS.
-func runLocalCommand(cmd, path, dir, input string, winid int) (string, error) {
-	wrappedCmd := fmt.Sprintf("env samfile=%s winid=%d sh -c %s",
-		shellescape.Quote(path),
-		winid,
-		shellescape.Quote(cmd))
-
-	c := exec.Command("sh", "-c", wrappedCmd)
-	c.Dir = dir
-	if input != "" {
-		c.Stdin = strings.NewReader(input)
-	}
-
+	c := exec.Command("sh", "-c", cmd)
+	c.Dir = localDir
+	c.Env = append(os.Environ(), "samfile="+path, "winid="+strconv.Itoa(winid))
+	c.Stdin = strings.NewReader(input)
 	out, err := c.CombinedOutput()
 	return string(out), err
 }

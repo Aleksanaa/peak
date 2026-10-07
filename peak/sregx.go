@@ -884,20 +884,9 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 		}
 		return addr, true
 	case '!':
-		filename := ctx.Window.GetFilename()
-		winid := ctx.Window.ID
-		go func() {
-			out, err := runCommand(cmd.text, filename, "", winid)
-			if err != nil || len(out) > 0 {
-				msg := out
-				if msg == "" && err != nil {
-					msg = err.Error()
-				}
-				ctx.Editor.callCh <- func() {
-					ctx.Editor.showError(ctx.Column, ctx.Window, getPathDir(filename), msg)
-				}
-			}
-		}()
+		ctx.Editor.run(ctx.Window, cmd.text, "", func(out string, err error) {
+			ctx.Editor.showOutput(ctx.Column, ctx.Window, out, err)
+		})
 		return addr, true
 	case '{':
 		curr := cmd.cmd
@@ -907,12 +896,14 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 		}
 		return addr, true
 	case '|', '>', '<':
-		input := string(runes[addr.q0:addr.q1])
-		filename := ctx.Window.GetFilename()
-		winid := ctx.Window.ID
+		input := ""
+		if cmd.cmdc != '<' {
+			input = string(runes[addr.q0:addr.q1])
+		}
+		path, winid := ctx.Window.GetFilename(), ctx.Window.ID
 		var out string
 		var err error
-		ctx.Editor.await(func() { out, err = runPipe(cmd.cmdc, cmd.text, input, filename, winid) })
+		ctx.Editor.await(func() { out, err = runCommand(cmd.text, path, input, winid) })
 		if err != nil {
 			if ctx.Out != nil {
 				ctx.Out.Write([]byte(err.Error() + "\n"))
@@ -969,14 +960,6 @@ func expand(repl string, text []rune, match []int) string {
 		}
 	}
 	return buf.String()
-}
-
-func runPipe(cmd rune, shellCmd, input, path string, winid int) (string, error) {
-	in := ""
-	if cmd == '|' || cmd == '>' {
-		in = input
-	}
-	return runCommand(shellCmd, path, in, winid)
 }
 
 func cmdaddress(ap *Addr, a Range, runes []rune, sign int) Range {

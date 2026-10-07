@@ -2,9 +2,11 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/aleksana/peak/internal/vfs"
 	"github.com/aleksana/peak/internal/vfs/afero"
 )
 
@@ -186,5 +188,56 @@ func TestReadFileOrDir_IgnoresWrongSize(t *testing.T) {
 	if got != content {
 		t.Errorf("file truncated: got %q (%d chars), want %q (%d chars)",
 			got, len(got), content, len(content))
+	}
+}
+
+// A local command runs in the window's directory with the selection on its
+// standard input, and $samfile and $winid name the window, as in acme.
+func TestRunCommandLocal(t *testing.T) {
+	setupTest(t, 80, 24) // the namespace
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := dir + "/x.txt"
+	out, err := runCommand(`echo "$samfile $winid"; pwd; cat`, path, "input", 7)
+	if want := path + " 7\n" + dir + "\ninput"; err != nil || out != want {
+		t.Errorf("output %q, %v; want %q", out, err, want)
+	}
+	if _, err := runCommand("exit 3", path, "", 7); err == nil {
+		t.Error("a failing command reported no error")
+	}
+}
+
+// runStub is a file server's run file: it takes the request written to it
+// and replies with output.
+type runStub struct {
+	vfs.ReadonlyFile
+	request *string
+}
+
+func (f *runStub) WriteAt(p []byte, _ int64) (int, error) {
+	*f.request = string(p)
+	f.Data = []byte("remote output")
+	return len(p), nil
+}
+
+// In a directory a file server mounts, the server runs the command: it is
+// asked for it, relative to its root, through its run file.
+func TestRunCommandRemote(t *testing.T) {
+	setupTest(t, 80, 24)
+	var request string
+	const mount = "/peak/run-test"
+	ns.Mount(mount, &vfs.NamespaceFs{Entries: []vfs.FileEntry{
+		{Name: "run", Mode: 0600, Open: func(int) (afero.File, error) { return &runStub{request: &request}, nil }},
+	}}, "")
+	t.Cleanup(func() { ns.Umount(mount) })
+
+	out, err := runCommand("ls -l", mount+"/sub/x.txt", "", 7)
+	if err != nil || out != "remote output" {
+		t.Errorf("output %q, %v; want %q", out, err, "remote output")
+	}
+	if want := "sub/\nls -l\n"; request != want {
+		t.Errorf("the server was asked %q, want %q", request, want)
 	}
 }
