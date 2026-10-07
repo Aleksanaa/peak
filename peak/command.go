@@ -507,7 +507,7 @@ func (e *Editor) cmdZerox(col *Column, win *Window) {
 		newWin := target.parent.AddWindow(target.tag.buffer.GetText(), tv.buffer.GetText())
 		newTv := newWin.bodyTextView()
 		newTv.org = tv.org
-		newTv.buffer.cursor = tv.buffer.cursor
+		newTv.buffer.SetDot(tv.buffer.q0, tv.buffer.q1)
 		newWin.kind, newWin.writable = target.kind, target.writable
 		// Versions are per buffer: the copy matches disk iff the original does.
 		if target.IsDirty() {
@@ -618,11 +618,7 @@ func (e *Editor) cmdEdit(col *Column, win *Window, cmd string) {
 	}
 
 	buf := target.body.GetBuffer()
-	dot := Range{buf.CursorToRuneOffset(buf.cursor), buf.CursorToRuneOffset(buf.cursor)}
-	if buf.selection.Active {
-		s, end := buf.selection.Ordered()
-		dot = Range{buf.CursorToRuneOffset(s), buf.CursorToRuneOffset(end)}
-	}
+	dot := Range{buf.q0, buf.q1}
 
 	log := &Elog{}
 	ctx := &Context{Editor: e, Column: col, Window: target, Buffer: buf, Out: &pOut, Log: log}
@@ -636,14 +632,10 @@ func (e *Editor) cmdEdit(col *Column, win *Window, cmd string) {
 		return
 	}
 	log.Apply(buf)
-	start := buf.RuneOffsetToCursor(newDot.q0)
-	end := buf.RuneOffsetToCursor(newDot.q1)
-	buf.SetSelection(start, end)
+	buf.SetDot(newDot.q0, newDot.q1)
 	if res.Cmd.cmdc == '\n' {
-		buf.cursor = start
-		target.body.ShowLineAt(start.y)
-	} else {
-		buf.cursor = end
+		line, _ := buf.Pos(newDot.q0)
+		target.body.ShowLineAt(line)
 	}
 
 	if pOut.Len() > 0 {
@@ -742,18 +734,13 @@ func (e *Editor) runExternal(col *Column, win *Window, cmd string) {
 		filename = getwd()
 	}
 
-	// The output lands after the user may have edited the window, so the
-	// selection is kept as rune offsets, which clamp to the buffer (as acme's
-	// wrsel does), rather than as line/column positions that may no longer exist.
+	// The output lands after the user may have edited the window; dot, kept
+	// as rune offsets, clamps to the buffer then, as acme's wrsel does.
 	var input string
 	var q0, q1 int
 	if win != nil {
 		buf := win.body.GetBuffer()
-		start, end := buf.cursor, buf.cursor
-		if buf.selection.Active {
-			start, end = buf.selection.Ordered()
-		}
-		q0, q1 = buf.CursorToRuneOffset(start), buf.CursorToRuneOffset(end)
+		q0, q1 = buf.q0, buf.q1
 		if pipechar == '>' || pipechar == '|' {
 			input = buf.GetSelectedText()
 		}

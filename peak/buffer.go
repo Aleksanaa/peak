@@ -8,15 +8,15 @@ import (
 
 type bufferState struct {
 	lines   [][]rune
-	cursor  Cursor
+	q0, q1  int
 	version int
 }
 
-// Buffer handles the raw text data and selection state.
+// Buffer is text, kept as lines, and dot: the rune offsets [q0, q1) of what
+// is selected. An empty dot, q0 == q1, is the cursor.
 type Buffer struct {
 	lines     [][]rune
-	cursor    Cursor
-	selection Selection
+	q0, q1    int
 	history   []bufferState
 	redoStack []bufferState
 	version   int
@@ -24,7 +24,7 @@ type Buffer struct {
 
 	// onMutate is called after replace() or SetText() with pre/post rune offsets.
 	// q0=start, q1Old=old end, q1New=new end, text=inserted text.
-	// Called on the main goroutine; never nil-checked by callers.
+	// Called on the main goroutine.
 	onMutate func(q0, q1Old, q1New int, text string)
 
 	// line-start rune offset cache (invalidated on version change)
@@ -51,12 +51,12 @@ func NewBuffer(content string) *Buffer {
 	return b
 }
 
-func (b *Buffer) copyLines() [][]rune {
-	return append([][]rune{}, b.lines...)
+func (b *Buffer) state() bufferState {
+	return bufferState{append([][]rune{}, b.lines...), b.q0, b.q1, b.version}
 }
 
 func (b *Buffer) saveState() {
-	b.history = append(b.history, bufferState{lines: b.copyLines(), cursor: b.cursor, version: b.version})
+	b.history = append(b.history, b.state())
 	b.redoStack = nil
 }
 
@@ -74,11 +74,10 @@ func (b *Buffer) restore(from, to *[]bufferState) {
 	if b.onMutate != nil {
 		old = []rune(b.GetText())
 	}
-	*to = append(*to, bufferState{lines: b.copyLines(), cursor: b.cursor, version: b.version})
+	*to = append(*to, b.state())
 	s := (*from)[len(*from)-1]
 	*from = (*from)[:len(*from)-1]
-	b.lines, b.cursor, b.version = s.lines, s.cursor, s.version
-	b.ClearSelection()
+	b.lines, b.q0, b.q1, b.version = s.lines, s.q0, s.q1, s.version
 	if b.onMutate != nil {
 		cur := []rune(b.GetText())
 		p := 0
@@ -93,18 +92,13 @@ func (b *Buffer) restore(from, to *[]bufferState) {
 	}
 }
 
-func (b *Buffer) ClearSelection() {
-	b.selection.Active = false
-}
-
-func (b *Buffer) SetSelection(start, end Cursor) {
-	b.selection.Start = start
-	b.selection.End = end
-	b.selection.Active = true
+// SetDot selects the text between q0 and q1, in either order.
+func (b *Buffer) SetDot(q0, q1 int) {
+	b.q0, b.q1 = min(q0, q1), max(q0, q1)
 }
 
 func (b *Buffer) GetSelectedText() string {
-	return GetTextInSelection(b, b.selection)
+	return string(b.RunesInRange(b.q0, b.q1))
 }
 
 func (b *Buffer) Len() int {
@@ -114,17 +108,19 @@ func (b *Buffer) Len() int {
 }
 
 func (b *Buffer) RunesInRange(q0, q1 int) []rune {
-	if q0 < 0 {
-		q0 = 0
-	}
-	if n := b.Len(); q1 > n {
-		q1 = n
-	}
 	if q0 >= q1 {
 		return nil
 	}
-	q0c, q1c := b.RuneOffsetToCursor(q0), b.RuneOffsetToCursor(q1)
-	return []rune(GetTextInSelection(b, Selection{Start: q0c, End: q1c, Active: true}))
+	l0, c0 := b.Pos(q0)
+	l1, c1 := b.Pos(q1)
+	if l0 == l1 {
+		return append([]rune{}, b.lines[l0][c0:c1]...)
+	}
+	r := append([]rune{}, b.lines[l0][c0:]...)
+	for l := l0 + 1; l < l1; l++ {
+		r = append(append(r, '\n'), b.lines[l]...)
+	}
+	return append(append(r, '\n'), b.lines[l1][:c1]...)
 }
 
 func (b *Buffer) GetText() string {
@@ -159,19 +155,30 @@ func (b *Buffer) ensureLSR() {
 	b.lsrunsVer = b.version
 }
 
-// RuneOffsetOfPos returns the rune offset in the buffer's flat text for position
-// (line, col). A col past the end of its line means the end of that line (a
-// terminal selection can extend into blank cells past the text).
-func (b *Buffer) RuneOffsetOfPos(line, col int) int {
+// Offset returns the rune offset of column col of line.
+func (b *Buffer) Offset(line, col int) int {
 	b.ensureLSR()
-	if line < 0 {
-		return 0
+	return b.lsruns[line] + col
+}
+
+// Pos returns the line and column of rune offset q, which is clamped to the
+// text.
+func (b *Buffer) Pos(q int) (line, col int) {
+	b.ensureLSR()
+	if q <= 0 {
+		return 0, 0
 	}
-	if line >= len(b.lsruns) {
-		line = len(b.lsruns) - 1
-		col = len(b.lines[line])
+	// Binary search: find last line whose start ≤ q.
+	lo, hi := 0, len(b.lsruns)-1
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		if b.lsruns[mid] <= q {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
 	}
-	return b.lsruns[line] + min(col, len(b.lines[line]))
+	return lo, min(q-b.lsruns[lo], len(b.lines[lo]))
 }
 
 func (b *Buffer) SetText(content string) {
@@ -186,8 +193,7 @@ func (b *Buffer) SetText(content string) {
 	for _, l := range strings.Split(content, "\n") {
 		b.lines = append(b.lines, []rune(l))
 	}
-	b.cursor = Cursor{0, 0}
-	b.ClearSelection()
+	b.q0, b.q1 = 0, 0
 	b.bumpVersion()
 	if b.onMutate != nil {
 		q1New := b.Len()
@@ -195,83 +201,75 @@ func (b *Buffer) SetText(content string) {
 	}
 }
 
-func (b *Buffer) replace(start, end Cursor, content string) Cursor {
-	var q0, q1Old int
-	if b.onMutate != nil {
-		q0 = b.RuneOffsetOfPos(start.y, start.x)
-		q1Old = b.RuneOffsetOfPos(end.y, end.x)
-	}
+// replace replaces the text [q0, q1) with content, leaves the cursor after
+// it, and returns where that is.
+func (b *Buffer) replace(q0, q1 int, content string) int {
+	l0, c0 := b.Pos(q0)
+	l1, c1 := b.Pos(q1)
 
 	midLines := strings.Split(content, "\n")
 	mid := make([][]rune, len(midLines))
 	for i, l := range midLines {
 		mid[i] = []rune(l)
 	}
-
-	prefix := b.lines[start.y][:start.x]
-	suffix := b.lines[end.y][end.x:]
-
-	mid[0] = append(append([]rune{}, prefix...), mid[0]...)
 	last := len(mid) - 1
-	newEndCol := len(mid[last])
-	mid[last] = append(mid[last], suffix...)
+	mid[0] = append(append([]rune{}, b.lines[l0][:c0]...), mid[0]...)
+	mid[last] = append(mid[last], b.lines[l1][c1:]...)
+	b.lines = append(b.lines[:l0], append(mid, b.lines[l1+1:]...)...)
 
-	b.lines = append(b.lines[:start.y], append(mid, b.lines[end.y+1:]...)...)
-	b.cursor = Cursor{newEndCol, start.y + last}
-	b.ClearSelection()
+	end := q0 + len([]rune(content))
+	b.q0, b.q1 = end, end
 	b.bumpVersion()
-
 	if b.onMutate != nil {
-		q1New := q0 + len([]rune(content))
-		b.onMutate(q0, q1Old, q1New, content)
+		b.onMutate(q0, q1, end, content)
 	}
-	return b.cursor
+	return end
 }
 
-// DeleteLine removes the cursor's line and leaves the cursor at the start of
-// the line that takes its place (the previous line, when the last is removed).
+// DeleteLine removes the line dot starts on and leaves the cursor at the
+// start of the line that takes its place (the previous line, when the last is
+// removed).
 func (b *Buffer) DeleteLine() {
 	b.mutate(func() {
-		y := b.cursor.y
+		y, _ := b.Pos(b.q0)
 		switch {
 		case len(b.lines) == 1:
-			b.replace(Cursor{0, 0}, Cursor{len(b.lines[0]), 0}, "")
+			b.replace(0, len(b.lines[0]), "")
 		case y < len(b.lines)-1:
-			b.replace(Cursor{0, y}, Cursor{0, y + 1}, "")
+			b.replace(b.Offset(y, 0), b.Offset(y+1, 0), "")
 		default:
-			b.replace(Cursor{len(b.lines[y-1]), y - 1}, Cursor{len(b.lines[y]), y}, "")
-			b.cursor = Cursor{0, y - 1}
+			b.replace(b.Offset(y, 0)-1, b.Len(), "")
+			b.moveTo(b.Offset(y-1, 0))
 		}
 	})
 }
 
+// DeleteWordBefore removes the word before dot, or the newline if dot starts
+// a line.
 func (b *Buffer) DeleteWordBefore() {
-	if b.cursor.x == 0 && b.cursor.y == 0 {
+	if b.q0 == 0 {
 		return
 	}
 	b.mutate(func() {
-		start := b.cursor
-		if start.x == 0 {
-			start.y--
-			start.x = len(b.lines[start.y])
-		} else {
-			line := b.lines[start.y]
-			for start.x > 0 && line[start.x-1] == ' ' {
-				start.x--
+		start := b.q0 - 1
+		if y, x := b.Pos(b.q0); x > 0 {
+			line := b.lines[y]
+			for x > 0 && line[x-1] == ' ' {
+				x--
 			}
-			for start.x > 0 && line[start.x-1] != ' ' {
-				start.x--
+			for x > 0 && line[x-1] != ' ' {
+				x--
 			}
+			start = b.Offset(y, x)
 		}
-		b.replace(start, b.cursor, "")
+		b.replace(start, b.q0, "")
 	})
 }
 
-func (b *Buffer) Insert(r rune) { b.mutate(func() { b.replace(b.cursor, b.cursor, string(r)) }) }
-func (b *Buffer) NewLine()      { b.mutate(func() { b.replace(b.cursor, b.cursor, "\n") }) }
-func (b *Buffer) DeleteSelection() {
-	b.mutate(func() { start, end := b.selection.Ordered(); b.replace(start, end, "") })
-}
+// Insert replaces dot with s.
+func (b *Buffer) Insert(s string) { b.mutate(func() { b.replace(b.q0, b.q1, s) }) }
+
+func (b *Buffer) DeleteSelection() { b.Insert("") }
 
 func (b *Buffer) Snarf() {
 	if text := b.GetSelectedText(); text != "" {
@@ -286,123 +284,106 @@ func (b *Buffer) Cut() {
 	}
 }
 
+// Paste replaces dot with the clipboard and selects what it pasted.
 func (b *Buffer) Paste() {
 	text, _ := readClipboard()
 	if text == "" {
 		return
 	}
 	b.mutate(func() {
-		start, end := b.cursor, b.cursor
-		if b.selection.Active {
-			start, end = b.selection.Ordered()
-		}
-		pasteEnd := b.replace(start, end, text)
-		b.SetSelection(start, pasteEnd)
+		q0 := b.q0
+		b.SetDot(q0, b.replace(q0, b.q1, text))
 	})
 }
 
+// Backspace removes the selection, or else the rune before the cursor.
 func (b *Buffer) Backspace() {
-	if b.selection.Active {
+	switch {
+	case b.q0 < b.q1:
 		b.DeleteSelection()
-		return
+	case b.q0 > 0:
+		b.mutate(func() { b.replace(b.q0-1, b.q0, "") })
 	}
-	if b.cursor.x == 0 && b.cursor.y == 0 {
-		return
-	}
-	b.mutate(func() {
-		start := b.cursor
-		if start.x > 0 {
-			start.x--
-		} else {
-			start.y--
-			start.x = len(b.lines[start.y])
-		}
-		b.replace(start, b.cursor, "")
-	})
 }
 
+// Delete removes the selection, or else the rune after the cursor.
 func (b *Buffer) Delete() {
-	if b.selection.Active {
+	switch {
+	case b.q0 < b.q1:
 		b.DeleteSelection()
-		return
+	case b.q0 < b.Len():
+		b.mutate(func() { b.replace(b.q0, b.q0+1, "") })
 	}
-	if b.cursor.y == len(b.lines)-1 && b.cursor.x == len(b.lines[b.cursor.y]) {
-		return
-	}
-	b.mutate(func() {
-		end := b.cursor
-		if end.x < len(b.lines[end.y]) {
-			end.x++
-		} else {
-			end.y++
-			end.x = 0
-		}
-		b.replace(b.cursor, end, "")
-	})
 }
 
+// ReplaceRangeRunes replaces the text [q0, q1), clamped to the buffer, with
+// runes.
 func (b *Buffer) ReplaceRangeRunes(q0, q1 int, runes []rune) {
 	b.mutate(func() { b.replaceRangeRunesNoSave(q0, q1, runes) })
 }
 
 func (b *Buffer) replaceRangeRunesNoSave(q0, q1 int, runes []rune) {
-	if q0 < 0 {
-		q0 = 0
-	}
-	if q1 < q0 {
-		q1 = q0
-	}
-	start := b.RuneOffsetToCursor(q0)
-	end := b.RuneOffsetToCursor(q1)
-	b.replace(start, end, string(runes))
+	n := b.Len()
+	q0 = max(0, min(q0, n))
+	q1 = max(q0, min(q1, n))
+	b.replace(q0, q1, string(runes))
 }
 
-func (b *Buffer) CursorToRuneOffset(c Cursor) int {
-	return b.RuneOffsetOfPos(c.y, c.x)
+// The motions leave the cursor where they move to. One that moves back
+// starts from the start of dot, one that moves on from its end.
+
+func (b *Buffer) moveTo(q int) { b.q0, b.q1 = q, q }
+
+func (b *Buffer) MoveLeft()  { b.moveTo(max(0, b.q0-1)) }
+func (b *Buffer) MoveRight() { b.moveTo(min(b.Len(), b.q1+1)) }
+
+func (b *Buffer) MoveHome() {
+	y, _ := b.Pos(b.q0)
+	b.moveTo(b.Offset(y, 0))
 }
 
-func (b *Buffer) RuneOffsetToCursor(off int) Cursor {
-	b.ensureLSR()
-	if off <= 0 {
-		return Cursor{0, 0}
-	}
-	// Binary search: find last line whose start ≤ off.
-	lo, hi := 0, len(b.lsruns)-1
-	for lo < hi {
-		mid := (lo + hi + 1) / 2
-		if b.lsruns[mid] <= off {
-			lo = mid
-		} else {
-			hi = mid - 1
-		}
-	}
-	col := off - b.lsruns[lo]
-	if col > len(b.lines[lo]) {
-		col = len(b.lines[lo])
-	}
-	return Cursor{col, lo}
+func (b *Buffer) MoveEnd() {
+	y, _ := b.Pos(b.q1)
+	b.moveTo(b.Offset(y, len(b.lines[y])))
 }
 
-func (b *Buffer) MoveHome() { b.cursor.x = 0 }
-func (b *Buffer) MoveEnd()  { b.cursor.x = len(b.lines[b.cursor.y]) }
+func (b *Buffer) MoveUp() {
+	y, x := b.Pos(b.q0)
+	if y > 0 {
+		y--
+		x = min(x, len(b.lines[y]))
+	}
+	b.moveTo(b.Offset(y, x))
+}
+
+func (b *Buffer) MoveDown() {
+	y, x := b.Pos(b.q1)
+	if y < len(b.lines)-1 {
+		y++
+		x = min(x, len(b.lines[y]))
+	}
+	b.moveTo(b.Offset(y, x))
+}
 
 func (b *Buffer) MoveWordLeft() {
-	if b.cursor.x == 0 {
+	y, x := b.Pos(b.q0)
+	if x == 0 {
 		b.MoveLeft()
 		return
 	}
-	line, x := b.lines[b.cursor.y], b.cursor.x
+	line := b.lines[y]
 	for x > 0 && !IsWordChar(line[x-1]) {
 		x--
 	}
 	for x > 0 && IsWordChar(line[x-1]) {
 		x--
 	}
-	b.cursor.x = x
+	b.moveTo(b.Offset(y, x))
 }
 
 func (b *Buffer) MoveWordRight() {
-	line, x := b.lines[b.cursor.y], b.cursor.x
+	y, x := b.Pos(b.q1)
+	line := b.lines[y]
 	if x >= len(line) {
 		b.MoveRight()
 		return
@@ -413,41 +394,5 @@ func (b *Buffer) MoveWordRight() {
 	for x < len(line) && !IsWordChar(line[x]) {
 		x++
 	}
-	b.cursor.x = x
-}
-
-func (b *Buffer) MoveLeft() {
-	if b.cursor.x > 0 {
-		b.cursor.x--
-	} else if b.cursor.y > 0 {
-		b.cursor.y--
-		b.cursor.x = len(b.lines[b.cursor.y])
-	}
-}
-
-func (b *Buffer) MoveRight() {
-	if b.cursor.x < len(b.lines[b.cursor.y]) {
-		b.cursor.x++
-	} else if b.cursor.y < len(b.lines)-1 {
-		b.cursor.y++
-		b.cursor.x = 0
-	}
-}
-
-func (b *Buffer) MoveUp() {
-	if b.cursor.y > 0 {
-		b.cursor.y--
-		if b.cursor.x > len(b.lines[b.cursor.y]) {
-			b.cursor.x = len(b.lines[b.cursor.y])
-		}
-	}
-}
-
-func (b *Buffer) MoveDown() {
-	if b.cursor.y < len(b.lines)-1 {
-		b.cursor.y++
-		if b.cursor.x > len(b.lines[b.cursor.y]) {
-			b.cursor.x = len(b.lines[b.cursor.y])
-		}
-	}
+	b.moveTo(b.Offset(y, x))
 }

@@ -227,7 +227,7 @@ func scrollStep(win *Window, dir, n int) {
 		return
 	}
 	win.body.Scroll(dir * n)
-	win.body.AdvanceDragCursor(dir)
+	win.body.AdvanceSweep(dir)
 }
 
 // dragWindow moves win by its handle with the pointer, within or across
@@ -387,10 +387,10 @@ func (e *Editor) fireChord(middle bool) {
 		}
 	case *TextView:
 		if middle {
-			v.typingStart = nil
+			v.typedFrom = -1
 			v.buffer.Cut()
 		} else {
-			v.prepareTyping()
+			v.startTyping()
 			v.buffer.Paste()
 		}
 	}

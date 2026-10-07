@@ -133,11 +133,7 @@ func (f *winCtlFile) WriteAt(p []byte, _ int64) (int, error) {
 func newWinRdselFile(win *Window) *winRdselFile {
 	f := &winRdselFile{}
 	win.editor.Call(func() {
-		buf := win.body.GetBuffer()
-		if buf.selection.Active {
-			start, end := buf.selection.Ordered()
-			f.Data = []byte(string(buf.RunesInRange(buf.CursorToRuneOffset(start), buf.CursorToRuneOffset(end))))
-		}
+		f.Data = []byte(win.body.GetBuffer().GetSelectedText())
 	})
 	return f
 }
@@ -153,10 +149,7 @@ func newWinWrselFile(win *Window) *winWrselFile {
 	f := &winWrselFile{win: win}
 	win.editor.Call(func() {
 		buf := win.body.GetBuffer()
-		if buf.selection.Active {
-			start, end := buf.selection.Ordered()
-			f.q0, f.q1 = buf.CursorToRuneOffset(start), buf.CursorToRuneOffset(end)
-		}
+		f.q0, f.q1 = buf.q0, buf.q1
 	})
 	return f
 }

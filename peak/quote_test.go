@@ -115,7 +115,7 @@ func TestExecuteQuotedClick(t *testing.T) {
 		col.Resize(col.rect)
 		tv := win.bodyTextView()
 		if selected {
-			tv.buffer.SetSelection(Cursor{4, 0}, Cursor{11, 0})
+			tv.buffer.SetDot(4, 11)
 		}
 		sub := newEventSub()
 		win.eventSubs = append(win.eventSubs, sub)
@@ -172,8 +172,8 @@ func TestClickRange(t *testing.T) {
 	tests := []struct {
 		name   string
 		text   string
-		sel    [2]int // rune offsets of the selection, if any
-		at     int    // the column clicked
+		sel    [2]int // dot
+		at     int    // the rune offset clicked
 		q0, q1 int
 		want   string
 	}{
@@ -187,10 +187,8 @@ func TestClickRange(t *testing.T) {
 	}
 	for _, tt := range tests {
 		b := NewBuffer(tt.text)
-		if tt.sel[0] != tt.sel[1] {
-			b.SetSelection(b.RuneOffsetToCursor(tt.sel[0]), b.RuneOffsetToCursor(tt.sel[1]))
-		}
-		q0, q1, text := clickRange(b, Cursor{tt.at, 0})
+		b.SetDot(tt.sel[0], tt.sel[1])
+		q0, q1, text := clickRange(b, tt.at)
 		if q0 != tt.q0 || q1 != tt.q1 || text != tt.want {
 			t.Errorf("%s: clickRange = [%d, %d) %q, want [%d, %d) %q", tt.name, q0, q1, text, tt.q0, tt.q1, tt.want)
 		}

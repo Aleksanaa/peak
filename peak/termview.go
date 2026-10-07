@@ -40,7 +40,7 @@ type TermView struct {
 	lastButtons tcell.ButtonMask
 
 	hist      []termLine      // the history: lines that left the screen
-	screenTop Cursor          // where the screen starts in the text
+	screenTop int             // the rune offset the screen starts at
 	styles    [][]tcell.Style // the style of each rune of each line
 	scrolled  []termLine      // rows that left the screen since sync; under the state lock
 	changed   atomic.Bool     // the emulator changed since sync; set by the parse goroutine
@@ -269,23 +269,24 @@ func (tv *TermView) sync() {
 		lines, styles = append(lines, l.text), append(styles, l.styles)
 	}
 	join := len(tv.hist) > 0 && tv.hist[len(tv.hist)-1].wrapped
-	starts := make([]Cursor, len(screen)) // where each row starts in the text
+	type at struct{ line, col int }
+	starts := make([]at, len(screen)) // where each row starts in the text
 	for y, l := range screen {
 		if join {
 			i := len(lines) - 1
-			starts[y] = Cursor{len(lines[i]), i}
+			starts[y] = at{i, len(lines[i])}
 			lines[i] = slices.Concat(lines[i], l.text)
 			styles[i] = slices.Concat(styles[i], l.styles)
 		} else {
-			starts[y] = Cursor{0, len(lines)}
+			starts[y] = at{len(lines), 0}
 			lines, styles = append(lines, l.text), append(styles, l.styles)
 		}
 		join = l.wrapped
 	}
 	b.lines, tv.styles = lines, styles
-	tv.screenTop = starts[0]
-	b.cursor = Cursor{starts[cy].x + col, starts[cy].y}
 	b.bumpVersion()
+	tv.screenTop = b.Offset(starts[0].line, starts[0].col)
+	tv.cursor = b.Offset(starts[cy].line, starts[cy].col) + col
 }
 
 // forget drops the oldest n lines of history. What refers to the lines left
@@ -298,12 +299,8 @@ func (tv *TermView) forget(n int) {
 	}
 	tv.hist = slices.Delete(tv.hist, 0, n)
 	tv.org = max(0, tv.org-off)
-	for _, c := range []*Cursor{&b.selection.Start, &b.selection.End} {
-		c.y -= n
-		if c.y < 0 {
-			*c = Cursor{}
-		}
-	}
+	tv.anchor = max(0, tv.anchor-off)
+	b.q0, b.q1 = max(0, b.q0-off), max(0, b.q1-off)
 }
 
 // Layout follows the screen, unless the view was scrolled away or a sweep
@@ -311,7 +308,7 @@ func (tv *TermView) forget(n int) {
 func (tv *TermView) Layout() {
 	tv.sync()
 	if tv.autoScroll && !tv.drag {
-		_, top := tv.bufferToVisual(tv.screenTop.x, tv.screenTop.y)
+		_, top := tv.visualOf(tv.screenTop)
 		tv.setTop(top)
 	}
 }
@@ -379,7 +376,7 @@ func (tv *TermView) HandleEvent(ev tcell.Event) {
 
 			switch key {
 			case tcell.KeyEsc:
-				tv.buffer.selection.Active = false
+				tv.buffer.moveTo(tv.buffer.q0)
 				return
 			case tcell.KeyPgUp:
 				tv.Scroll(-tv.h)
@@ -455,7 +452,7 @@ func (tv *TermView) HandleEvent(ev tcell.Event) {
 		}
 
 		if buttons&tcell.ButtonPrimary != 0 {
-			tv.buffer.selection.Active = false
+			tv.buffer.moveTo(tv.buffer.q0)
 		}
 	}
 }

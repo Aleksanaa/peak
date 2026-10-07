@@ -193,8 +193,7 @@ func (w *Window) saveState(colH int) WindowSession {
 		ws.Kind = "file"
 		if tv := w.bodyTextView(); tv != nil {
 			ws.Scroll = tv.top()
-			ws.CursorLine = tv.buffer.cursor.y
-			ws.CursorCol = tv.buffer.cursor.x
+			ws.CursorLine, ws.CursorCol = tv.buffer.Pos(tv.buffer.q0)
 			ws.TabWidth = tv.tabWidth
 			if w.IsDirty() {
 				ws.Dirty = true
@@ -205,8 +204,7 @@ func (w *Window) saveState(colH int) WindowSession {
 		ws.Kind = "dir"
 		if tv := w.bodyTextView(); tv != nil {
 			ws.Scroll = tv.top()
-			ws.CursorLine = tv.buffer.cursor.y
-			ws.CursorCol = tv.buffer.cursor.x
+			ws.CursorLine, ws.CursorCol = tv.buffer.Pos(tv.buffer.q0)
 		}
 	case WinTerm:
 		ws.Kind = "term"
@@ -248,7 +246,7 @@ func (w *Window) restoreViewState(ws WindowSession) {
 	}
 	line := max(0, min(ws.CursorLine, len(tv.buffer.lines)-1))
 	col := max(0, min(ws.CursorCol, len(tv.buffer.lines[line])))
-	tv.buffer.cursor = Cursor{col, line}
+	tv.buffer.moveTo(tv.buffer.Offset(line, col))
 }
 
 func (e *Editor) Dump(file string) error {

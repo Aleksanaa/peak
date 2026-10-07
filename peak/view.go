@@ -11,75 +11,28 @@ import (
 	uwidth "golang.org/x/text/width"
 )
 
-// Cursor represents a 2D position.
-type Cursor struct {
-	x, y int
-}
-
-// Selection represents a selected range.
-type Selection struct {
-	Start  Cursor
-	End    Cursor
-	Active bool
-}
-
-func (s Selection) Ordered() (Cursor, Cursor) {
-	if s.Start.y > s.End.y || (s.Start.y == s.End.y && s.Start.x > s.End.x) {
-		return s.End, s.Start
-	}
-	return s.Start, s.End
-}
-
-func (s Selection) Contains(x, y int, inclusive bool) bool {
-	if !s.Active {
-		return false
-	}
-	start, end := s.Ordered()
-	if y < start.y || y > end.y {
-		return false
-	}
-	if y == start.y && y == end.y {
-		if inclusive {
-			return x >= start.x && x <= end.x
-		}
-		return x >= start.x && x < end.x
-	}
-	if y == start.y {
-		return x >= start.x
-	}
-	if y == end.y {
-		if inclusive {
-			return x <= end.x
-		}
-		return x < end.x
-	}
-	return true
-}
-
 func IsWordChar(r rune) bool {
 	return r != 0 && !unicode.IsSpace(r)
 }
 
-// clickRange returns what a click at p in b stands for, as the rune offsets
+// clickRange returns what a click at q in b stands for, as the rune offsets
 // [q0, q1) of b and their text. A click in the selection takes the
 // selection; so does a click on blank space, since we cannot set the mouse
-// cursor position like acme. Otherwise it takes the word at p: a field (see
+// cursor position like acme. Otherwise it takes the word at q: a field (see
 // package quote), so a backtick-quoted name is one word. Quoted text stands
 // for its contents, as if they were selected: the range is inside the
 // backticks and the text is unquoted.
-func clickRange(b *Buffer, p Cursor) (q0, q1 int, text string) {
-	start, end := p, p
-	if p.y >= 0 && p.y < len(b.lines) {
-		if line := b.lines[p.y]; p.x >= 0 && p.x < len(line) {
-			s, e := quote.FieldAt(p.x, len(line), func(i int) rune { return line[i] })
-			start, end = Cursor{s, p.y}, Cursor{e, p.y}
-		}
+func clickRange(b *Buffer, q int) (q0, q1 int, text string) {
+	q0, q1 = q, q
+	if y, x := b.Pos(q); x < len(b.lines[y]) {
+		line := b.lines[y]
+		s, e := quote.FieldAt(x, len(line), func(i int) rune { return line[i] })
+		q0, q1 = b.Offset(y, s), b.Offset(y, e)
 	}
-	if strings.TrimSpace(b.GetSelectedText()) != "" && (b.selection.Contains(p.x, p.y, false) || start == end) {
-		start, end = b.selection.Ordered()
+	if strings.TrimSpace(b.GetSelectedText()) != "" && (b.q0 <= q && q < b.q1 || q0 == q1) {
+		q0, q1 = b.q0, b.q1
 	}
 
-	q0, q1 = b.RuneOffsetOfPos(start.y, start.x), b.RuneOffsetOfPos(end.y, end.x)
 	r := b.RunesInRange(q0, q1)
 	for len(r) > 0 && unicode.IsSpace(r[0]) {
 		r, q0 = r[1:], q0+1
@@ -97,95 +50,28 @@ func clickRange(b *Buffer, p Cursor) (q0, q1 int, text string) {
 	return q0, q1, text
 }
 
-// Search performs a two-pass search (forward from start, then wrap around).
-// It returns the line number, the resulting selection, and true if found.
-func Search(buf *Buffer, word string, start Cursor) (int, Selection, bool) {
-	if word == "" {
-		return -1, Selection{}, false
-	}
-	lines := buf.lines
-	count := len(lines)
-	if count == 0 {
-		return -1, Selection{}, false
-	}
-	wordRunes := []rune(word)
-	wn := len(wordRunes)
-	startRX, startRY := start.x+1, start.y
-	if startRY >= count {
-		startRY, startRX = 0, 0
-	}
-
-	// find returns the rune index of wordRunes in line[from:], or -1.
-	find := func(line []rune, from int) int {
-		for i := from; i+wn <= len(line); i++ {
-			j := 0
-			for j < wn && line[i+j] == wordRunes[j] {
-				j++
-			}
-			if j == wn {
+// Search returns where word next occurs in buf from q on, wrapping around
+// to the start.
+func Search(buf *Buffer, word string, q int) (int, bool) {
+	text, w := []rune(buf.GetText()), []rune(word)
+	find := func(from, to int) int {
+		for i := from; i < to && i+len(w) <= len(text); i++ {
+			if slices.Equal(text[i:i+len(w)], w) {
 				return i
 			}
 		}
 		return -1
 	}
-
-	// Pass 1: startRY to end
-	for y := startRY; y < count; y++ {
-		line := lines[y]
-		sx := 0
-		if y == startRY {
-			sx = min(startRX, len(line))
-		}
-		if x := find(line, sx); x != -1 {
-			return y, Selection{Start: Cursor{x, y}, End: Cursor{x + wn, y}, Active: true}, true
-		}
+	if len(w) == 0 {
+		return 0, false
 	}
-
-	// Pass 2: 0 to startRY
-	for y := 0; y <= startRY && y < count; y++ {
-		line := lines[y]
-		limit := len(line)
-		if y == startRY {
-			limit = min(startRX, len(line))
-		}
-		if x := find(line[:limit], 0); x != -1 {
-			return y, Selection{Start: Cursor{x, y}, End: Cursor{x + wn, y}, Active: true}, true
-		}
+	if i := find(q, len(text)); i >= 0 {
+		return i, true
 	}
-
-	return -1, Selection{}, false
-}
-
-func GetTextInSelection(buf *Buffer, s Selection) string {
-	if !s.Active {
-		return ""
+	if i := find(0, q); i >= 0 {
+		return i, true
 	}
-	start, end := s.Ordered()
-	lines := buf.lines
-	count := len(lines)
-	var sb strings.Builder
-	for y := start.y; y <= end.y; y++ {
-		if y < 0 || y >= count {
-			continue
-		}
-		line := lines[y]
-		x1, x2 := 0, len(line)
-		if y == start.y {
-			x1 = start.x
-		}
-		if y == end.y {
-			x2 = end.x
-		}
-		x1 = max(0, min(x1, len(line)))
-		x2 = max(0, min(x2, len(line)))
-		if x1 < x2 {
-			sb.WriteString(string(line[x1:x2]))
-		}
-		if y < end.y {
-			sb.WriteRune('\n')
-		}
-	}
-	return sb.String()
+	return 0, false
 }
 
 // A frame shows a Buffer in an area w wide and h high: it wraps the
@@ -206,8 +92,12 @@ type frame struct {
 	autoScroll    bool
 	scrollable    bool // false for tags, which show their text from the top
 	drag          bool // a selection is being swept
+	anchor        int  // where the sweep began
 	underlineLast bool // underline the last line, as the active window's tag
-	cursorHidden  bool // the program hid the cursor
+	// cursor is the rune offset the cursor is shown at, unless cursorHidden;
+	// the view's Layout sets them.
+	cursor       int
+	cursorHidden bool
 	// layout is the buffer's lines wrapped at the frame's width, laid out for
 	// laidOut; read it through lines.
 	layout   []VisualLine
@@ -226,7 +116,7 @@ func newFrame(b *Buffer, w, h int, theme *Theme, colors *colorPair, scrollable b
 
 // mouse handles the mouse in the frame: the wheel scrolls it, Button1 sweeps
 // a selection, and another button puts the cursor where it is pressed,
-// unless something is selected. A selection of nothing is dropped.
+// unless something is selected.
 func (f *frame) mouse(ev *tcell.EventMouse) {
 	buttons := ev.Buttons()
 	if f.scrollable {
@@ -241,20 +131,17 @@ func (f *frame) mouse(ev *tcell.EventMouse) {
 	}
 	if buttons == tcell.ButtonNone {
 		f.drag = false
-		if f.buffer.selection.Active && f.buffer.selection.Start == f.buffer.selection.End {
-			f.buffer.ClearSelection()
-		}
 		return
 	}
-	p := f.PosAt(ev.Position())
+	q := f.PosAt(ev.Position())
 	switch {
 	case buttons == tcell.ButtonPrimary && !f.drag:
-		f.drag, f.buffer.cursor = true, p
-		f.buffer.SetSelection(p, p)
+		f.drag, f.anchor = true, q
+		f.buffer.SetDot(q, q)
 	case buttons == tcell.ButtonPrimary:
-		f.buffer.cursor, f.buffer.selection.End = p, p
-	case !f.buffer.selection.Active:
-		f.buffer.cursor = p
+		f.buffer.SetDot(f.anchor, q)
+	case f.buffer.q0 == f.buffer.q1:
+		f.buffer.SetDot(q, q)
 	}
 }
 
@@ -319,7 +206,7 @@ func (f *frame) lines() []VisualLine {
 func (f *frame) top() int {
 	lines := f.lines()
 	i := sort.Search(len(lines), func(i int) bool {
-		return f.buffer.RuneOffsetOfPos(lines[i].BufferLine, lines[i].Start) > f.org
+		return f.buffer.Offset(lines[i].BufferLine, lines[i].Start) > f.org
 	})
 	return max(0, i-1)
 }
@@ -328,7 +215,7 @@ func (f *frame) top() int {
 func (f *frame) setTop(i int) {
 	lines := f.lines()
 	vl := lines[max(0, min(i, len(lines)-1))]
-	f.org = f.buffer.RuneOffsetOfPos(vl.BufferLine, vl.Start)
+	f.org = f.buffer.Offset(vl.BufferLine, vl.Start)
 }
 
 func (f *frame) GetScroll() (scroll, total, visible int) {
@@ -346,8 +233,9 @@ func (f *frame) Scroll(n int) {
 	}
 }
 
-// bufferToVisual translates a buffer position to visual coordinates (vx, vrow).
-func (f *frame) bufferToVisual(bx, by int) (int, int) {
+// visualOf returns the column and the visual line rune offset q is shown at.
+func (f *frame) visualOf(q int) (vx, vrow int) {
+	by, bx := f.buffer.Pos(q)
 	lines := f.lines()
 	for lidx, vl := range lines {
 		if vl.BufferLine == by && bx >= vl.Start && bx <= vl.End {
@@ -366,8 +254,8 @@ func (f *frame) bufferToVisual(bx, by int) (int, int) {
 	return 0, -1
 }
 
-// visualToBuffer translates visual coordinates (vx, vidx) to buffer position (bx, by).
-func (f *frame) visualToBuffer(vx, vidx int) (int, int) {
+// offsetAt returns the rune offset shown at column vx of visual line vidx.
+func (f *frame) offsetAt(vx, vidx int) int {
 	lines := f.lines()
 	vl := lines[max(0, min(vidx, len(lines)-1))]
 	line := f.buffer.lines[vl.BufferLine]
@@ -380,22 +268,24 @@ func (f *frame) visualToBuffer(vx, vidx int) (int, int) {
 		currVX += w
 		bx = i + 1
 	}
-	return bx, vl.BufferLine
+	return f.buffer.Offset(vl.BufferLine, bx)
 }
 
 func (f *frame) Draw(cv canvas) {
 	selStyle := f.theme.Selection.style()
+	selected := func(q int) bool { return f.buffer.q0 <= q && q < f.buffer.q1 }
 	lines, vrow := f.lines(), 0
 	for lidx := f.top(); lidx < len(lines) && vrow < f.h; lidx++ {
 		vl, vcol := lines[lidx], 0
 		line := f.buffer.lines[vl.BufferLine]
+		start := f.buffer.Offset(vl.BufferLine, 0)
 		lineStyle := f.colors.style()
 		if f.underlineLast && lidx == len(lines)-1 {
 			lineStyle = lineStyle.Underline(true)
 		}
 		for idx := vl.Start; idx < vl.End; idx++ {
 			r, style := line[idx], lineStyle
-			if f.buffer.selection.Contains(idx, vl.BufferLine, false) {
+			if selected(start + idx) {
 				style = selStyle
 			} else if f.styleAt != nil {
 				style = f.styleAt(vl.BufferLine, idx, style)
@@ -414,7 +304,7 @@ func (f *frame) Draw(cv canvas) {
 			vcol += width
 		}
 		eolStyle := lineStyle
-		if f.buffer.selection.Contains(vl.End, vl.BufferLine, false) {
+		if selected(start + vl.End) {
 			eolStyle = selStyle
 		}
 		cv.fill(rect{vcol, vrow, f.w - vcol, 1}, eolStyle)
@@ -423,16 +313,16 @@ func (f *frame) Draw(cv canvas) {
 	cv.fill(rect{0, vrow, f.w, f.h - vrow}, f.colors.style())
 }
 
-func (f *frame) PosAt(x, y int) Cursor {
-	bx, by := f.visualToBuffer(x, y+f.top())
-	return Cursor{bx, by}
+// PosAt returns the rune offset shown at (x, y).
+func (f *frame) PosAt(x, y int) int {
+	return f.offsetAt(x, y+f.top())
 }
 
 func (f *frame) ShowCursor(cv canvas) {
 	if f.cursorHidden {
 		return
 	}
-	vx, vrow := f.bufferToVisual(f.buffer.cursor.x, f.buffer.cursor.y)
+	vx, vrow := f.visualOf(f.cursor)
 	cv.showCursor(max(0, min(vx, f.w-1)), vrow-f.top())
 }
 
@@ -442,33 +332,31 @@ func (f *frame) fit(w int) {
 	f.h = max(1, len(f.lines()))
 }
 
-func (f *frame) AdvanceDragCursor(dir int) {
+// AdvanceSweep moves the end of a sweep under way a line in direction
+// dir.
+func (f *frame) AdvanceSweep(dir int) {
 	if !f.drag {
 		return
 	}
-	f.buffer.cursor = f.buffer.selection.End
-	if dir > 0 {
-		f.buffer.MoveDown()
-	} else {
-		f.buffer.MoveUp()
+	end := f.buffer.q1
+	if end == f.anchor {
+		end = f.buffer.q0
 	}
-	f.buffer.selection.End = f.buffer.cursor
+	y, x := f.buffer.Pos(end)
+	y = max(0, min(y+dir, len(f.buffer.lines)-1))
+	f.buffer.SetDot(f.anchor, f.buffer.Offset(y, min(x, len(f.buffer.lines[y]))))
 }
 
-// Search selects the next match of word after the selection, or else after
-// the cursor, wrapping around.
+// Search selects the next match of word from the end of dot on, wrapping
+// around, and returns its line, or -1 if there is none.
 func (f *frame) Search(word string) int {
-	start := f.buffer.cursor
-	if f.buffer.selection.Active {
-		start = f.buffer.selection.End
+	q, ok := Search(f.buffer, word, f.buffer.q1)
+	if !ok {
+		return -1
 	}
-	line, sel, ok := Search(f.buffer, word, start)
-	if ok {
-		f.buffer.cursor = sel.End
-		f.buffer.selection = sel
-		return line
-	}
-	return -1
+	f.buffer.SetDot(q, q+len([]rune(word)))
+	line, _ := f.buffer.Pos(q)
+	return line
 }
 
 // showLine scrolls to show line n, if it is not shown, and reports whether

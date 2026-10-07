@@ -74,7 +74,7 @@ func TestWindowSaveStateCleanFile(t *testing.T) {
 	win := addFileWindow(t, col, " /tmp/foo.go Get Put Del ", "line1\nline2\nline3")
 	tv := win.bodyTextView()
 	tv.setTop(1)
-	tv.buffer.cursor = Cursor{3, 2}
+	tv.buffer.moveTo(tv.buffer.Offset(2, 3))
 	tv.tabWidth = 8
 	win.explicitHeight = 20
 
@@ -128,7 +128,7 @@ func TestWindowSaveStateDir(t *testing.T) {
 	win.kind = WinDir
 	tv := win.bodyTextView()
 	tv.setTop(5)
-	tv.buffer.cursor = Cursor{0, 3}
+	tv.buffer.moveTo(tv.buffer.Offset(3, 0))
 
 	ws := win.saveState(col.h)
 
@@ -299,8 +299,8 @@ func TestWindowRestoreViewState(t *testing.T) {
 	if tv.top() != 5 {
 		t.Errorf("Scroll = %d, want 5", tv.top())
 	}
-	if tv.buffer.cursor.y != 10 || tv.buffer.cursor.x != 3 {
-		t.Errorf("cursor = (%d,%d), want (10,3)", tv.buffer.cursor.y, tv.buffer.cursor.x)
+	if line, col := tv.buffer.Pos(tv.buffer.q0); line != 10 || col != 3 {
+		t.Errorf("cursor = (%d,%d), want (10,3)", line, col)
 	}
 }
 
@@ -308,13 +308,12 @@ func TestWindowRestoreViewStateCursorAtOrigin(t *testing.T) {
 	_, col := newTestEditorWithColumn(t)
 	win := makeTextWindow(t, col, strings.Repeat("x\n", 20))
 	// put cursor somewhere else first
-	win.bodyTextView().buffer.cursor = Cursor{5, 5}
+	win.bodyTextView().buffer.moveTo(win.bodyTextView().buffer.Offset(5, 5))
 
 	win.restoreViewState(WindowSession{CursorLine: 0, CursorCol: 0})
 
-	c := win.bodyTextView().buffer.cursor
-	if c.x != 0 || c.y != 0 {
-		t.Errorf("cursor = (%d,%d), want (0,0)", c.x, c.y)
+	if q := win.bodyTextView().buffer.q0; q != 0 {
+		t.Errorf("cursor = %d, want 0", q)
 	}
 }
 
@@ -324,15 +323,8 @@ func TestWindowRestoreViewStateCursorClamped(t *testing.T) {
 
 	win.restoreViewState(WindowSession{CursorLine: 999, CursorCol: 999})
 
-	c := win.bodyTextView().buffer.cursor
-	tv := win.bodyTextView()
-	maxLine := len(tv.buffer.lines) - 1
-	if c.y != maxLine {
-		t.Errorf("line clamped to %d, want %d", c.y, maxLine)
-	}
-	maxCol := len(tv.buffer.lines[c.y])
-	if c.x != maxCol {
-		t.Errorf("col clamped to %d, want %d", c.x, maxCol)
+	if b := win.bodyTextView().buffer; b.q0 != b.Len() {
+		t.Errorf("cursor = %d, want clamped to the end, %d", b.q0, b.Len())
 	}
 }
 
@@ -525,7 +517,7 @@ func TestEditorRoundTripCleanFile(t *testing.T) {
 	e, col := newTestEditorWithColumn(t)
 	col.tag.buffer.SetText(" Custom Col Tag ")
 	win := addFileWindow(t, col, " "+path+" Get Put Del ", "")
-	win.bodyTextView().buffer.cursor = Cursor{3, 0}
+	win.bodyTextView().buffer.moveTo(win.bodyTextView().buffer.Offset(0, 3))
 
 	dest := filepath.Join(t.TempDir(), "session.json")
 	if err := e.Dump(dest); err != nil {

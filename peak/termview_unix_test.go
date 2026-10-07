@@ -146,8 +146,9 @@ func TestTermHistory(t *testing.T) {
 	if cy >= 10 {
 		t.Errorf("cursor row %d on a screen of 10 rows", cy)
 	}
-	if top := tv.lines()[tv.top()].BufferLine; top != tv.screenTop.y {
-		t.Errorf("view starts at line %d, want the screen's first, %d", top, tv.screenTop.y)
+	screen, _ := tv.buffer.Pos(tv.screenTop)
+	if top := tv.lines()[tv.top()].BufferLine; top != screen {
+		t.Errorf("view starts at line %d, want the screen's first, %d", top, screen)
 	}
 }
 

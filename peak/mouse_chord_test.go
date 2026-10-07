@@ -54,7 +54,7 @@ func TestMouseChordSweepMiddleCutsBodyText(t *testing.T) {
 func TestMouseChordClickOnSelectionDoesNothing(t *testing.T) {
 	e, _, tv := setupMouseChordWindow(t)
 	p := screenAt(e, tv)
-	tv.buffer.SetSelection(Cursor{6, 0}, Cursor{10, 0})
+	tv.buffer.SetDot(6, 10)
 
 	// A plain click on a standing selection deselects it; a chord that follows
 	// finds nothing selected and must not cut.
@@ -132,7 +132,7 @@ func TestMouseChordPasteThenCutWithoutReleasing(t *testing.T) {
 func TestMouseChordRequiresPrimaryHeld(t *testing.T) {
 	e, _, tv := setupMouseChordWindow(t)
 	p := screenAt(e, tv)
-	tv.buffer.SetSelection(Cursor{0, 0}, Cursor{5, 0})
+	tv.buffer.SetDot(0, 5)
 
 	// Middle or secondary alone (no primary) must not arm or fire a chord:
 	// they are normal execute/plumb clicks. Click on the space at column 5 so

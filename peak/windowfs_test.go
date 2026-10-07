@@ -315,7 +315,7 @@ func TestWindowFsRdselWithSelection(t *testing.T) {
 		buf := win.body.GetBuffer()
 		buf.SetText("hello world\n")
 		// Select "hello" (rune offsets 0–5).
-		buf.SetSelection(Cursor{0, 0}, Cursor{5, 0})
+		buf.SetDot(0, 5)
 	})
 
 	wfs := newWindowFs(win)
@@ -330,7 +330,7 @@ func TestWindowFsWrselReplacesSelection(t *testing.T) {
 	e.Call(func() {
 		buf := win.body.GetBuffer()
 		buf.SetText("hello world\n")
-		buf.SetSelection(Cursor{0, 0}, Cursor{5, 0})
+		buf.SetDot(0, 5)
 	})
 
 	wfs := newWindowFs(win)
@@ -348,7 +348,7 @@ func TestWindowFsWrselEmptyReplacesWithEmpty(t *testing.T) {
 	e.Call(func() {
 		buf := win.body.GetBuffer()
 		buf.SetText("hello world\n")
-		buf.SetSelection(Cursor{0, 0}, Cursor{5, 0})
+		buf.SetDot(0, 5)
 	})
 
 	wfs := newWindowFs(win)
@@ -367,7 +367,7 @@ func TestWindowFsRdselWrselPipeRoundTrip(t *testing.T) {
 	e.Call(func() {
 		buf := win.body.GetBuffer()
 		buf.SetText("hello world\n")
-		buf.SetSelection(Cursor{0, 0}, Cursor{5, 0})
+		buf.SetDot(0, 5)
 	})
 
 	wfs := newWindowFs(win)
@@ -503,7 +503,7 @@ func TestWindowFsEventIDEvents(t *testing.T) {
 	ef := vfs.UnwrapFile(f).(*winEventFile)
 
 	// Trigger an insert via buffer edit on the main goroutine
-	e.Call(func() { win.body.GetBuffer().Insert('X') })
+	e.Call(func() { win.body.GetBuffer().Insert("X") })
 
 	sr := &subReader{sub: ef.sub}
 	evCh := make(chan wevent.Event, 1)

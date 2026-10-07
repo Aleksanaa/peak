@@ -240,7 +240,7 @@ func parseAddrOne(s string, buf *Buffer) (int, error) {
 	if n >= len(buf.lines) {
 		n = len(buf.lines) - 1
 	}
-	return buf.RuneOffsetOfPos(n, 0), nil
+	return buf.Offset(n, 0), nil
 }
 
 func clampAddr(q int, buf *Buffer) int {

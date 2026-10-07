@@ -10,21 +10,21 @@ func TestDeleteLine(t *testing.T) {
 	tests := []struct {
 		name       string
 		text       string
-		cursor     Cursor
+		cursor     int
 		wantText   string
-		wantCursor Cursor
+		wantCursor int
 		want       mutation
 	}{
-		{"middle line", "ab\ncd\nef", Cursor{1, 1}, "ab\nef", Cursor{0, 1}, mutation{3, 6, 3, ""}},
-		{"first line", "ab\ncd", Cursor{2, 0}, "cd", Cursor{0, 0}, mutation{0, 3, 0, ""}},
-		{"last line", "ab\ncd", Cursor{1, 1}, "ab", Cursor{0, 0}, mutation{2, 5, 2, ""}},
-		{"only line", "abc", Cursor{2, 0}, "", Cursor{0, 0}, mutation{0, 3, 0, ""}},
-		{"only line, empty", "", Cursor{0, 0}, "", Cursor{0, 0}, mutation{0, 0, 0, ""}},
+		{"middle line", "ab\ncd\nef", 4, "ab\nef", 3, mutation{3, 6, 3, ""}},
+		{"first line", "ab\ncd", 2, "cd", 0, mutation{0, 3, 0, ""}},
+		{"last line", "ab\ncd", 4, "ab", 0, mutation{2, 5, 2, ""}},
+		{"only line", "abc", 2, "", 0, mutation{0, 3, 0, ""}},
+		{"only line, empty", "", 0, "", 0, mutation{0, 0, 0, ""}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := NewBuffer(tt.text)
-			b.cursor = tt.cursor
+			b.moveTo(tt.cursor)
 			var got []mutation
 			b.onMutate = func(q0, q1Old, q1New int, text string) {
 				got = append(got, mutation{q0, q1Old, q1New, text})
@@ -36,8 +36,8 @@ func TestDeleteLine(t *testing.T) {
 			if text := b.GetText(); text != tt.wantText {
 				t.Errorf("text = %q, want %q", text, tt.wantText)
 			}
-			if b.cursor != tt.wantCursor {
-				t.Errorf("cursor = %v, want %v", b.cursor, tt.wantCursor)
+			if b.q0 != tt.wantCursor || b.q1 != tt.wantCursor {
+				t.Errorf("dot = [%d, %d), want the cursor at %d", b.q0, b.q1, tt.wantCursor)
 			}
 			if b.version == version {
 				t.Error("version not bumped")

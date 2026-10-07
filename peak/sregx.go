@@ -804,12 +804,7 @@ func (cmd *Cmd) Execute(ctx *Context, dot Range) (Range, bool) {
 					continue
 				}
 				subCtx := &Context{Editor: ctx.Editor, Column: win.parent, Window: win, Buffer: buf, Out: ctx.Out, Log: subLog}
-				subDot := Range{buf.CursorToRuneOffset(buf.cursor), buf.CursorToRuneOffset(buf.cursor)}
-				if buf.selection.Active {
-					s, e := buf.selection.Ordered()
-					subDot = Range{buf.CursorToRuneOffset(s), buf.CursorToRuneOffset(e)}
-				}
-				cmd.cmd.Execute(subCtx, subDot)
+				cmd.cmd.Execute(subCtx, Range{buf.q0, buf.q1})
 				subLog.Apply(buf)
 			}
 		}

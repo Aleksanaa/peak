@@ -31,12 +31,12 @@ type View interface {
 	ShowCursor(canvas)
 	Resize(w, h int)
 	HandleEvent(tcell.Event)
-	PosAt(x, y int) Cursor // the buffer position shown at (x, y)
+	PosAt(x, y int) int // the rune offset shown at (x, y)
 	GetBuffer() *Buffer
 	Scroll(n int)
-	// AdvanceDragCursor moves the end of a sweep under way by one line in
+	// AdvanceSweep moves the end of a sweep under way by one line in
 	// direction dir, as the view scrolls under it.
-	AdvanceDragCursor(dir int)
+	AdvanceSweep(dir int)
 	GetScroll() (scroll, total, visible int)
 	Search(word string) int
 	ShowLineAt(lineNum int)
@@ -46,9 +46,11 @@ type View interface {
 // A TextView is a frame whose text is typed and edited: a tag or a body.
 type TextView struct {
 	frame
-	singleLine  bool
-	typingStart *Cursor
-	typingEnd   *Cursor
+	singleLine bool
+	// The text typed since the cursor last moved starts at typedFrom and,
+	// once Esc ends the typing, ends at typedTo; Esc selects it. Either is
+	// -1 until then.
+	typedFrom, typedTo int
 }
 
 func (tv *TextView) IsRaw() bool {
@@ -59,28 +61,31 @@ func NewTextView(text string, w, h int, theme *Theme, colors *colorPair, singleL
 	return &TextView{
 		frame:      newFrame(NewBuffer(text), w, h, theme, colors, scrollable),
 		singleLine: singleLine,
+		typedFrom:  -1,
+		typedTo:    -1,
 	}
 }
 
+// Layout scrolls to follow the cursor, which is shown where dot is empty.
 func (tv *TextView) Layout() {
 	if !tv.scrollable {
 		tv.org = 0
 	}
 	tv.SyncScroll()
+	tv.cursor, tv.cursorHidden = tv.buffer.q0, tv.buffer.q0 != tv.buffer.q1
 }
 
-func (tv *TextView) GotoLineCol(lineNum, colNum int) {
-	lineNum = max(0, min(lineNum, len(tv.buffer.lines)-1))
-	if colNum < 0 {
-		end := Cursor{len(tv.buffer.lines[lineNum]), lineNum}
-		tv.buffer.SetSelection(Cursor{0, lineNum}, end)
-		tv.buffer.cursor = end
+// GotoLineCol puts the cursor at column col of line, or selects the line if
+// col is negative, and shows it.
+func (tv *TextView) GotoLineCol(line, col int) {
+	b := tv.buffer
+	line = max(0, min(line, len(b.lines)-1))
+	if col < 0 {
+		b.SetDot(b.Offset(line, 0), b.Offset(line, len(b.lines[line])))
 	} else {
-		colNum = max(0, min(colNum, len(tv.buffer.lines[lineNum])))
-		tv.buffer.cursor = Cursor{colNum, lineNum}
-		tv.buffer.ClearSelection()
+		b.moveTo(b.Offset(line, min(col, len(b.lines[line]))))
 	}
-	tv.ShowLineAt(lineNum)
+	tv.ShowLineAt(line)
 }
 
 func (tv *TextView) ShowLineAt(n int) {
@@ -95,151 +100,126 @@ func (tv *TextView) GetBuffer() *Buffer {
 	return tv.buffer
 }
 
-func (tv *TextView) prepareTyping() bool {
-	tv.typingEnd = nil
-	if tv.buffer.selection.Active {
-		start, _ := tv.buffer.selection.Ordered()
-		tv.typingStart = &Cursor{start.x, start.y}
-		return true
+// startTyping notes where the text about to be typed over dot starts.
+func (tv *TextView) startTyping() {
+	tv.typedTo = -1
+	if tv.buffer.q0 < tv.buffer.q1 || tv.typedFrom < 0 {
+		tv.typedFrom = tv.buffer.q0
 	}
-	if tv.typingStart == nil {
-		tv.typingStart = &Cursor{tv.buffer.cursor.x, tv.buffer.cursor.y}
+}
+
+// selectTyped selects the text typed and shows it.
+func (tv *TextView) selectTyped() {
+	tv.buffer.SetDot(tv.typedFrom, tv.typedTo)
+	line, _ := tv.buffer.Pos(tv.typedFrom)
+	tv.ShowLineAt(line)
+}
+
+// page scrolls to show visual line top first, keeping the cursor at q if
+// that is still shown and moving it to the first line otherwise.
+func (tv *TextView) page(top, q int) {
+	tv.setTop(top)
+	top = tv.top()
+	if _, vrow := tv.visualOf(q); vrow < top || vrow >= top+tv.h {
+		q = tv.offsetAt(0, top)
 	}
-	return false
+	tv.buffer.moveTo(q)
 }
 
 func (tv *TextView) HandleEvent(ev tcell.Event) {
+	b := tv.buffer
 	switch ev := ev.(type) {
 	case *tcell.EventKey:
 		switch ev.Key() {
 		case tcell.KeyEsc:
-			if tv.typingStart != nil && tv.typingEnd == nil {
-				tv.typingEnd = &Cursor{tv.buffer.cursor.x, tv.buffer.cursor.y}
-				tv.buffer.SetSelection(*tv.typingStart, *tv.typingEnd)
-				tv.ShowLineAt(tv.typingStart.y)
-			} else if tv.buffer.selection.Active {
-				start, _ := tv.buffer.selection.Ordered()
-				tv.buffer.cursor = start
-				tv.buffer.ClearSelection()
-			} else if tv.typingStart != nil && tv.typingEnd != nil {
-				tv.buffer.SetSelection(*tv.typingStart, *tv.typingEnd)
-				tv.ShowLineAt(tv.typingStart.y)
+			switch {
+			case tv.typedFrom >= 0 && tv.typedTo < 0:
+				tv.typedTo = b.q0
+				tv.selectTyped()
+			case b.q0 < b.q1:
+				b.moveTo(b.q0)
+			case tv.typedFrom >= 0:
+				tv.selectTyped()
 			}
 		case tcell.KeyCtrlZ:
-			tv.typingStart = nil
+			tv.typedFrom = -1
 			if ev.Modifiers()&tcell.ModShift != 0 {
-				tv.buffer.Redo()
+				b.Redo()
 			} else {
-				tv.buffer.Undo()
+				b.Undo()
 			}
 		case tcell.KeyCtrlY:
-			tv.typingStart = nil
-			tv.buffer.Redo()
+			tv.typedFrom = -1
+			b.Redo()
 		case tcell.KeyCtrlA:
-			tv.typingStart = nil
-			last := len(tv.buffer.lines) - 1
-			tv.buffer.SetSelection(Cursor{0, 0}, Cursor{len(tv.buffer.lines[last]), last})
+			tv.typedFrom = -1
+			b.SetDot(0, b.Len())
 		case tcell.KeyCtrlC:
-			tv.buffer.Snarf()
+			b.Snarf()
 		case tcell.KeyCtrlX:
-			tv.typingStart = nil
-			tv.buffer.Cut()
+			tv.typedFrom = -1
+			b.Cut()
 		case tcell.KeyCtrlV:
-			tv.prepareTyping()
-			tv.buffer.Paste()
+			tv.startTyping()
+			b.Paste()
 		case tcell.KeyCtrlU:
-			tv.typingStart = nil
-			tv.buffer.ClearSelection()
-			tv.buffer.DeleteLine()
+			tv.typedFrom = -1
+			b.DeleteLine()
 		case tcell.KeyCtrlW:
-			tv.typingStart = nil
-			tv.buffer.ClearSelection()
-			tv.buffer.DeleteWordBefore()
+			tv.typedFrom = -1
+			b.DeleteWordBefore()
 		case tcell.KeyCtrlH, tcell.KeyBackspace:
-			tv.prepareTyping()
-			tv.buffer.Backspace()
+			tv.startTyping()
+			b.Backspace()
 		case tcell.KeyDelete:
-			tv.prepareTyping()
-			tv.buffer.Delete()
+			tv.startTyping()
+			b.Delete()
 		case tcell.KeyPgUp:
-			tv.typingStart = nil
-			tv.buffer.ClearSelection()
-			top := max(0, tv.top()-tv.h)
-			tv.setTop(top)
-			_, vrow := tv.bufferToVisual(tv.buffer.cursor.x, tv.buffer.cursor.y)
-			if vrow >= top+tv.h {
-				bx, by := tv.visualToBuffer(0, top)
-				tv.buffer.cursor = Cursor{bx, by}
-			}
+			tv.typedFrom = -1
+			tv.page(max(0, tv.top()-tv.h), b.q0)
 		case tcell.KeyPgDn:
-			tv.typingStart = nil
-			tv.buffer.ClearSelection()
-			top := max(0, min(len(tv.lines())-1, tv.top()+tv.h))
-			tv.setTop(top)
-			_, vrow := tv.bufferToVisual(tv.buffer.cursor.x, tv.buffer.cursor.y)
-			if vrow < top {
-				bx, by := tv.visualToBuffer(0, top)
-				tv.buffer.cursor = Cursor{bx, by}
-			}
+			tv.typedFrom = -1
+			tv.page(max(0, min(len(tv.lines())-1, tv.top()+tv.h)), b.q1)
 		case tcell.KeyUp:
-			tv.typingStart = nil
-			tv.buffer.ClearSelection()
-			if !tv.singleLine {
-				tv.buffer.MoveUp()
-			}
+			tv.typedFrom = -1
+			b.MoveUp()
 		case tcell.KeyDown:
-			tv.typingStart = nil
-			tv.buffer.ClearSelection()
-			if !tv.singleLine {
-				tv.buffer.MoveDown()
-			}
+			tv.typedFrom = -1
+			b.MoveDown()
 		case tcell.KeyLeft:
-			tv.typingStart = nil
-			tv.buffer.ClearSelection()
+			tv.typedFrom = -1
 			if ev.Modifiers()&tcell.ModCtrl != 0 {
-				tv.buffer.MoveWordLeft()
+				b.MoveWordLeft()
 			} else {
-				tv.buffer.MoveLeft()
+				b.MoveLeft()
 			}
 		case tcell.KeyRight:
-			tv.typingStart = nil
-			tv.buffer.ClearSelection()
+			tv.typedFrom = -1
 			if ev.Modifiers()&tcell.ModCtrl != 0 {
-				tv.buffer.MoveWordRight()
+				b.MoveWordRight()
 			} else {
-				tv.buffer.MoveRight()
+				b.MoveRight()
 			}
 		case tcell.KeyHome:
-			tv.typingStart = nil
-			tv.buffer.ClearSelection()
-			tv.buffer.MoveHome()
+			tv.typedFrom = -1
+			b.MoveHome()
 		case tcell.KeyEnd:
-			tv.typingStart = nil
-			tv.buffer.ClearSelection()
-			tv.buffer.MoveEnd()
+			tv.typedFrom = -1
+			b.MoveEnd()
 		case tcell.KeyEnter:
-			if tv.prepareTyping() {
-				tv.buffer.DeleteSelection()
-				tv.typingStart = nil
-			}
 			if !tv.singleLine {
-				tv.buffer.NewLine()
+				tv.startTyping()
+				b.Insert("\n")
 			}
 		case tcell.KeyTab:
-			if tv.prepareTyping() {
-				tv.buffer.DeleteSelection()
-			}
-			tv.buffer.Insert('\t')
+			tv.startTyping()
+			b.Insert("\t")
 		case tcell.KeyRune:
-			if tv.prepareTyping() {
-				tv.buffer.DeleteSelection()
-			}
-			for _, r := range ev.Str() {
-				tv.buffer.Insert(r)
-			}
+			tv.startTyping()
+			b.Insert(ev.Str())
 		}
 		tv.autoScroll = true
-		_, vrow := tv.bufferToVisual(tv.buffer.cursor.x, tv.buffer.cursor.y)
+		_, vrow := tv.visualOf(b.q0)
 		if top := tv.top(); vrow < top {
 			tv.setTop(vrow)
 		} else if vrow >= top+tv.h {
@@ -247,7 +227,7 @@ func (tv *TextView) HandleEvent(ev tcell.Event) {
 		}
 	case *tcell.EventMouse:
 		if ev.Buttons() != tcell.ButtonNone {
-			tv.typingStart = nil
+			tv.typedFrom = -1
 		}
 		tv.mouse(ev)
 	}
@@ -257,7 +237,7 @@ func (tv *TextView) SyncScroll() {
 	if !tv.scrollable || !tv.autoScroll {
 		return
 	}
-	_, vrow := tv.bufferToVisual(tv.buffer.cursor.x, tv.buffer.cursor.y)
+	_, vrow := tv.visualOf(tv.buffer.q0)
 	if vrow >= tv.top()+tv.h {
 		tv.setTop(vrow - tv.h + 1)
 	}
@@ -384,7 +364,7 @@ func (win *Window) spanStyle(tv *TextView) func(line, col int, s tcell.Style) tc
 	i := 0
 	lastOff := -1
 	return func(line, col int, s tcell.Style) tcell.Style {
-		runeOff := tv.buffer.RuneOffsetOfPos(line, col)
+		runeOff := tv.buffer.Offset(line, col)
 		if runeOff < lastOff {
 			i = 0
 		}

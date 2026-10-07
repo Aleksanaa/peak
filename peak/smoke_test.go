@@ -169,8 +169,8 @@ func TestTextViewClickPlacesCursorOnClickedCharacter(t *testing.T) {
 
 	tv.HandleEvent(tcell.NewEventMouse(0, 0, tcell.ButtonPrimary, 0))
 
-	if got := tv.buffer.cursor; got != (Cursor{0, 0}) {
-		t.Fatalf("cursor after clicking first character = %+v, want %+v", got, Cursor{0, 0})
+	if b := tv.buffer; b.q0 != 0 || b.q1 != 0 {
+		t.Fatalf("dot after clicking the first character = [%d, %d), want the cursor at 0", b.q0, b.q1)
 	}
 }
 
@@ -305,7 +305,7 @@ func TestZeroxKeepsDirtyState(t *testing.T) {
 		e, col := newTestEditorWithColumn(t)
 		path := writeTempFile(t, "hello\n")
 		win := e.createWindow(col, path, "hello\n", false, true, -1, 0)
-		win.bodyTextView().buffer.Insert('x')
+		win.bodyTextView().buffer.Insert("x")
 		if saved {
 			win.markSaved(win.body.GetBuffer().version) // as Put does
 		}
@@ -327,7 +327,7 @@ func TestPipeOutputAfterEdit(t *testing.T) {
 	e, col := newTestEditorWithColumn(t)
 	win := col.AddWindow(" /tmp/pipe.txt Get Put Del ", "a\nb\nc\nd\nselected")
 	buf := win.body.GetBuffer()
-	buf.SetSelection(Cursor{0, 4}, Cursor{8, 4})
+	buf.SetDot(8, 16)
 
 	e.runExternal(col, win, "|sleep 0.2; echo out")
 	e.Call(func() { buf.SetText("x") }) // the user replaces the text meanwhile
@@ -944,9 +944,7 @@ func TestExternalCommand(t *testing.T) {
 	if idx == -1 {
 		t.Fatal("Could not find 'uname -a' in tag text")
 	}
-	start := win.tag.buffer.RuneOffsetToCursor(idx)
-	end := win.tag.buffer.RuneOffsetToCursor(idx + len("uname -a"))
-	win.tag.buffer.SetSelection(start, end)
+	win.tag.buffer.SetDot(idx, idx+len("uname -a"))
 
 	// 3. Middle click on the selection in the tag
 	tx, ty, tfound := GetWordCoordinate(s, "uname -a", 0, screenAt(e, win.tag).Y)
@@ -987,9 +985,7 @@ func TestExternalCommand(t *testing.T) {
 	// 7. Select "uname -a" in buffer
 	bodyText := errWin.body.GetBuffer().GetText()
 	bidx := strings.Index(bodyText, "uname -a")
-	bstart := errWin.body.GetBuffer().RuneOffsetToCursor(bidx)
-	bend := errWin.body.GetBuffer().RuneOffsetToCursor(bidx + len("uname -a"))
-	errWin.body.GetBuffer().SetSelection(bstart, bend)
+	errWin.body.GetBuffer().SetDot(bidx, bidx+len("uname -a"))
 
 	// 8. Run it (middle click)
 	errY := screenAt(e, errWin.body).Y
@@ -1126,14 +1122,9 @@ func TestPlumbLineCol(t *testing.T) {
 		if tv == nil {
 			t.Fatal("no text view")
 		}
-		if tv.buffer.cursor.y != 1 {
-			t.Errorf("cursor line: got %d, want 1", tv.buffer.cursor.y)
-		}
-		if tv.buffer.cursor.x != 5 {
-			t.Errorf("cursor col: got %d, want 5", tv.buffer.cursor.x)
-		}
-		if tv.buffer.selection.Active {
-			t.Error("expected no selection for line:col plumb")
+		b := tv.buffer
+		if line, col := b.Pos(b.q0); line != 1 || col != 5 || b.q1 != b.q0 {
+			t.Errorf("dot = [%d, %d) at (%d, %d), want the cursor at line 1, column 5", b.q0, b.q1, line, col)
 		}
 		// Close window
 		e.Execute(nil, win, "Del")
@@ -1147,18 +1138,9 @@ func TestPlumbLineCol(t *testing.T) {
 		if tv == nil {
 			t.Fatal("no text view")
 		}
-		if tv.buffer.cursor.y != 2 {
-			t.Errorf("cursor line: got %d, want 2", tv.buffer.cursor.y)
-		}
-		if !tv.buffer.selection.Active {
-			t.Error("expected selection for line-only plumb")
-		}
-		start, end := tv.buffer.selection.Ordered()
-		if start.y != 2 || start.x != 0 {
-			t.Errorf("selection start: got (%d,%d), want (0,2)", start.x, start.y)
-		}
-		if end.y != 2 {
-			t.Errorf("selection end line: got %d, want 2", end.y)
+		b := tv.buffer
+		if q0, q1 := b.Offset(2, 0), b.Offset(2, len(b.lines[2])); b.q0 != q0 || b.q1 != q1 {
+			t.Errorf("dot = [%d, %d), want line 2, [%d, %d)", b.q0, b.q1, q0, q1)
 		}
 	})
 }
@@ -1262,8 +1244,7 @@ func TestTextViewTypingRevealsCursorBelowVisible(t *testing.T) {
 	body := strings.Join(lines, "\n")
 	tv := NewTextView(body, 40, 10, nil, nil, false, true)
 
-	bx, by := tv.visualToBuffer(0, 9)
-	tv.buffer.cursor = Cursor{bx, by}
+	tv.buffer.moveTo(tv.offsetAt(0, 9))
 	tv.HandleEvent(tcell.NewEventKey(tcell.KeyDown, "", 0))
 
 	if tv.top() != 1 {
@@ -1325,7 +1306,7 @@ func TestSyncScrollFollowsCursorDownward(t *testing.T) {
 	body := strings.Join(lines, "\n")
 	tv := NewTextView(body, 40, 10, nil, nil, false, true)
 
-	tv.buffer.cursor = Cursor{0, 95}
+	tv.buffer.moveTo(tv.buffer.Offset(95, 0))
 	tv.setTop(80)
 	tv.autoScroll = true
 	tv.SyncScroll()
@@ -1632,7 +1613,8 @@ func TestDragSelectTickExtendsSelection(t *testing.T) {
 	}
 
 	wantScrollPos := tv.top() + 1
-	wantEndY := tv.buffer.selection.End.y + 1
+	endLine := func() int { line, _ := tv.buffer.Pos(tv.buffer.q1); return line }
+	wantEndLine := endLine() + 1
 
 	// One timer tick scrolls and advances the drag cursor.
 	e.repeat()
@@ -1640,8 +1622,8 @@ func TestDragSelectTickExtendsSelection(t *testing.T) {
 	if tv.top() != wantScrollPos {
 		t.Errorf("after tick: scroll.Pos = %d, want %d", tv.top(), wantScrollPos)
 	}
-	if tv.buffer.selection.End.y != wantEndY {
-		t.Errorf("after tick: selection.End.y = %d, want %d", tv.buffer.selection.End.y, wantEndY)
+	if endLine() != wantEndLine {
+		t.Errorf("after tick: selection ends on line %d, want %d", endLine(), wantEndLine)
 	}
 
 	_ = s
@@ -1679,58 +1661,34 @@ func TestEscToggleSelection(t *testing.T) {
 	text := strings.Repeat("line\n", 20)
 	tv := NewTextView(text, 40, 5, nil, nil, false, true)
 
-	selStart := Cursor{0, 3}
-	selEnd := Cursor{2, 5}
-	tv.typingStart = &selStart
-	tv.buffer.cursor = selEnd
+	from, to := 15, 27 // line 3, column 0 to line 5, column 2
+	tv.typedFrom = from
+	tv.buffer.moveTo(to)
 
 	esc := func() { tv.HandleEvent(tcell.NewEventKey(tcell.KeyEsc, "", 0)) }
+	dot := func(step string, q0, q1 int) {
+		t.Helper()
+		if b := tv.buffer; b.q0 != q0 || b.q1 != q1 {
+			t.Fatalf("%s: dot [%d, %d), want [%d, %d)", step, b.q0, b.q1, q0, q1)
+		}
+	}
 
-	// ESC1: typing → select [selStart, selEnd]
 	esc()
-	if !tv.buffer.selection.Active {
-		t.Fatal("ESC1: selection should be active")
+	dot("ESC1 selects what was typed", from, to)
+	if tv.typedTo != to {
+		t.Fatalf("ESC1: typedTo = %d, want %d", tv.typedTo, to)
 	}
-	if tv.typingEnd == nil {
-		t.Fatal("ESC1: typingEnd should be set")
-	}
-	s, e := tv.buffer.selection.Ordered()
-	if s != selStart || e != selEnd {
-		t.Errorf("ESC1: selection %v–%v, want %v–%v", s, e, selStart, selEnd)
-	}
-
-	// ESC2: deselect, cursor moves to start of selection
 	esc()
-	if tv.buffer.selection.Active {
-		t.Fatal("ESC2: selection should be cleared")
-	}
-	if tv.buffer.cursor != selStart {
-		t.Errorf("ESC2: cursor %v, want %v", tv.buffer.cursor, selStart)
-	}
-
-	// ESC3: re-select same range
+	dot("ESC2 deselects to its start", from, from)
 	esc()
-	if !tv.buffer.selection.Active {
-		t.Fatal("ESC3: selection should be active again")
-	}
-	s2, e2 := tv.buffer.selection.Ordered()
-	if s2 != selStart || e2 != selEnd {
-		t.Errorf("ESC3: selection %v–%v, want %v–%v", s2, e2, selStart, selEnd)
-	}
-
-	// ESC4: deselect again
+	dot("ESC3 selects it again", from, to)
 	esc()
-	if tv.buffer.selection.Active {
-		t.Fatal("ESC4: selection should be cleared")
-	}
-	if tv.buffer.cursor != selStart {
-		t.Errorf("ESC4: cursor %v, want %v", tv.buffer.cursor, selStart)
-	}
+	dot("ESC4 deselects again", from, from)
 
-	// Typing must break the toggle cycle (typingEnd cleared)
+	// Typing breaks the cycle.
 	tv.HandleEvent(tcell.NewEventKey(tcell.KeyRune, "x", 0))
-	if tv.typingEnd != nil {
-		t.Error("after typing: typingEnd should be nil (cycle broken)")
+	if tv.typedTo != -1 {
+		t.Error("after typing: typedTo should be -1 (cycle broken)")
 	}
 }
 
@@ -1754,7 +1712,7 @@ func TestDragSelectStopsAtLastLine(t *testing.T) {
 	e.HandleEvent(tcell.NewEventMouse(bodyX, bodyY+bodyH-1, tcell.ButtonPrimary, 0))
 
 	scrollBefore := tv.top()
-	endYBefore := tv.buffer.selection.End.y
+	q1Before := tv.buffer.q1
 
 	// A tick at the boundary must neither scroll nor extend the selection.
 	e.repeat()
@@ -1762,8 +1720,8 @@ func TestDragSelectStopsAtLastLine(t *testing.T) {
 	if tv.top() != scrollBefore {
 		t.Errorf("scroll.Pos changed from %d to %d; should stay at boundary", scrollBefore, tv.top())
 	}
-	if tv.buffer.selection.End.y != endYBefore {
-		t.Errorf("selection.End.y changed from %d to %d; should stay at boundary", endYBefore, tv.buffer.selection.End.y)
+	if tv.buffer.q1 != q1Before {
+		t.Errorf("selection end moved from %d to %d; should stay at boundary", q1Before, tv.buffer.q1)
 	}
 
 	_ = s
@@ -1795,8 +1753,8 @@ func TestScrollBarHoldsMouse(t *testing.T) {
 	}
 
 	e.HandleEvent(tcell.NewEventMouse(body.X+1, body.Y+4, tcell.ButtonSecondary, 0))
-	if tv.top() != 3 || tv.buffer.cursor != (Cursor{}) {
-		t.Errorf("moving the held pointer onto the body acted there: scroll %d, cursor %v", tv.top(), tv.buffer.cursor)
+	if tv.top() != 3 || tv.buffer.q1 != 0 {
+		t.Errorf("moving the held pointer onto the body acted there: scroll %d, dot end %d", tv.top(), tv.buffer.q1)
 	}
 
 	e.HandleEvent(tcell.NewEventMouse(body.X+1, body.Y+4, tcell.ButtonNone, 0))
@@ -2194,7 +2152,7 @@ func TestScrollStaysOnItsText(t *testing.T) {
 	tv.setTop(50)
 
 	tv.buffer.saveState()
-	tv.buffer.replace(Cursor{0, 0}, Cursor{0, 0}, "new\nlines\n")
+	tv.buffer.replace(0, 0, "new\nlines\n")
 	if got := shown(); got != "L50" {
 		t.Errorf("after inserting above, the view shows %q first, want L50", got)
 	}
