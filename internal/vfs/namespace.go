@@ -89,6 +89,54 @@ type ReadWriteFile struct {
 
 func (f *ReadWriteFile) WriteAt(p []byte, off int64) (int, error) { return f.Writes.WriteAt(p, off) }
 
+// DirFile is an open directory, Info, listing Entries.
+type DirFile struct {
+	FileStub
+	Info    os.FileInfo
+	Entries []os.FileInfo
+	next    int // the first entry Readdir has yet to return
+}
+
+func (d *DirFile) Name() string               { return d.Info.Name() }
+func (d *DirFile) Stat() (os.FileInfo, error) { return d.Info, nil }
+
+// Readdir returns the next count entries, or all of them if count <= 0.
+func (d *DirFile) Readdir(count int) ([]os.FileInfo, error) {
+	if count <= 0 {
+		return d.Entries, nil
+	}
+	if d.next >= len(d.Entries) {
+		return nil, io.EOF
+	}
+	end := min(d.next+count, len(d.Entries))
+	infos := d.Entries[d.next:end]
+	d.next = end
+	return infos, nil
+}
+
+func (d *DirFile) Readdirnames(count int) ([]string, error) {
+	infos, err := d.Readdir(count)
+	names := make([]string, len(infos))
+	for i, fi := range infos {
+		names[i] = fi.Name()
+	}
+	return names, err
+}
+
+// FsStub refuses every change to an afero.Fs. Embed it in a file system
+// that cannot be changed.
+type FsStub struct{}
+
+func (FsStub) Create(n string) (afero.File, error)    { return nil, os.ErrPermission }
+func (FsStub) Mkdir(n string, p os.FileMode) error    { return os.ErrPermission }
+func (FsStub) MkdirAll(n string, p os.FileMode) error { return os.ErrPermission }
+func (FsStub) Remove(n string) error                  { return os.ErrPermission }
+func (FsStub) RemoveAll(n string) error               { return os.ErrPermission }
+func (FsStub) Rename(o, n string) error               { return os.ErrPermission }
+func (FsStub) Chmod(n string, m os.FileMode) error    { return os.ErrPermission }
+func (FsStub) Chown(n string, u, g int) error         { return os.ErrPermission }
+func (FsStub) Chtimes(n string, a, m time.Time) error { return os.ErrPermission }
+
 // FileEntry describes one file or directory in a NamespaceFs.
 type FileEntry struct {
 	Name  string
@@ -113,6 +161,7 @@ type FileEntry struct {
 // Stat, Readdir, and OpenFile are derived from the entry list automatically.
 // All mutation operations return os.ErrPermission.
 type NamespaceFs struct {
+	FsStub
 	// RootName is the Name field returned when stat-ing the root.
 	// Defaults to ".".
 	RootName string
@@ -163,7 +212,7 @@ func (fs *NamespaceFs) Open(name string) (afero.File, error) {
 func (fs *NamespaceFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
 	s := strings.Trim(name, "/")
 	if s == "" || s == "." {
-		return &nsDir{rootName: fs.rootName(), entries: fs.Entries}, nil
+		return &DirFile{Info: &nsFileInfo{name: fs.rootName(), isDir: true, mode: 0555}, Entries: nsEntryInfos(fs.Entries)}, nil
 	}
 	if e := fs.find(s); e != nil {
 		if e.Open == nil {
@@ -199,6 +248,12 @@ type namedFile struct {
 	name  string
 	mode  os.FileMode
 	isDir bool
+}
+
+// NamedFile returns f as the file name of mode mode, a directory if isDir:
+// what its Name and Stat report.
+func NamedFile(f afero.File, name string, mode os.FileMode, isDir bool) afero.File {
+	return &namedFile{File: f, name: name, mode: mode, isDir: isDir}
 }
 
 func (f *namedFile) Name() string { return f.name }
@@ -244,16 +299,7 @@ func splitChild(s string) (parent, child string, ok bool) {
 	return s[:i], s[i+1:], true
 }
 
-func (fs *NamespaceFs) Name() string                           { return "NamespaceFs" }
-func (fs *NamespaceFs) Create(n string) (afero.File, error)    { return nil, os.ErrPermission }
-func (fs *NamespaceFs) Mkdir(n string, p os.FileMode) error    { return os.ErrPermission }
-func (fs *NamespaceFs) MkdirAll(n string, p os.FileMode) error { return os.ErrPermission }
-func (fs *NamespaceFs) Remove(n string) error                  { return os.ErrPermission }
-func (fs *NamespaceFs) RemoveAll(n string) error               { return os.ErrPermission }
-func (fs *NamespaceFs) Rename(o, n string) error               { return os.ErrPermission }
-func (fs *NamespaceFs) Chmod(n string, m os.FileMode) error    { return os.ErrPermission }
-func (fs *NamespaceFs) Chown(n string, u, g int) error         { return os.ErrPermission }
-func (fs *NamespaceFs) Chtimes(n string, a, m time.Time) error { return os.ErrPermission }
+func (fs *NamespaceFs) Name() string { return "NamespaceFs" }
 
 // NewFileInfo creates an os.FileInfo for virtual files and directories.
 func NewFileInfo(name string, mode os.FileMode, isDir bool) os.FileInfo {
@@ -284,45 +330,6 @@ func (fi *nsFileInfo) Mode() os.FileMode {
 func (fi *nsFileInfo) ModTime() time.Time { return time.Time{} }
 func (fi *nsFileInfo) IsDir() bool        { return fi.isDir }
 func (fi *nsFileInfo) Sys() any           { return nil }
-
-// nsDir is the afero.File returned when opening the namespace root directory.
-type nsDir struct {
-	FileStub
-	rootName string
-	entries  []FileEntry
-	offset   int
-}
-
-func (d *nsDir) Name() string { return "/" }
-func (d *nsDir) Stat() (os.FileInfo, error) {
-	return &nsFileInfo{name: d.rootName, isDir: true, mode: 0555}, nil
-}
-
-func (d *nsDir) Readdir(count int) ([]os.FileInfo, error) {
-	all := d.entries
-	if count <= 0 {
-		return nsEntryInfos(all), nil
-	}
-	if d.offset >= len(all) {
-		return nil, io.EOF
-	}
-	end := min(d.offset+count, len(all))
-	infos := nsEntryInfos(all[d.offset:end])
-	d.offset = end
-	return infos, nil
-}
-
-func (d *nsDir) Readdirnames(n int) ([]string, error) {
-	infos, err := d.Readdir(n)
-	if err != nil {
-		return nil, err
-	}
-	names := make([]string, len(infos))
-	for i, fi := range infos {
-		names[i] = fi.Name()
-	}
-	return names, err
-}
 
 func nsEntryInfos(entries []FileEntry) []os.FileInfo {
 	infos := make([]os.FileInfo, 0, len(entries))

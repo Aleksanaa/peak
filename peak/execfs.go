@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"strconv"
@@ -49,7 +48,7 @@ func newPeakNamespaceFs(editor *Editor, bus *eventBus) *peakNamespaceFs {
 				// "new" is intercepted by WalkRedirect; direct open is not supported.
 				{Name: "new", Mode: 0555, IsDir: true},
 				{Name: "srv", Mode: 0555, IsDir: true,
-					Open:      func(_ int) (afero.File, error) { return &srvDirFile{reg: srvReg}, nil },
+					Open:      func(_ int) (afero.File, error) { return srvReg.dir(), nil },
 					ChildMode: 0600,
 					// Opening an entry read-write posts a service under its name.
 					OpenChild: func(child string, flag int) (afero.File, error) {
@@ -257,16 +256,6 @@ func (r *srvRegistry) remove(name string, s *service) {
 	s.conn.Close()
 }
 
-func (r *srvRegistry) list() []string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	names := make([]string, 0, len(r.services))
-	for n := range r.services {
-		names = append(names, n)
-	}
-	return names
-}
-
 // srvServerFile is the file a service serves 9P on: its end of the pipe.
 // Closing it ends the service; ServeConn closes it too, so it may be closed
 // twice.
@@ -288,39 +277,13 @@ func (f *srvServerFile) Close() error {
 	return f.conn.Close()
 }
 
-// srvDirFile serves the /srv directory listing.
-type srvDirFile struct {
-	vfs.FileStub
-	reg     *srvRegistry
-	entries []os.FileInfo
-	offset  int
-}
-
-func (f *srvDirFile) Readdir(count int) ([]os.FileInfo, error) {
-	if f.entries == nil {
-		for _, name := range f.reg.list() {
-			f.entries = append(f.entries, vfs.NewFileInfo(name, 0600, false))
-		}
+// dir returns the /srv directory, listing the services posted now.
+func (r *srvRegistry) dir() *vfs.DirFile {
+	d := &vfs.DirFile{Info: vfs.NewFileInfo("srv", 0555, true)}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for name := range r.services {
+		d.Entries = append(d.Entries, vfs.NewFileInfo(name, 0600, false))
 	}
-	if count <= 0 {
-		return f.entries, nil
-	}
-	if f.offset >= len(f.entries) {
-		return nil, io.EOF
-	}
-	end := min(f.offset+count, len(f.entries))
-	res := f.entries[f.offset:end]
-	f.offset = end
-	return res, nil
-}
-func (f *srvDirFile) Readdirnames(n int) ([]string, error) {
-	infos, err := f.Readdir(n)
-	if err != nil {
-		return nil, err
-	}
-	names := make([]string, len(infos))
-	for i, info := range infos {
-		names[i] = info.Name()
-	}
-	return names, nil
+	return d
 }

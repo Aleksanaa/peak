@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"os/user"
@@ -12,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aleksana/peak/internal/vfs"
 	"github.com/aleksana/peak/internal/vfs/afero"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -147,12 +147,21 @@ func (s *SftpFs) Stat(name string) (os.FileInfo, error) {
 	sfi, err := client.sftp.Stat(rel)
 	if err != nil {
 		if rel == "" || rel == "/" {
-			return &SimpleFileInfo{name: conn, isDir: true}, nil
+			return vfs.NewFileInfo(conn, 0755, true), nil
 		}
 		return nil, err
 	}
-	return &SimpleFileInfo{name: path.Base(name), isDir: sfi.IsDir(), size: sfi.Size(), modTime: sfi.ModTime(), mode: sfi.Mode()}, nil
+	return named{sfi, path.Base(name)}, nil
 }
+
+// named is a FileInfo under another name: sftp names a file by the path it
+// was asked for, which for the remote home (~) or root is not its name here.
+type named struct {
+	os.FileInfo
+	name string
+}
+
+func (n named) Name() string { return n.name }
 
 func (s *SftpFs) Open(name string) (afero.File, error) {
 	return s.OpenFile(name, os.O_RDONLY, 0)
@@ -279,80 +288,53 @@ func (s *SftpFs) Name() string { return "SftpFs" }
 
 type SftpFile struct {
 	*sftp.File
-	client  *sftp.Client
-	fs      *SftpFs
-	conn    string
-	name    string
-	isDir   bool
-	offset  int
-	entries []os.FileInfo
+	client *sftp.Client
+	fs     *SftpFs
+	conn   string
+	name   string
+	isDir  bool
+	dir    *vfs.DirFile // the listing, once read
 }
 
 func (f *SftpFile) Name() string { return path.Base(f.name) }
-func (f *SftpFile) Readdir(count int) ([]os.FileInfo, error) {
-	if f.entries == nil {
-		raw, err := f.client.ReadDir(f.name)
+
+// listing reads the directory, once, and caches its entries for Stat.
+func (f *SftpFile) listing() (*vfs.DirFile, error) {
+	if f.dir == nil {
+		entries, err := f.client.ReadDir(f.name)
 		if err != nil {
-			if f.fs != nil {
-				f.fs.invalidate(f.conn, f.name)
-			}
+			f.fs.invalidate(f.conn, f.name)
 			return nil, err
 		}
-		f.entries = make([]os.FileInfo, len(raw))
-		for i, fi := range raw {
-			f.entries[i] = &SimpleFileInfo{
-				name:    fi.Name(),
-				isDir:   fi.IsDir(),
-				size:    fi.Size(),
-				modTime: fi.ModTime(),
-				mode:    fi.Mode(),
-			}
-		}
-		if f.fs != nil {
-			f.fs.cacheEntries(f.conn, f.name, f.entries)
-		}
+		f.fs.cacheEntries(f.conn, f.name, entries)
+		f.dir = &vfs.DirFile{Info: vfs.NewFileInfo(f.Name(), 0755, true), Entries: entries}
 	}
-	if count <= 0 {
-		return f.entries, nil
-	}
-	if f.offset >= len(f.entries) {
-		return nil, io.EOF
-	}
-	end := f.offset + count
-	if end > len(f.entries) {
-		end = len(f.entries)
-	}
-	res := f.entries[f.offset:end]
-	f.offset = end
-	return res, nil
+	return f.dir, nil
 }
-func (f *SftpFile) Readdirnames(n int) ([]string, error) {
-	entries, err := f.Readdir(n)
+
+func (f *SftpFile) Readdir(count int) ([]os.FileInfo, error) {
+	d, err := f.listing()
 	if err != nil {
 		return nil, err
 	}
-	res := make([]string, len(entries))
-	for i, e := range entries {
-		res[i] = e.Name()
-	}
-	return res, nil
+	return d.Readdir(count)
 }
+
+func (f *SftpFile) Readdirnames(count int) ([]string, error) {
+	d, err := f.listing()
+	if err != nil {
+		return nil, err
+	}
+	return d.Readdirnames(count)
+}
+
 func (f *SftpFile) Stat() (os.FileInfo, error) {
 	if f.isDir {
-		return &SimpleFileInfo{name: f.Name(), isDir: true}, nil
+		return vfs.NewFileInfo(f.Name(), 0755, true), nil
 	}
-	fi, err := f.File.Stat()
-	if err != nil {
-		return nil, err
-	}
-	return &SimpleFileInfo{name: f.Name(), isDir: fi.IsDir(), size: fi.Size(), modTime: fi.ModTime(), mode: fi.Mode()}, nil
+	return f.File.Stat()
 }
-func (f *SftpFile) Sync() error {
-	if f.File == nil {
-		return nil
-	}
-	return nil
-}
+func (f *SftpFile) Sync() error { return nil }
 func (f *SftpFile) Truncate(size int64) error {
 	if f.File == nil {
 		return os.ErrInvalid
@@ -374,72 +356,3 @@ func (f *SftpFile) Close() error {
 	}
 	return nil
 }
-
-type SimpleFileInfo struct {
-	name    string
-	isDir   bool
-	size    int64
-	modTime time.Time
-	mode    os.FileMode
-}
-
-func (s *SimpleFileInfo) Name() string       { return s.name }
-func (s *SimpleFileInfo) Size() int64        { return s.size }
-func (s *SimpleFileInfo) IsDir() bool        { return s.isDir }
-func (s *SimpleFileInfo) ModTime() time.Time { return s.modTime }
-func (s *SimpleFileInfo) Sys() interface{}   { return nil }
-func (s *SimpleFileInfo) Mode() os.FileMode {
-	if s.mode != 0 {
-		return s.mode
-	}
-	if s.isDir {
-		return os.ModeDir | 0755
-	}
-	return 0644
-}
-
-type MemDirFile struct {
-	name    string
-	entries []os.FileInfo
-	offset  int
-}
-
-func (v *MemDirFile) Close() error                                   { return nil }
-func (v *MemDirFile) Read(p []byte) (n int, err error)               { return 0, io.EOF }
-func (v *MemDirFile) ReadAt(p []byte, off int64) (n int, err error)  { return 0, io.EOF }
-func (v *MemDirFile) Seek(offset int64, whence int) (int64, error)   { return 0, nil }
-func (v *MemDirFile) Write(p []byte) (n int, err error)              { return 0, os.ErrPermission }
-func (v *MemDirFile) WriteAt(p []byte, off int64) (n int, err error) { return 0, os.ErrPermission }
-func (v *MemDirFile) Name() string                                   { return v.name }
-func (v *MemDirFile) Readdir(count int) ([]os.FileInfo, error) {
-	if count <= 0 {
-		return v.entries, nil
-	}
-	if v.offset >= len(v.entries) {
-		return nil, io.EOF
-	}
-	end := v.offset + count
-	if end > len(v.entries) {
-		end = len(v.entries)
-	}
-	res := v.entries[v.offset:end]
-	v.offset = end
-	return res, nil
-}
-func (v *MemDirFile) Readdirnames(n int) ([]string, error) {
-	entries, err := v.Readdir(n)
-	if err != nil {
-		return nil, err
-	}
-	res := make([]string, len(entries))
-	for i, e := range entries {
-		res[i] = e.Name()
-	}
-	return res, nil
-}
-func (v *MemDirFile) Stat() (os.FileInfo, error) {
-	return &SimpleFileInfo{name: v.name, isDir: true}, nil
-}
-func (v *MemDirFile) Sync() error                               { return nil }
-func (v *MemDirFile) Truncate(size int64) error                 { return os.ErrPermission }
-func (v *MemDirFile) WriteString(s string) (ret int, err error) { return 0, os.ErrPermission }

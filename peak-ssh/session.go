@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"al.essio.dev/pkg/shellescape"
+	"github.com/aleksana/peak/internal/vfs"
 	"github.com/aleksana/peak/internal/vfs/afero"
 	"golang.org/x/crypto/ssh"
 )
@@ -78,6 +78,7 @@ func (s *sshSession) close()                { s.session.Close() }
 //
 // Stat never triggers a connection except for SFTP file paths under /fs/.
 type hostFs struct {
+	vfs.FsStub
 	sftp *SftpFs
 
 	mu     sync.Mutex
@@ -188,24 +189,23 @@ func remoteDir(relPath string) string {
 // ---- path parsing ----
 
 const (
-	kindRoot     = "root"
-	kindNew      = "new"
-	kindRun      = "run"
-	kindHostDir  = "hostdir"
-	kindHostIO   = "hostio"
-	kindFsRoot   = "fsroot"
-	kindFsFile   = "fsfile"
-	kindSessDir  = "sessdir"
-	kindSessIO   = "sessio"
-	kindSessCtl  = "sessctl"
-	kindSessStat = "sessstat"
+	kindRoot    = "root"
+	kindNew     = "new"
+	kindRun     = "run"
+	kindHostDir = "hostdir"
+	kindHostIO  = "hostio"
+	kindFsRoot  = "fsroot"
+	kindFsFile  = "fsfile"
+	kindSess    = "sess"
 )
 
+// A ppath is a path in hostFs: its kind, the host it is under, and the rest
+// of it within the host's fs or the session's directory.
 type ppath struct {
 	kind   string
 	host   string
 	sessID int
-	fsRel  string
+	rest   string
 }
 
 func parsePath(name string) ppath {
@@ -235,23 +235,22 @@ func parsePath(name string) ppath {
 		if rest == "" {
 			return ppath{kind: kindFsRoot, host: host}
 		}
-		return ppath{kind: kindFsFile, host: host, fsRel: "/" + rest}
+		return ppath{kind: kindFsFile, host: host, rest: "/" + rest}
 	}
 	n, err := strconv.Atoi(second)
 	if err != nil {
 		return ppath{kind: kindRoot}
 	}
-	switch rest {
-	case "":
-		return ppath{kind: kindSessDir, host: host, sessID: n}
-	case "io":
-		return ppath{kind: kindSessIO, host: host, sessID: n}
-	case "ctl":
-		return ppath{kind: kindSessCtl, host: host, sessID: n}
-	case "stat":
-		return ppath{kind: kindSessStat, host: host, sessID: n}
+	return ppath{kind: kindSess, host: host, sessID: n, rest: rest}
+}
+
+// sessionDir returns the directory of the session p is in.
+func (fs *hostFs) sessionDir(p ppath) (*vfs.NamespaceFs, error) {
+	sh := fs.getSession(p.host, p.sessID)
+	if sh == nil {
+		return nil, os.ErrNotExist
 	}
-	return ppath{kind: kindRoot}
+	return sh.dir(p.sessID), nil
 }
 
 // ---- Stat: no connection except SFTP file paths ----
@@ -260,39 +259,25 @@ func (fs *hostFs) Stat(name string) (os.FileInfo, error) {
 	p := parsePath(name)
 	switch p.kind {
 	case kindRoot:
-		return &SimpleFileInfo{name: ".", isDir: true}, nil
+		return vfs.NewFileInfo(".", 0755, true), nil
 	case kindNew:
-		return &SimpleFileInfo{name: "new", mode: 0600}, nil
+		return vfs.NewFileInfo("new", 0600, false), nil
 	case kindRun:
-		return &SimpleFileInfo{name: "run", mode: 0600}, nil
+		return vfs.NewFileInfo("run", 0600, false), nil
 	case kindHostDir:
-		return &SimpleFileInfo{name: p.host, isDir: true}, nil
+		return vfs.NewFileInfo(p.host, 0755, true), nil
 	case kindHostIO:
-		return &SimpleFileInfo{name: "io", mode: 0600}, nil
+		return vfs.NewFileInfo("io", 0600, false), nil
 	case kindFsRoot:
-		return &SimpleFileInfo{name: "fs", isDir: true}, nil
+		return vfs.NewFileInfo("fs", 0755, true), nil
 	case kindFsFile:
-		return fs.sftp.Stat("/" + p.host + p.fsRel)
-	case kindSessDir:
-		if fs.getSession(p.host, p.sessID) == nil {
-			return nil, os.ErrNotExist
+		return fs.sftp.Stat("/" + p.host + p.rest)
+	case kindSess:
+		dir, err := fs.sessionDir(p)
+		if err != nil {
+			return nil, err
 		}
-		return &SimpleFileInfo{name: strconv.Itoa(p.sessID), isDir: true}, nil
-	case kindSessIO:
-		if fs.getSession(p.host, p.sessID) == nil {
-			return nil, os.ErrNotExist
-		}
-		return &SimpleFileInfo{name: "io", mode: 0600}, nil
-	case kindSessCtl:
-		if fs.getSession(p.host, p.sessID) == nil {
-			return nil, os.ErrNotExist
-		}
-		return &SimpleFileInfo{name: "ctl", mode: 0200}, nil
-	case kindSessStat:
-		if fs.getSession(p.host, p.sessID) == nil {
-			return nil, os.ErrNotExist
-		}
-		return &SimpleFileInfo{name: "stat", mode: 0400}, nil
+		return dir.Stat(p.rest)
 	}
 	return nil, os.ErrNotExist
 }
@@ -309,9 +294,9 @@ func (fs *hostFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File,
 	case kindRoot:
 		return fs.rootDir(), nil
 	case kindNew:
-		return &newFile{fs: fs}, nil
+		return vfs.NamedFile(&newFile{fs: fs}, "new", 0600, false), nil
 	case kindRun:
-		return &runFile{fs: fs}, nil
+		return vfs.NamedFile(&runFile{fs: fs}, "run", 0600, false), nil
 	case kindHostDir:
 		return fs.hostDir(p.host), nil
 	case kindHostIO:
@@ -319,52 +304,21 @@ func (fs *hostFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File,
 		if err != nil {
 			return nil, err
 		}
-		return &ioFile{session: sh}, nil
+		return vfs.NamedFile(&ioFile{session: sh}, "io", 0600, false), nil
 	case kindFsRoot:
 		f, err := fs.sftp.OpenFile("/"+p.host+"/", flag, perm)
 		if err != nil {
 			return nil, err
 		}
-		return &namedDir{File: f, name: "fs"}, nil
+		return vfs.NamedFile(f, "fs", 0755, true), nil
 	case kindFsFile:
-		return fs.sftp.OpenFile("/"+p.host+p.fsRel, flag, perm)
-	case kindSessDir:
-		sh := fs.getSession(p.host, p.sessID)
-		if sh == nil {
-			return nil, os.ErrNotExist
+		return fs.sftp.OpenFile("/"+p.host+p.rest, flag, perm)
+	case kindSess:
+		dir, err := fs.sessionDir(p)
+		if err != nil {
+			return nil, err
 		}
-		return &MemDirFile{
-			name: strconv.Itoa(p.sessID),
-			entries: []os.FileInfo{
-				&SimpleFileInfo{name: "io", mode: 0600},
-				&SimpleFileInfo{name: "ctl", mode: 0200},
-				&SimpleFileInfo{name: "stat", mode: 0400},
-			},
-		}, nil
-	case kindSessIO:
-		sh := fs.getSession(p.host, p.sessID)
-		if sh == nil {
-			return nil, os.ErrNotExist
-		}
-		return &ioFile{session: sh}, nil
-	case kindSessCtl:
-		sh := fs.getSession(p.host, p.sessID)
-		if sh == nil {
-			return nil, os.ErrNotExist
-		}
-		return &ctlFile{session: sh}, nil
-	case kindSessStat:
-		sh := fs.getSession(p.host, p.sessID)
-		if sh == nil {
-			return nil, os.ErrNotExist
-		}
-		status := "open"
-		sh.mu.Lock()
-		if sh.done {
-			status = "closed"
-		}
-		sh.mu.Unlock()
-		return &statFile{snap: []byte(status + "\n")}, nil
+		return dir.OpenFile(p.rest, flag, perm)
 	}
 	return nil, os.ErrNotExist
 }
@@ -377,9 +331,9 @@ func (fs *hostFs) OpenWithStat(name string, fi os.FileInfo, flag int, perm os.Fi
 		if err != nil {
 			return nil, err
 		}
-		return &namedDir{File: f, name: "fs"}, nil
+		return vfs.NamedFile(f, "fs", 0755, true), nil
 	case kindFsFile:
-		return fs.sftp.OpenWithStat("/"+p.host+p.fsRel, fi, flag, perm)
+		return fs.sftp.OpenWithStat("/"+p.host+p.rest, fi, flag, perm)
 	}
 	return fs.OpenFile(name, flag, perm)
 }
@@ -387,96 +341,83 @@ func (fs *hostFs) OpenWithStat(name string, fi os.FileInfo, flag int, perm os.Fi
 func (fs *hostFs) rootDir() afero.File {
 	seen := make(map[string]bool)
 	entries := []os.FileInfo{
-		&SimpleFileInfo{name: "new", mode: 0600},
-		&SimpleFileInfo{name: "run", mode: 0600},
+		vfs.NewFileInfo("new", 0600, false),
+		vfs.NewFileInfo("run", 0600, false),
 	}
 	fs.mu.Lock()
 	for host := range fs.hosts {
 		seen[host] = true
-		entries = append(entries, &SimpleFileInfo{name: host, isDir: true})
+		entries = append(entries, vfs.NewFileInfo(host, 0755, true))
 	}
 	fs.mu.Unlock()
 	fs.sftp.conns.Range(func(k, _ interface{}) bool {
 		h := k.(string)
 		if !seen[h] {
 			seen[h] = true
-			entries = append(entries, &SimpleFileInfo{name: h, isDir: true})
+			entries = append(entries, vfs.NewFileInfo(h, 0755, true))
 		}
 		return true
 	})
-	return &MemDirFile{name: ".", entries: entries}
+	return &vfs.DirFile{Info: vfs.NewFileInfo(".", 0755, true), Entries: entries}
 }
 
 func (fs *hostFs) hostDir(host string) afero.File {
 	entries := []os.FileInfo{
-		&SimpleFileInfo{name: "io", mode: 0600},
-		&SimpleFileInfo{name: "fs", isDir: true},
+		vfs.NewFileInfo("io", 0600, false),
+		vfs.NewFileInfo("fs", 0755, true),
 	}
 	fs.mu.Lock()
 	for id := range fs.hosts[host] {
-		entries = append(entries, &SimpleFileInfo{name: strconv.Itoa(id), isDir: true})
+		entries = append(entries, vfs.NewFileInfo(strconv.Itoa(id), 0755, true))
 	}
 	fs.mu.Unlock()
-	return &MemDirFile{name: host, entries: entries}
+	return &vfs.DirFile{Info: vfs.NewFileInfo(host, 0755, true), Entries: entries}
 }
 
-// Unsupported mutations.
-func (fs *hostFs) Create(n string) (afero.File, error)    { return nil, os.ErrPermission }
-func (fs *hostFs) Mkdir(n string, p os.FileMode) error    { return os.ErrPermission }
-func (fs *hostFs) MkdirAll(n string, p os.FileMode) error { return os.ErrPermission }
-func (fs *hostFs) Remove(n string) error                  { return os.ErrPermission }
-func (fs *hostFs) RemoveAll(n string) error               { return os.ErrPermission }
-func (fs *hostFs) Rename(o, n string) error               { return os.ErrPermission }
-func (fs *hostFs) Chmod(n string, m os.FileMode) error    { return os.ErrPermission }
-func (fs *hostFs) Chown(n string, u, g int) error         { return os.ErrPermission }
-func (fs *hostFs) Chtimes(n string, a, m time.Time) error { return os.ErrPermission }
-func (fs *hostFs) Name() string                           { return "hostFs" }
+func (fs *hostFs) Name() string { return "hostFs" }
 
-// ---- sessStub ----
+// ---- session files ----
 
-type sessStub struct{}
+// dir returns the directory of session s, numbered id.
+func (s *sshSession) dir(id int) *vfs.NamespaceFs {
+	return &vfs.NamespaceFs{
+		RootName: strconv.Itoa(id),
+		Entries: []vfs.FileEntry{
+			{Name: "io", Mode: 0600, Open: func(int) (afero.File, error) { return &ioFile{session: s}, nil }},
+			{Name: "ctl", Mode: 0200, Open: func(int) (afero.File, error) { return &ctlFile{session: s}, nil }},
+			{Name: "stat", Mode: 0400, Open: func(int) (afero.File, error) {
+				return &vfs.ReadonlyFile{Data: []byte(s.status() + "\n")}, nil
+			}},
+		},
+	}
+}
 
-func (sessStub) Close() error                            { return nil }
-func (sessStub) Read(p []byte) (int, error)              { return 0, io.EOF }
-func (sessStub) ReadAt(p []byte, off int64) (int, error) { return 0, io.EOF }
-func (sessStub) Seek(off int64, w int) (int64, error)    { return 0, nil }
-func (sessStub) Write(p []byte) (int, error)             { return 0, os.ErrPermission }
-func (sessStub) WriteAt(p []byte, _ int64) (int, error)  { return 0, os.ErrPermission }
-func (sessStub) WriteString(s string) (int, error)       { return 0, os.ErrPermission }
-func (sessStub) Readdir(n int) ([]os.FileInfo, error)    { return nil, nil }
-func (sessStub) Readdirnames(n int) ([]string, error)    { return nil, nil }
-func (sessStub) Sync() error                             { return nil }
-func (sessStub) Truncate(int64) error                    { return os.ErrPermission }
-func (sessStub) Name() string                            { return "" }
-func (sessStub) Stat() (os.FileInfo, error)              { return nil, os.ErrNotExist }
+// status is "open" while the session runs, then "closed".
+func (s *sshSession) status() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.done {
+		return "closed"
+	}
+	return "open"
+}
 
-// ---- ioFile ----
-
+// ioFile is the session's terminal: reads return its output, writes are
+// typed into it.
 type ioFile struct {
-	sessStub
+	vfs.FileStub
 	session *sshSession
 }
 
-func (f *ioFile) Name() string { return "io" }
-func (f *ioFile) Stat() (os.FileInfo, error) {
-	return &SimpleFileInfo{name: "io", mode: 0600}, nil
-}
 func (f *ioFile) ReadAt(p []byte, off int64) (int, error) { return f.session.readAt(p, off) }
 func (f *ioFile) WriteAt(p []byte, _ int64) (int, error)  { return f.session.stdin.Write(p) }
-func (f *ioFile) Write(p []byte) (int, error)             { return f.WriteAt(p, 0) }
-func (f *ioFile) WriteString(s string) (int, error)       { return f.WriteAt([]byte(s), 0) }
 
-// ---- ctlFile ----
-
+// ctlFile takes "kill" and "resize <cols>x<rows>".
 type ctlFile struct {
-	sessStub
+	vfs.FileStub
 	session *sshSession
 }
 
-func (f *ctlFile) Name() string { return "ctl" }
-func (f *ctlFile) Stat() (os.FileInfo, error) {
-	return &SimpleFileInfo{name: "ctl", mode: 0200}, nil
-}
 func (f *ctlFile) WriteAt(p []byte, _ int64) (int, error) {
 	cmd := strings.TrimSpace(string(p))
 	switch {
@@ -489,59 +430,16 @@ func (f *ctlFile) WriteAt(p []byte, _ int64) (int, error) {
 	}
 	return len(p), nil
 }
-func (f *ctlFile) Write(p []byte) (int, error)       { return f.WriteAt(p, 0) }
-func (f *ctlFile) WriteString(s string) (int, error) { return f.WriteAt([]byte(s), 0) }
-
-func snapReadAt(data, p []byte, off int64) (int, error) {
-	if off >= int64(len(data)) {
-		return 0, io.EOF
-	}
-	n := copy(p, data[off:])
-	if off+int64(n) >= int64(len(data)) {
-		return n, io.EOF
-	}
-	return n, nil
-}
-
-// ---- statFile ----
-
-type statFile struct {
-	sessStub
-	snap []byte
-}
-
-func (f *statFile) Name() string { return "stat" }
-func (f *statFile) Stat() (os.FileInfo, error) {
-	return &SimpleFileInfo{name: "stat", mode: 0400, size: int64(len(f.snap))}, nil
-}
-func (f *statFile) ReadAt(p []byte, off int64) (int, error) { return snapReadAt(f.snap, p, off) }
-
-// ---- namedDir: wraps a dir file with an overridden Name ----
-
-type namedDir struct {
-	afero.File
-	name string
-}
-
-func (d *namedDir) Name() string { return d.name }
-func (d *namedDir) Stat() (os.FileInfo, error) {
-	return &SimpleFileInfo{name: d.name, isDir: true}, nil
-}
 
 // ---- newFile: write relative path → read back "<host>/<id>\n" ----
 
 type newFile struct {
-	sessStub
-	fs   *hostFs
-	resp []byte
+	vfs.ReadonlyFile // the new session, once written
+	fs               *hostFs
 }
 
-func (f *newFile) Name() string { return "new" }
-func (f *newFile) Stat() (os.FileInfo, error) {
-	return &SimpleFileInfo{name: "new", mode: 0600}, nil
-}
 func (f *newFile) WriteAt(p []byte, _ int64) (int, error) {
-	if f.resp != nil {
+	if f.Data != nil {
 		return 0, os.ErrPermission
 	}
 	parts := strings.SplitN(strings.TrimRight(string(p), "\n"), "\n", 2)
@@ -558,26 +456,19 @@ func (f *newFile) WriteAt(p []byte, _ int64) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	f.resp = []byte(fmt.Sprintf("%s/%d\n", host, id))
+	f.Data = fmt.Appendf(nil, "%s/%d\n", host, id)
 	return len(p), nil
 }
-func (f *newFile) Write(p []byte) (int, error)             { return f.WriteAt(p, 0) }
-func (f *newFile) ReadAt(p []byte, off int64) (int, error) { return snapReadAt(f.resp, p, off) }
 
 // ---- runFile: write "<relpath>\n<cmd>\n" → read combined output ----
 
 type runFile struct {
-	sessStub
-	fs   *hostFs
-	resp []byte
+	vfs.ReadonlyFile // the command's output, once written
+	fs               *hostFs
 }
 
-func (f *runFile) Name() string { return "run" }
-func (f *runFile) Stat() (os.FileInfo, error) {
-	return &SimpleFileInfo{name: "run", mode: 0600}, nil
-}
 func (f *runFile) WriteAt(p []byte, _ int64) (int, error) {
-	if f.resp != nil {
+	if f.Data != nil {
 		return 0, os.ErrPermission
 	}
 	s := strings.TrimRight(string(p), "\n")
@@ -602,11 +493,9 @@ func (f *runFile) WriteAt(p []byte, _ int64) (int, error) {
 
 	out, err := sess.CombinedOutput(cmd)
 	if err != nil {
-		f.resp = append([]byte(err.Error()+"\n"), out...)
+		f.Data = append([]byte(err.Error()+"\n"), out...)
 	} else {
-		f.resp = out
+		f.Data = out
 	}
 	return len(p), nil
 }
-func (f *runFile) Write(p []byte) (int, error)             { return f.WriteAt(p, 0) }
-func (f *runFile) ReadAt(p []byte, off int64) (int, error) { return snapReadAt(f.resp, p, off) }
