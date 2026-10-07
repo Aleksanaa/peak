@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net"
@@ -52,21 +51,12 @@ func newPeakNamespaceFs(editor *Editor, bus *eventBus) *peakNamespaceFs {
 				{Name: "srv", Mode: 0555, IsDir: true,
 					Open:      func(_ int) (afero.File, error) { return &srvDirFile{reg: srvReg}, nil },
 					ChildMode: 0600,
+					// Opening an entry read-write posts a service under its name.
 					OpenChild: func(child string, flag int) (afero.File, error) {
-						if flag&os.O_RDWR != 0 {
-							sock, serverRight, err := srvReg.create(child)
-							if err != nil {
-								return nil, err
-							}
-							return &srvServerFile{name: child, sock: sock, serverRight: serverRight, reg: srvReg}, nil
+						if flag&os.O_RDWR == 0 {
+							return nil, os.ErrPermission
 						}
-						// O_RDONLY: Plan 9-style client connect. Dial the service and
-						// return the client end of a fresh independent connection.
-						rwc, err := srvReg.dial(context.Background(), child)
-						if err != nil {
-							return nil, err
-						}
-						return &srvConnFile{rwc: rwc}, nil
+						return srvReg.post(child)
 					},
 				},
 			},
@@ -207,91 +197,95 @@ type indexFile struct {
 	vfs.ReadonlyFile
 }
 
-// ---- /srv virtual socket registry ----
+// ---- /srv ----
 
-// srvSocket is the server side of a virtual /srv entry. The mux is created
-// eagerly so clients can dial immediately. serverRight is owned by the
-// srvServerFile, not the registry.
-type srvSocket struct {
-	mux       *vfs.NinePMux
-	closeOnce sync.Once
+// srvRegistry holds the 9P services posted under /srv. A service serves on
+// one end of a pipe and peak holds the other, over which it has one 9P
+// conversation with the service: every mount of the service shares it, as
+// Plan 9's mount driver shares a posted channel.
+type srvRegistry struct {
+	mu       sync.Mutex
+	services map[string]*service
 }
 
-// srvRegistry tracks virtual sockets posted under /srv.
-type srvRegistry struct {
-	mu      sync.Mutex
-	sockets map[string]*srvSocket
+type service struct {
+	conn net.Conn // peak's end of the pipe
+	once sync.Once
+	fs   *vfs.NinePClientFs
+	err  error
 }
 
 func newSrvRegistry() *srvRegistry {
-	return &srvRegistry{sockets: make(map[string]*srvSocket)}
+	return &srvRegistry{services: make(map[string]*service)}
 }
 
-func (r *srvRegistry) create(name string) (*srvSocket, net.Conn, error) {
+// post registers a service under name and returns the file it serves on.
+func (r *srvRegistry) post(name string) (afero.File, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.sockets[name]; ok {
-		return nil, nil, os.ErrExist
+	if _, ok := r.services[name]; ok {
+		return nil, os.ErrExist
 	}
-	serverLeft, serverRight := net.Pipe()
-	m := vfs.NewNinePMux(serverLeft)
-	go m.Serve()
-	sock := &srvSocket{mux: m}
-	r.sockets[name] = sock
-	return sock, serverRight, nil
+	ours, theirs := net.Pipe()
+	s := &service{conn: ours}
+	r.services[name] = s
+	return &srvServerFile{name: name, conn: theirs, svc: s, reg: r}, nil
 }
 
-// dial returns a client connection to the service posted under name.
-// All callers share the single server conversation via the mux.
-func (r *srvRegistry) dial(ctx context.Context, name string) (io.ReadWriteCloser, error) {
+// fs returns peak's conversation with the service posted under name. The
+// first call starts it: a service is mounted once it serves, so the
+// handshake has someone to answer it.
+func (r *srvRegistry) fs(name string) (*vfs.NinePClientFs, error) {
 	r.mu.Lock()
-	sock, ok := r.sockets[name]
+	s, ok := r.services[name]
 	r.mu.Unlock()
 	if !ok {
 		return nil, fmt.Errorf("srv: %s not found", name)
 	}
-	return sock.mux.Dial(ctx)
+	s.once.Do(func() { s.fs, s.err = vfs.NewNinePClientFsFromConn(s.conn) })
+	return s.fs, s.err
 }
 
-func (r *srvRegistry) remove(name string) {
+// remove ends service s, posted under name, and with it peak's conversation.
+// A service posted under the name since is another one, and stays.
+func (r *srvRegistry) remove(name string, s *service) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	delete(r.sockets, name)
+	if r.services[name] == s {
+		delete(r.services, name)
+	}
+	s.conn.Close()
 }
 
 func (r *srvRegistry) list() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	names := make([]string, 0, len(r.sockets))
-	for n := range r.sockets {
+	names := make([]string, 0, len(r.services))
+	for n := range r.services {
 		names = append(names, n)
 	}
 	return names
 }
 
-// srvServerFile is the afero.File returned to the posting service. It wraps
-// the server end of the mux pipe and is used directly as an io.ReadWriteCloser
-// by ServeConn.
+// srvServerFile is the file a service serves 9P on: its end of the pipe.
+// Closing it ends the service; ServeConn closes it too, so it may be closed
+// twice.
 type srvServerFile struct {
 	vfs.FileStub
-	name        string
-	sock        *srvSocket
-	serverRight net.Conn
-	reg         *srvRegistry
+	name string
+	conn net.Conn
+	svc  *service
+	reg  *srvRegistry
 }
 
-func (f *srvServerFile) Read(p []byte) (int, error)             { return f.serverRight.Read(p) }
-func (f *srvServerFile) ReadAt(p []byte, _ int64) (int, error)  { return f.serverRight.Read(p) }
-func (f *srvServerFile) Write(p []byte) (int, error)            { return f.serverRight.Write(p) }
-func (f *srvServerFile) WriteAt(p []byte, _ int64) (int, error) { return f.serverRight.Write(p) }
+func (f *srvServerFile) Read(p []byte) (int, error)             { return f.conn.Read(p) }
+func (f *srvServerFile) ReadAt(p []byte, _ int64) (int, error)  { return f.conn.Read(p) }
+func (f *srvServerFile) Write(p []byte) (int, error)            { return f.conn.Write(p) }
+func (f *srvServerFile) WriteAt(p []byte, _ int64) (int, error) { return f.conn.Write(p) }
 
 func (f *srvServerFile) Close() error {
-	f.sock.closeOnce.Do(func() {
-		f.sock.mux.Close()
-		f.serverRight.Close()
-	})
-	f.reg.remove(f.name)
-	return nil
+	f.reg.remove(f.name, f.svc)
+	return f.conn.Close()
 }
 
 // srvDirFile serves the /srv directory listing.
@@ -330,16 +324,3 @@ func (f *srvDirFile) Readdirnames(n int) ([]string, error) {
 	}
 	return names, nil
 }
-
-// srvConnFile wraps a client connection returned by O_RDONLY open of an /srv entry.
-type srvConnFile struct {
-	vfs.FileStub
-	rwc io.ReadWriteCloser
-}
-
-func (f *srvConnFile) Read(p []byte) (int, error)             { return f.rwc.Read(p) }
-func (f *srvConnFile) ReadAt(p []byte, _ int64) (int, error)  { return f.rwc.Read(p) }
-func (f *srvConnFile) Write(p []byte) (int, error)            { return f.rwc.Write(p) }
-func (f *srvConnFile) WriteAt(p []byte, _ int64) (int, error) { return f.rwc.Write(p) }
-func (f *srvConnFile) WriteString(s string) (int, error)      { return f.rwc.Write([]byte(s)) }
-func (f *srvConnFile) Close() error                           { return f.rwc.Close() }

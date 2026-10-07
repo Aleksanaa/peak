@@ -40,7 +40,8 @@ These files live directly under /peak:
 - exec              Write a window title to create an externally-driven
                     terminal window; read back the window ID.
 - mount             Write "<socket> <path>" to mount a 9P server at
-                    path. Read to list current mounts.
+                    path: a service posted in /peak/srv/, or one on
+                    a Unix socket. Read to list current mounts.
 - unmount           Write a path to detach it from the VFS.
 - bind              Write "<src> <dst>" to overlay src onto dst. Read
                     to list current binds.
@@ -49,8 +50,10 @@ Paths in mount, unmount, and bind, written or listed, are backtick-quoted
 when they contain spaces (see Quoting in Commands).
 - new/              Walking into this directory creates a new empty
                     window and redirects to its /peak/<id>/ directory.
-- srv/              Virtual socket registry. Open read-write to post a
-                    service; open read-only to connect to one.
+- srv/              Posted 9P services. Open srv/<name> read-write
+                    and serve 9P on it to post one; mount it through
+                    the mount file. All mounts of a service share one
+                    conversation with it, as on Plan 9.
 
 
 ## Per-Window Files

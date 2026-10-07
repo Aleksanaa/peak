@@ -685,108 +685,42 @@ func TestSrvOpenRDWRCreatesServerFile(t *testing.T) {
 	}
 }
 
-func TestSrvOpenReadOnlyNonexistent(t *testing.T) {
+// A service is reached by mounting it; it cannot be opened read-only.
+func TestSrvOpenReadOnlyRefused(t *testing.T) {
 	_, _, nsFs, _ := setupExecFsTest(t)
-	// O_RDONLY on a non-existent entry must fail (no service posted there).
-	_, err := nsFs.OpenFile("srv/myconn", os.O_RDONLY, 0)
-	if err == nil {
-		t.Error("OpenFile(srv/nonexistent, O_RDONLY) succeeded, want error")
-	}
-}
-
-// TestSrvReadyBeforeClientMounts verifies the Plan 9-equivalent model: the
-// service can handle requests the moment it opens /srv/X, before any client
-// connects or mounts.
-func TestSrvReadyBeforeClientMounts(t *testing.T) {
-	_, _, nsFs, _ := setupExecFsTest(t)
-
-	srvFs := afero.NewMemMapFs()
-	afero.WriteFile(srvFs, "/sentinel", []byte("ok"), 0644)
-
-	f, err := nsFs.OpenFile("srv/eager", os.O_RDWR, 0)
+	f, err := nsFs.OpenFile("srv/ro", os.O_RDWR, 0)
 	if err != nil {
-		t.Fatalf("OpenFile: %v", err)
+		t.Fatalf("OpenFile(srv/ro, O_RDWR): %v", err)
 	}
 	defer f.Close()
-
-	// Service is ready immediately — mux is live when OpenFile returns.
-	go vfs.NewNinePSrv(srvFs).ServeConn(f)
-
-	// Dial directly without going through Mount to verify mux is live.
-	conn, err := nsFs.OpenFile("srv/eager", os.O_RDONLY, 0)
-	if err != nil {
-		t.Fatalf("OpenFile srv/eager: %v", err)
-	}
-	defer conn.Close()
-
-	clientFs, err := vfs.NewNinePClientFsFromConn(conn)
-	if err != nil {
-		t.Fatalf("NewNinePClientFsFromConn: %v", err)
-	}
-	data, err := afero.ReadFile(clientFs, "/sentinel")
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-	if string(data) != "ok" {
-		t.Errorf("data = %q, want %q", data, "ok")
+	if _, err := nsFs.OpenFile("srv/ro", os.O_RDONLY, 0); err == nil {
+		t.Error("OpenFile(srv/ro, O_RDONLY) succeeded, want error")
 	}
 }
 
+// Closing a service's file ends it: it can no longer be mounted, and its name
+// can be posted again.
 func TestSrvCloseRemovesFromRegistry(t *testing.T) {
-	_, _, nsFs, _ := setupExecFsTest(t)
+	e, _, nsFs, _ := setupExecFsTest(t)
 	f, err := nsFs.OpenFile("srv/temp", os.O_RDWR, 0)
 	if err != nil {
 		t.Fatalf("OpenFile: %v", err)
 	}
 	f.Close()
-	_, err = nsFs.OpenFile("srv/temp", os.O_RDONLY, 0)
-	if err == nil {
-		t.Error("OpenFile srv/temp succeeded after Close, want error")
+	if _, err := e.ninep.Mount("/peak/srv/temp", "/peak/srv-temp-mount"); err == nil {
+		t.Error("Mount of a closed service succeeded, want error")
 	}
+	f, err = nsFs.OpenFile("srv/temp", os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("posting srv/temp again: %v", err)
+	}
+	f.Close()
 }
 
-func TestSrvOpenSocketReturnsClientConn(t *testing.T) {
-	_, _, nsFs, _ := setupExecFsTest(t)
-	f, err := nsFs.OpenFile("srv/xfer", os.O_RDWR, 0)
-	if err != nil {
-		t.Fatalf("OpenFile: %v", err)
-	}
-	defer f.Close()
-	go vfs.NewNinePSrv(afero.NewMemMapFs()).ServeConn(f)
-	conn, err := nsFs.OpenFile("srv/xfer", os.O_RDONLY, 0)
-	if err != nil {
-		t.Fatalf("OpenFile srv/xfer: %v", err)
-	}
-	conn.Close()
-}
-
-func TestSrvOpenSocketMultipleDials(t *testing.T) {
-	_, _, nsFs, _ := setupExecFsTest(t)
-	f, err := nsFs.OpenFile("srv/multi", os.O_RDWR, 0)
-	if err != nil {
-		t.Fatalf("OpenFile: %v", err)
-	}
-	defer f.Close()
-	// The mux multiplexes all dials onto the one service connection.
-	go vfs.NewNinePSrv(afero.NewMemMapFs()).ServeConn(f)
-	// Each OpenFile O_RDONLY call must succeed and return a distinct connection.
-	conn1, err := nsFs.OpenFile("srv/multi", os.O_RDONLY, 0)
-	if err != nil {
-		t.Fatalf("first OpenFile srv/multi: %v", err)
-	}
-	defer conn1.Close()
-	conn2, err := nsFs.OpenFile("srv/multi", os.O_RDONLY, 0)
-	if err != nil {
-		t.Fatalf("second OpenFile srv/multi: %v", err)
-	}
-	defer conn2.Close()
-	if conn1 == conn2 {
-		t.Error("two OpenFile calls returned the same connection")
-	}
-}
-
-func TestSrvDataFlowBidirectional(t *testing.T) {
-	_, _, nsFs, _ := setupExecFsTest(t)
+// Every mount of a service shares peak's one conversation with it: data
+// flows both ways through either mount.
+func TestSrvMountsShareOneConversation(t *testing.T) {
+	e, _, nsFs, _ := setupExecFsTest(t)
 
 	srvFs := afero.NewMemMapFs()
 	afero.WriteFile(srvFs, "/from-server", []byte("hello from server"), 0644)
@@ -798,37 +732,34 @@ func TestSrvDataFlowBidirectional(t *testing.T) {
 	defer serverF.Close()
 	go vfs.NewNinePSrv(srvFs).ServeConn(serverF)
 
-	// Open the client side of the srv entry; wrap it in a NinePClientFs.
-	clientConn, err := nsFs.OpenFile("srv/pipe", os.O_RDONLY, 0)
-	if err != nil {
-		t.Fatalf("OpenFile srv/pipe: %v", err)
-	}
-	defer clientConn.Close()
-
-	clientFs, err := vfs.NewNinePClientFsFromConn(clientConn)
-	if err != nil {
-		t.Fatalf("NewNinePClientFsFromConn: %v", err)
+	const a, b = "/peak/srv-share-a", "/peak/srv-share-b"
+	for _, dst := range []string{a, b} {
+		if _, err := e.ninep.Mount("/peak/srv/pipe", dst); err != nil {
+			t.Fatalf("Mount at %s: %v", dst, err)
+		}
+		defer e.ninep.Umount(dst)
 	}
 
-	// Client reads a file served by the service (server→client data).
-	got, err := afero.ReadFile(clientFs, "/from-server")
-	if err != nil {
-		t.Fatalf("ReadFile from service: %v", err)
-	}
-	if string(got) != "hello from server" {
-		t.Errorf("got %q, want %q", got, "hello from server")
+	for _, dst := range []string{a, b} {
+		got, err := afero.ReadFile(ns, dst+"/from-server")
+		if err != nil {
+			t.Fatalf("ReadFile through %s: %v", dst, err)
+		}
+		if string(got) != "hello from server" {
+			t.Errorf("through %s: got %q, want %q", dst, got, "hello from server")
+		}
 	}
 
-	// Client writes a file to the service (client→server data).
-	if err := afero.WriteFile(clientFs, "/from-client", []byte("hello from client"), 0644); err != nil {
-		t.Fatalf("WriteFile to service: %v", err)
+	if err := afero.WriteFile(ns, a+"/from-client", []byte("hello from client"), 0644); err != nil {
+		t.Fatalf("WriteFile through %s: %v", a, err)
 	}
-	written, err := afero.ReadFile(srvFs, "/from-client")
-	if err != nil {
-		t.Fatalf("ReadFile from backing fs: %v", err)
-	}
-	if string(written) != "hello from client" {
-		t.Errorf("backing got %q, want %q", written, "hello from client")
+	for _, read := range []func(string) ([]byte, error){
+		func(name string) ([]byte, error) { return afero.ReadFile(srvFs, name) },
+		func(name string) ([]byte, error) { return afero.ReadFile(ns, b+name) },
+	} {
+		if got, err := read("/from-client"); err != nil || string(got) != "hello from client" {
+			t.Errorf("written file reads %q, %v; want %q", got, err, "hello from client")
+		}
 	}
 }
 

@@ -93,18 +93,18 @@ func (p *NineP) BroadcastPut(win *Window) {
 	p.bus.broadcast(fmt.Appendf(nil, "put %d %s\n", win.ID, win.GetFilename()))
 }
 
-// Mount attaches a 9P server to path in the VFS, listed in /mount. If
-// socket can be opened as a file in peak's own VFS it is treated as a virtual
-// socket; otherwise it is dialled as a Unix socket. Returns the resolved
-// destination path.
+// Mount attaches a 9P server to path in the VFS, listed in /mount: a
+// service posted in /peak/srv, or else one listening on the Unix socket
+// socket. Returns the resolved destination path.
 func (p *NineP) Mount(socket, path string) (string, error) {
-	var clientFs afero.Fs
-	if f, err := ns.OpenFile(socket, os.O_RDONLY, 0); err == nil {
-		if clientFs, err = vfs.NewNinePClientFsFromConn(f); err != nil {
-			f.Close()
-			return "", err
-		}
-	} else if clientFs, err = vfs.NewNinePClientFs("unix", normalizePath(socket, "")); err != nil {
+	var clientFs *vfs.NinePClientFs
+	var err error
+	if name, ok := strings.CutPrefix(normalizePath(socket, ""), p.nsBase+"/srv/"); ok {
+		clientFs, err = p.nsFs.srvReg.fs(name)
+	} else {
+		clientFs, err = vfs.NewNinePClientFs("unix", normalizePath(socket, ""))
+	}
+	if err != nil {
 		return "", err
 	}
 	path = normalizePath(path, "")
