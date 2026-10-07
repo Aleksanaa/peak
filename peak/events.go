@@ -23,18 +23,13 @@ type colorSpan struct {
 
 // ---- event subscription ----
 
-// eventSub is one reader's subscription to a window's event stream.
+// eventSub is one reader's subscription to an event stream.
 // deliver sends chunks to a buffered channel; readAt drains the channel
 // into a local accumulator and serves from it by offset. The accumulator
 // is only ever accessed by the single 9P goroutine calling readAt.
 type eventSub struct {
-	ch   chan []byte
-	buf  []byte // accumulated bytes; goroutine-local to the readAt caller
-	once sync.Once
-}
-
-func newEventSub() *eventSub {
-	return &eventSub{ch: make(chan []byte, 64)}
+	ch  chan []byte
+	buf []byte // accumulated bytes; goroutine-local to the readAt caller
 }
 
 // deliver sends a record chunk to the subscriber. Non-blocking: if the channel is
@@ -53,78 +48,61 @@ func (s *eventSub) readAt(p []byte, off int64) (int, error) {
 	for int64(len(s.buf)) <= off {
 		chunk, ok := <-s.ch
 		if !ok {
-			if int64(len(s.buf)) <= off {
-				return 0, io.EOF
-			}
-			break
+			return 0, io.EOF
 		}
 		s.buf = append(s.buf, chunk...)
 	}
-	if int64(len(s.buf)) <= off {
-		return 0, io.EOF
-	}
-	n := copy(p, s.buf[off:])
-	return n, nil
+	return copy(p, s.buf[off:]), nil
 }
 
-func (s *eventSub) close() {
-	s.once.Do(func() { close(s.ch) })
-}
+// ---- eventBus ----
 
-// ---- globalEventBus ----
-
-// globalEventBus fans out editor-wide lifecycle events to all open /event readers.
-// Events are lines like "new 5\n", "close 3\n".
-type globalEventBus struct {
+// eventBus fans events out to its subscribers: the readers of /peak/event,
+// or of a window's event file. Events come from the main goroutine and
+// subscriptions from 9P's, so it keeps a lock of its own.
+type eventBus struct {
 	mu   sync.Mutex
 	subs []*eventSub
 }
 
-func (b *globalEventBus) subscribe() *eventSub {
-	s := newEventSub()
+func (b *eventBus) subscribe() *eventSub {
+	s := &eventSub{ch: make(chan []byte, 64)}
 	b.mu.Lock()
 	b.subs = append(b.subs, s)
 	b.mu.Unlock()
 	return s
 }
 
-func (b *globalEventBus) unsubscribe(s *eventSub) {
+// unsubscribe removes s and ends its stream.
+func (b *eventBus) unsubscribe(s *eventSub) {
 	b.mu.Lock()
-	for i, sub := range b.subs {
-		if sub == s {
-			b.subs = append(b.subs[:i], b.subs[i+1:]...)
-			break
-		}
-	}
+	b.subs = slices.DeleteFunc(b.subs, func(x *eventSub) bool { return x == s })
 	b.mu.Unlock()
+	close(s.ch)
 }
 
-func (b *globalEventBus) broadcast(line string) {
-	msg := []byte(line)
+func (b *eventBus) broadcast(event []byte) {
 	b.mu.Lock()
-	subs := make([]*eventSub, len(b.subs))
-	copy(subs, b.subs)
-	b.mu.Unlock()
-	for _, s := range subs {
-		s.deliver(msg)
+	defer b.mu.Unlock()
+	for _, s := range b.subs {
+		s.deliver(event)
 	}
 }
 
 // ---- winEventFile ----
 
 func newWinEventFile(win *Window, flag int) *winEventFile {
-	var sub *eventSub
+	f := &winEventFile{win: win}
 	if flag&os.O_WRONLY == 0 {
-		sub = newEventSub()
-		win.editor.Call(func() { win.eventSubs = append(win.eventSubs, sub) })
+		f.sub = win.events.subscribe()
 	}
-	return &winEventFile{win: win, sub: sub}
+	return f
 }
 
 type winEventFile struct {
 	vfs.FileStub
 	win *Window
-	sub *eventSub
+	sub *eventSub // nil when opened only to write
 }
 
 func (f *winEventFile) ReadAt(p []byte, off int64) (int, error) {
@@ -168,11 +146,8 @@ func (f *winEventFile) dispatchWriteEvent(ev wevent.Event) error {
 func (f *winEventFile) Close() error {
 	if f.sub != nil {
 		win := f.win
-		win.editor.Call(func() {
-			win.eventSubs = slices.DeleteFunc(win.eventSubs, func(s *eventSub) bool { return s == f.sub })
-			win.spans = nil
-		})
-		f.sub.close()
+		win.events.unsubscribe(f.sub)
+		win.editor.Call(func() { win.spans = nil })
 	}
 	return nil
 }

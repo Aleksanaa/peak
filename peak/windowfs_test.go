@@ -543,7 +543,7 @@ func TestWindowFsEventWriteOnlyNoSub(t *testing.T) {
 	if ef.sub != nil {
 		t.Error("write-only open should not create a subscription")
 	}
-	if len(win.eventSubs) > 0 {
+	if len(win.events.subs) > 0 {
 		t.Error("write-only open should not count as a subscriber")
 	}
 }
@@ -874,7 +874,6 @@ func TestEventScannerIntegration(t *testing.T) {
 		t.Fatal("timeout waiting for close event via scanner")
 	}
 
-	sub.close()
 }
 
 func TestRemoveWindowUnmountsFromVFS(t *testing.T) {

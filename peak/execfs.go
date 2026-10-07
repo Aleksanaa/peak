@@ -24,7 +24,7 @@ type peakNamespaceFs struct {
 	srvReg *srvRegistry
 }
 
-func newPeakNamespaceFs(editor *Editor, bus *globalEventBus) *peakNamespaceFs {
+func newPeakNamespaceFs(editor *Editor, bus *eventBus) *peakNamespaceFs {
 	srvReg := newSrvRegistry()
 	return &peakNamespaceFs{
 		editor: editor,
@@ -33,8 +33,7 @@ func newPeakNamespaceFs(editor *Editor, bus *globalEventBus) *peakNamespaceFs {
 			RootName: "peak",
 			Entries: []vfs.FileEntry{
 				{Name: "event", Mode: 0444, Open: func(_ int) (afero.File, error) {
-					sub := bus.subscribe()
-					return &globalEventFile{bus: bus, sub: sub}, nil
+					return &globalEventFile{bus: bus, sub: bus.subscribe()}, nil
 				}},
 				{Name: "index", Mode: 0444, Open: func(_ int) (afero.File, error) {
 					return &indexFile{ReadonlyFile: vfs.ReadonlyFile{Data: indexSnap(editor)}}, nil
@@ -97,7 +96,7 @@ func (fs *peakNamespaceFs) WalkRedirect(dir, name string) (string, os.FileInfo, 
 // Each open of /event creates an independent subscriber.
 type globalEventFile struct {
 	vfs.FileStub
-	bus *globalEventBus
+	bus *eventBus
 	sub *eventSub
 }
 
@@ -106,7 +105,6 @@ func (f *globalEventFile) ReadAt(p []byte, off int64) (int, error) {
 }
 func (f *globalEventFile) Close() error {
 	f.bus.unsubscribe(f.sub)
-	f.sub.close()
 	return nil
 }
 

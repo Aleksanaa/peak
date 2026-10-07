@@ -28,7 +28,7 @@ var ns *vfs.CompositeFs
 // NineP manages the virtual filesystem and 9P server for Peak.
 type NineP struct {
 	editor *Editor
-	bus    *globalEventBus
+	bus    *eventBus
 	nsFs   *peakNamespaceFs
 	nsBase string // VFS path where nsFs is mounted
 }
@@ -37,7 +37,7 @@ type NineP struct {
 func NewNineP(e *Editor) *NineP {
 	const nsBase = "/peak"
 	ns = vfs.NewCompositeFs()
-	p := &NineP{editor: e, bus: &globalEventBus{}, nsBase: nsBase}
+	p := &NineP{editor: e, bus: &eventBus{}, nsBase: nsBase}
 
 	ns.Mount("/", afero.NewOsFs(), "")
 	p.nsFs = newPeakNamespaceFs(e, p.bus)
@@ -72,25 +72,25 @@ func (p *NineP) Listen() {
 // MountWindow exposes a window's namespace at /peak/<id>/.
 func (p *NineP) MountWindow(win *Window) {
 	ns.Mount("/peak/"+strconv.Itoa(win.ID), newWindowFs(win), "")
-	p.bus.broadcast(fmt.Sprintf("new %d %s\n", win.ID, win.GetFilename()))
+	p.bus.broadcast(fmt.Appendf(nil, "new %d %s\n", win.ID, win.GetFilename()))
 }
 
 // UmountWindow removes a window's namespace.
 func (p *NineP) UmountWindow(win *Window) {
 	ns.Umount("/peak/" + strconv.Itoa(win.ID))
-	p.bus.broadcast(fmt.Sprintf("close %d %s\n", win.ID, win.GetFilename()))
+	p.bus.broadcast(fmt.Appendf(nil, "close %d %s\n", win.ID, win.GetFilename()))
 }
 
 func (p *NineP) BroadcastFocus(win *Window) {
-	p.bus.broadcast(fmt.Sprintf("focus %d %s\n", win.ID, win.GetFilename()))
+	p.bus.broadcast(fmt.Appendf(nil, "focus %d %s\n", win.ID, win.GetFilename()))
 }
 
 func (p *NineP) BroadcastGet(win *Window) {
-	p.bus.broadcast(fmt.Sprintf("get %d %s\n", win.ID, win.GetFilename()))
+	p.bus.broadcast(fmt.Appendf(nil, "get %d %s\n", win.ID, win.GetFilename()))
 }
 
 func (p *NineP) BroadcastPut(win *Window) {
-	p.bus.broadcast(fmt.Sprintf("put %d %s\n", win.ID, win.GetFilename()))
+	p.bus.broadcast(fmt.Appendf(nil, "put %d %s\n", win.ID, win.GetFilename()))
 }
 
 // Mount attaches a 9P server to path in the VFS, listed in /mount. If

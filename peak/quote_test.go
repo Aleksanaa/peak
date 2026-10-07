@@ -117,8 +117,7 @@ func TestExecuteQuotedClick(t *testing.T) {
 		if selected {
 			tv.buffer.SetDot(4, 11)
 		}
-		sub := newEventSub()
-		win.eventSubs = append(win.eventSubs, sub)
+		sub := win.events.subscribe()
 
 		p := screenAt(e, tv)
 		e.HandleEvent(tcell.NewEventMouse(p.X+8, p.Y, tcell.ButtonMiddle, 0))

@@ -233,7 +233,6 @@ func TestGlobalEventFileReadAtBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open(event): %v", err)
 	}
-	defer f.Close()
 	// ReadAt with no data pending should block until Close delivers EOF.
 	readDone := make(chan error, 1)
 	go func() {

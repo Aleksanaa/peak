@@ -251,7 +251,7 @@ type Window struct {
 	savedVersion  int
 	warnedVersion int
 
-	eventSubs []*eventSub
+	events eventBus // to the readers of its event file
 
 	addrQ0, addrQ1 int
 
@@ -303,10 +303,7 @@ func (w *Window) Draw(cv canvas) {
 
 // broadcastEvent delivers a counted event record to all open event file subscribers.
 func (win *Window) broadcastEvent(origin, typ byte, q0, q1 int, text string) {
-	record := wevent.Format(wevent.Event{Origin: origin, Type: typ, Q0: q0, Q1: q1, Text: text})
-	for _, s := range win.eventSubs {
-		s.deliver(record)
-	}
+	win.events.broadcast(wevent.Format(wevent.Event{Origin: origin, Type: typ, Q0: q0, Q1: q1, Text: text}))
 }
 
 // adjustPoint shifts a single rune offset after a buffer mutation
