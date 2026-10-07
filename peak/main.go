@@ -10,35 +10,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v3"
-	"github.com/gdamore/tcell/v3/color"
 )
-
-// colorPair is the background and foreground of one kind of text area.
-type colorPair struct{ BG, FG tcell.Color }
-
-func (c *colorPair) style() tcell.Style {
-	return tcell.StyleDefault.Background(c.BG).Foreground(c.FG)
-}
-
-type Theme struct {
-	GlobalTag, ColTag, Tag, Body, Selection colorPair
-
-	Handle, ScrollThumb, ScrollGutter tcell.Color
-	HandleDirty, HandleError          tcell.Color
-	HandleWritable, HandleUnwritable  tcell.Color
-	HandleColumn                      tcell.Color
-
-	SynKeyword  tcell.Color
-	SynType     tcell.Color
-	SynComment  tcell.Color
-	SynString   tcell.Color
-	SynNumber   tcell.Color
-	SynFunction tcell.Color
-	SynOperator tcell.Color
-	SynVariable tcell.Color
-	SynConstant tcell.Color
-	SynError    tcell.Color
-}
 
 // Editor is the main application state.
 type Editor struct {
@@ -353,33 +325,6 @@ func (e *Editor) resize() {
 		col.explicitWidth = sizes[i]
 		col.Resize(rect{x, 1, sizes[i], e.h - 1})
 		x += sizes[i]
-	}
-}
-
-func (t *Theme) colorForAttr(attr string) tcell.Color {
-	switch attr {
-	case "keyword":
-		return t.SynKeyword
-	case "type":
-		return t.SynType
-	case "comment":
-		return t.SynComment
-	case "string":
-		return t.SynString
-	case "number":
-		return t.SynNumber
-	case "function":
-		return t.SynFunction
-	case "operator":
-		return t.SynOperator
-	case "variable":
-		return t.SynVariable
-	case "constant":
-		return t.SynConstant
-	case "error":
-		return t.SynError
-	default:
-		return color.Default
 	}
 }
 

@@ -11,8 +11,6 @@ import (
 
 	"github.com/aleksana/peak/internal/quote"
 	"github.com/aleksana/peak/internal/session"
-	"github.com/gdamore/tcell/v3"
-	"github.com/gdamore/tcell/v3/color"
 )
 
 // Execute parses and runs internal or external commands.
@@ -812,93 +810,4 @@ func (e *Editor) cmdTheme(win *Window, cmd string) {
 		return
 	}
 	e.Redraw()
-}
-
-func (e *Editor) ApplyTheme(name string) error {
-	data, err := readFile("/peak/theme/" + name)
-	if err != nil {
-		return err
-	}
-	return applyThemeFromData(&e.theme, data)
-}
-
-func applyThemeFromData(t *Theme, data []byte) error {
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, "\t", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		key := parts[0]
-		hex, err := strconv.ParseUint(parts[1], 0, 32)
-		if err != nil {
-			continue
-		}
-		setThemeField(t, key, color.NewHexColor(int32(hex)))
-	}
-	return nil
-}
-
-func setThemeField(t *Theme, key string, c tcell.Color) {
-	switch key {
-	case "GlobalTagBG":
-		t.GlobalTag.BG = c
-	case "GlobalTagFG":
-		t.GlobalTag.FG = c
-	case "ColTagBG":
-		t.ColTag.BG = c
-	case "ColTagFG":
-		t.ColTag.FG = c
-	case "TagBG":
-		t.Tag.BG = c
-	case "TagFG":
-		t.Tag.FG = c
-	case "BodyBG":
-		t.Body.BG = c
-	case "BodyFG":
-		t.Body.FG = c
-	case "Handle":
-		t.Handle = c
-	case "ScrollThumb":
-		t.ScrollThumb = c
-	case "ScrollGutter":
-		t.ScrollGutter = c
-	case "HandleDirty":
-		t.HandleDirty = c
-	case "HandleError":
-		t.HandleError = c
-	case "HandleWritable":
-		t.HandleWritable = c
-	case "HandleUnwritable":
-		t.HandleUnwritable = c
-	case "SelectionBG":
-		t.Selection.BG = c
-	case "SelectionFG":
-		t.Selection.FG = c
-	case "HandleColumn":
-		t.HandleColumn = c
-	case "SynKeyword":
-		t.SynKeyword = c
-	case "SynType":
-		t.SynType = c
-	case "SynComment":
-		t.SynComment = c
-	case "SynString":
-		t.SynString = c
-	case "SynNumber":
-		t.SynNumber = c
-	case "SynFunction":
-		t.SynFunction = c
-	case "SynOperator":
-		t.SynOperator = c
-	case "SynVariable":
-		t.SynVariable = c
-	case "SynConstant":
-		t.SynConstant = c
-	case "SynError":
-		t.SynError = c
-	}
 }

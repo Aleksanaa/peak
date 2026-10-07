@@ -394,7 +394,7 @@ func (win *Window) spanStyle(tv *TextView) func(line, col int, s tcell.Style) tc
 			i++
 		}
 		if i < len(spans) && spans[i].q0 <= runeOff && runeOff < spans[i].q1 {
-			return s.Foreground(theme.colorForAttr(spans[i].attr))
+			return s.Foreground(theme.Syn[spans[i].attr])
 		}
 		return s
 	}
