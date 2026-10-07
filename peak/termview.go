@@ -313,14 +313,6 @@ func (tv *TermView) Layout() {
 	}
 }
 
-// ShowLineAt shows line n, and stops following the screen if that moved the
-// view, so that it stays on n.
-func (tv *TermView) ShowLineAt(n int) {
-	if tv.showLine(n) {
-		tv.autoScroll = false
-	}
-}
-
 func (tv *TermView) GetBuffer() *Buffer {
 	tv.sync()
 	return tv.buffer

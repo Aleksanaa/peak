@@ -38,8 +38,7 @@ type View interface {
 	// direction dir, as the view scrolls under it.
 	AdvanceSweep(dir int)
 	GetScroll() (scroll, total, visible int)
-	Search(word string) int
-	ShowLineAt(lineNum int)
+	Show(q int) // scroll to show rune offset q
 	IsRaw() bool
 }
 
@@ -85,11 +84,7 @@ func (tv *TextView) GotoLineCol(line, col int) {
 	} else {
 		b.moveTo(b.Offset(line, min(col, len(b.lines[line]))))
 	}
-	tv.ShowLineAt(line)
-}
-
-func (tv *TextView) ShowLineAt(n int) {
-	tv.showLine(n)
+	tv.Show(b.q0)
 }
 
 func (tv *TextView) Resize(w, h int) {
@@ -111,8 +106,7 @@ func (tv *TextView) startTyping() {
 // selectTyped selects the text typed and shows it.
 func (tv *TextView) selectTyped() {
 	tv.buffer.SetDot(tv.typedFrom, tv.typedTo)
-	line, _ := tv.buffer.Pos(tv.typedFrom)
-	tv.ShowLineAt(line)
+	tv.Show(tv.typedFrom)
 }
 
 // page scrolls to show visual line top first, keeping the cursor at q if
@@ -121,7 +115,7 @@ func (tv *TextView) page(top, q int) {
 	tv.setTop(top)
 	top = tv.top()
 	if _, vrow := tv.visualOf(q); vrow < top || vrow >= top+tv.h {
-		q = tv.offsetAt(0, top)
+		q = tv.PosAt(0, 0)
 	}
 	tv.buffer.moveTo(q)
 }

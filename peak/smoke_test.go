@@ -1244,7 +1244,7 @@ func TestTextViewTypingRevealsCursorBelowVisible(t *testing.T) {
 	body := strings.Join(lines, "\n")
 	tv := NewTextView(body, 40, 10, nil, nil, false, true)
 
-	tv.buffer.moveTo(tv.offsetAt(0, 9))
+	tv.buffer.moveTo(tv.PosAt(0, 9))
 	tv.HandleEvent(tcell.NewEventKey(tcell.KeyDown, "", 0))
 
 	if tv.top() != 1 {

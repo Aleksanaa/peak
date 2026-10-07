@@ -189,10 +189,10 @@ func TestTermShrinkKeepsRows(t *testing.T) {
 // Look finds text in history and the view stays on it while output goes on.
 func TestTermLookStaysOnMatch(t *testing.T) {
 	tv := runTerm(t, "echo needle; seq 1 50; printf end; exec sleep 30", 20, 10, "end")
-	if line := tv.Search("needle"); line != 0 {
-		t.Fatalf("Search found line %d, want 0", line)
+	if !tv.GetBuffer().Search("needle") || tv.buffer.q0 != 0 {
+		t.Fatalf("Search found [%d, %d), want the first line", tv.buffer.q0, tv.buffer.q1)
 	}
-	tv.ShowLineAt(0)
+	tv.Show(tv.buffer.q0)
 	tv.changed.Store(true)
 	tv.Layout()
 	if top := tv.lines()[tv.top()].BufferLine; top > 0 {

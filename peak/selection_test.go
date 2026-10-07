@@ -105,8 +105,8 @@ func TestRunesInRangeClampsPastEnd(t *testing.T) {
 	}
 }
 
-// Search finds the next match from an offset on, wrapping around, as a rune
-// offset; selecting it selects the word.
+// Search selects the next match from the end of dot on, wrapping around: the
+// word, at its rune offset.
 func TestSearchUTF8(t *testing.T) {
 	tests := []struct {
 		text, word string
@@ -127,28 +127,24 @@ func TestSearchUTF8(t *testing.T) {
 	}
 	for _, tt := range tests {
 		b := NewBuffer(tt.text)
-		q, ok := Search(b, tt.word, tt.from)
-		if !ok || q != tt.want {
-			t.Errorf("Search(%q, %q, %d) = %d, %v, want %d", tt.text, tt.word, tt.from, q, ok, tt.want)
-			continue
-		}
-		b.SetDot(q, q+len([]rune(tt.word)))
-		if got := b.GetSelectedText(); got != tt.word {
-			t.Errorf("Search(%q, %q): selected %q", tt.text, tt.word, got)
+		b.SetDot(tt.from, tt.from)
+		ok := b.Search(tt.word)
+		if got := b.GetSelectedText(); !ok || b.q0 != tt.want || got != tt.word {
+			t.Errorf("Search(%q) in %q from %d selected %q at %d, %v; want at %d", tt.word, tt.text, tt.from, got, b.q0, ok, tt.want)
 		}
 	}
-	if _, ok := Search(NewBuffer("abc"), "x", 0); ok {
+	if NewBuffer("abc").Search("x") {
 		t.Error("Search found a word that is not there")
 	}
 }
 
 // A search from the end of a match finds the next one, not the same again.
 func TestSearchFromDotFindsNext(t *testing.T) {
-	tv := NewTextView("foofoo foo", 20, 1, &Theme{}, &colorPair{}, false, true)
+	b := NewBuffer("foofoo foo")
 	for _, want := range []int{0, 3, 7, 0} {
-		tv.Search("foo")
-		if tv.buffer.q0 != want || tv.buffer.q1 != want+3 {
-			t.Fatalf("dot = [%d, %d), want [%d, %d)", tv.buffer.q0, tv.buffer.q1, want, want+3)
+		b.Search("foo")
+		if b.q0 != want || b.q1 != want+3 {
+			t.Fatalf("dot = [%d, %d), want [%d, %d)", b.q0, b.q1, want, want+3)
 		}
 	}
 }

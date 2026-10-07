@@ -1,7 +1,6 @@
 package main
 
 import (
-	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -10,10 +9,6 @@ import (
 	"github.com/gdamore/tcell/v3"
 	uwidth "golang.org/x/text/width"
 )
-
-func IsWordChar(r rune) bool {
-	return r != 0 && !unicode.IsSpace(r)
-}
 
 // clickRange returns what a click at q in b stands for, as the rune offsets
 // [q0, q1) of b and their text. A click in the selection takes the
@@ -50,30 +45,6 @@ func clickRange(b *Buffer, q int) (q0, q1 int, text string) {
 	return q0, q1, text
 }
 
-// Search returns where word next occurs in buf from q on, wrapping around
-// to the start.
-func Search(buf *Buffer, word string, q int) (int, bool) {
-	text, w := []rune(buf.GetText()), []rune(word)
-	find := func(from, to int) int {
-		for i := from; i < to && i+len(w) <= len(text); i++ {
-			if slices.Equal(text[i:i+len(w)], w) {
-				return i
-			}
-		}
-		return -1
-	}
-	if len(w) == 0 {
-		return 0, false
-	}
-	if i := find(q, len(text)); i >= 0 {
-		return i, true
-	}
-	if i := find(0, q); i >= 0 {
-		return i, true
-	}
-	return 0, false
-}
-
 // A frame shows a Buffer in an area w wide and h high: it wraps the
 // buffer's lines to its width, scrolls through them, draws them with the
 // cursor, and selects text with the mouse. A view is a frame and what it
@@ -87,8 +58,8 @@ type frame struct {
 	// forget), so the view stays where it was.
 	org int
 	// autoScroll is whether the view follows what is written: the cursor
-	// of a TextView, the screen of a TermView. Scrolling up stops it;
-	// scrolling to the end starts it again.
+	// of a TextView, the screen of a TermView. Scrolling up or showing
+	// another place stops it; scrolling to the end starts it again.
 	autoScroll    bool
 	scrollable    bool // false for tags, which show their text from the top
 	drag          bool // a selection is being swept
@@ -254,15 +225,15 @@ func (f *frame) visualOf(q int) (vx, vrow int) {
 	return 0, -1
 }
 
-// offsetAt returns the rune offset shown at column vx of visual line vidx.
-func (f *frame) offsetAt(vx, vidx int) int {
+// PosAt returns the rune offset shown at (x, y).
+func (f *frame) PosAt(x, y int) int {
 	lines := f.lines()
-	vl := lines[max(0, min(vidx, len(lines)-1))]
+	vl := lines[max(0, min(y+f.top(), len(lines)-1))]
 	line := f.buffer.lines[vl.BufferLine]
 	bx, currVX := vl.Start, 0
 	for i := vl.Start; i < vl.End; i++ {
 		w := f.runeWidth(line[i], currVX)
-		if currVX+w > vx {
+		if currVX+w > x {
 			break
 		}
 		currVX += w
@@ -313,11 +284,6 @@ func (f *frame) Draw(cv canvas) {
 	cv.fill(rect{0, vrow, f.w, f.h - vrow}, f.colors.style())
 }
 
-// PosAt returns the rune offset shown at (x, y).
-func (f *frame) PosAt(x, y int) int {
-	return f.offsetAt(x, y+f.top())
-}
-
 func (f *frame) ShowCursor(cv canvas) {
 	if f.cursorHidden {
 		return
@@ -347,25 +313,13 @@ func (f *frame) AdvanceSweep(dir int) {
 	f.buffer.SetDot(f.anchor, f.buffer.Offset(y, min(x, len(f.buffer.lines[y]))))
 }
 
-// Search selects the next match of word from the end of dot on, wrapping
-// around, and returns its line, or -1 if there is none.
-func (f *frame) Search(word string) int {
-	q, ok := Search(f.buffer, word, f.buffer.q1)
-	if !ok {
-		return -1
+// Show scrolls to show rune offset q, if it is not shown. A view that moves
+// away stops following what is written, so that it stays on q.
+func (f *frame) Show(q int) {
+	_, vrow := f.visualOf(q)
+	if top := f.top(); vrow == -1 || (vrow >= top && vrow < top+f.h) {
+		return
 	}
-	f.buffer.SetDot(q, q+len([]rune(word)))
-	line, _ := f.buffer.Pos(q)
-	return line
-}
-
-// showLine scrolls to show line n, if it is not shown, and reports whether
-// it did.
-func (f *frame) showLine(n int) bool {
-	vidx := slices.IndexFunc(f.lines(), func(vl VisualLine) bool { return vl.BufferLine == n })
-	if top := f.top(); vidx == -1 || (vidx >= top && vidx < top+f.h) {
-		return false
-	}
-	f.setTop(vidx - f.h/4)
-	return true
+	f.setTop(vrow - f.h/4)
+	f.autoScroll = false
 }

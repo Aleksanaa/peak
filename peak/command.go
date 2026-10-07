@@ -593,9 +593,8 @@ func (e *Editor) cmdLook(win *Window, cmd string) {
 		return
 	}
 
-	foundLine := target.body.Search(arg)
-	if foundLine != -1 {
-		target.body.ShowLineAt(foundLine)
+	if b := target.body.GetBuffer(); b.Search(arg) {
+		target.body.Show(b.q0)
 	}
 }
 
@@ -634,8 +633,7 @@ func (e *Editor) cmdEdit(col *Column, win *Window, cmd string) {
 	log.Apply(buf)
 	buf.SetDot(newDot.q0, newDot.q1)
 	if res.Cmd.cmdc == '\n' {
-		line, _ := buf.Pos(newDot.q0)
-		target.body.ShowLineAt(line)
+		target.body.Show(newDot.q0)
 	}
 
 	if pOut.Len() > 0 {

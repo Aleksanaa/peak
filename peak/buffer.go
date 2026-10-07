@@ -1,7 +1,9 @@
 package main
 
 import (
+	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/atotto/clipboard"
 )
@@ -136,11 +138,6 @@ func (b *Buffer) GetText() string {
 
 func (b *Buffer) bumpVersion() { b.version, b.nextVer = b.nextVer, b.nextVer+1 }
 
-func (b *Buffer) mutate(fn func()) {
-	b.saveState()
-	fn()
-}
-
 // ensureLSR rebuilds the line-start rune offset cache if stale.
 func (b *Buffer) ensureLSR() {
 	if b.lsruns != nil && b.lsrunsVer == b.version {
@@ -230,18 +227,17 @@ func (b *Buffer) replace(q0, q1 int, content string) int {
 // start of the line that takes its place (the previous line, when the last is
 // removed).
 func (b *Buffer) DeleteLine() {
-	b.mutate(func() {
-		y, _ := b.Pos(b.q0)
-		switch {
-		case len(b.lines) == 1:
-			b.replace(0, len(b.lines[0]), "")
-		case y < len(b.lines)-1:
-			b.replace(b.Offset(y, 0), b.Offset(y+1, 0), "")
-		default:
-			b.replace(b.Offset(y, 0)-1, b.Len(), "")
-			b.moveTo(b.Offset(y-1, 0))
-		}
-	})
+	b.saveState()
+	y, _ := b.Pos(b.q0)
+	switch {
+	case len(b.lines) == 1:
+		b.replace(0, len(b.lines[0]), "")
+	case y < len(b.lines)-1:
+		b.replace(b.Offset(y, 0), b.Offset(y+1, 0), "")
+	default:
+		b.replace(b.Offset(y, 0)-1, b.Len(), "")
+		b.moveTo(b.Offset(y-1, 0))
+	}
 }
 
 // DeleteWordBefore removes the word before dot, or the newline if dot starts
@@ -250,24 +246,26 @@ func (b *Buffer) DeleteWordBefore() {
 	if b.q0 == 0 {
 		return
 	}
-	b.mutate(func() {
-		start := b.q0 - 1
-		if y, x := b.Pos(b.q0); x > 0 {
-			line := b.lines[y]
-			for x > 0 && line[x-1] == ' ' {
-				x--
-			}
-			for x > 0 && line[x-1] != ' ' {
-				x--
-			}
-			start = b.Offset(y, x)
+	start := b.q0 - 1
+	if y, x := b.Pos(b.q0); x > 0 {
+		line := b.lines[y]
+		for x > 0 && line[x-1] == ' ' {
+			x--
 		}
-		b.replace(start, b.q0, "")
-	})
+		for x > 0 && line[x-1] != ' ' {
+			x--
+		}
+		start = b.Offset(y, x)
+	}
+	b.saveState()
+	b.replace(start, b.q0, "")
 }
 
 // Insert replaces dot with s.
-func (b *Buffer) Insert(s string) { b.mutate(func() { b.replace(b.q0, b.q1, s) }) }
+func (b *Buffer) Insert(s string) {
+	b.saveState()
+	b.replace(b.q0, b.q1, s)
+}
 
 func (b *Buffer) DeleteSelection() { b.Insert("") }
 
@@ -290,10 +288,9 @@ func (b *Buffer) Paste() {
 	if text == "" {
 		return
 	}
-	b.mutate(func() {
-		q0 := b.q0
-		b.SetDot(q0, b.replace(q0, b.q1, text))
-	})
+	b.saveState()
+	q0 := b.q0
+	b.SetDot(q0, b.replace(q0, b.q1, text))
 }
 
 // Backspace removes the selection, or else the rune before the cursor.
@@ -302,7 +299,8 @@ func (b *Buffer) Backspace() {
 	case b.q0 < b.q1:
 		b.DeleteSelection()
 	case b.q0 > 0:
-		b.mutate(func() { b.replace(b.q0-1, b.q0, "") })
+		b.saveState()
+		b.replace(b.q0-1, b.q0, "")
 	}
 }
 
@@ -312,14 +310,16 @@ func (b *Buffer) Delete() {
 	case b.q0 < b.q1:
 		b.DeleteSelection()
 	case b.q0 < b.Len():
-		b.mutate(func() { b.replace(b.q0, b.q0+1, "") })
+		b.saveState()
+		b.replace(b.q0, b.q0+1, "")
 	}
 }
 
 // ReplaceRangeRunes replaces the text [q0, q1), clamped to the buffer, with
 // runes.
 func (b *Buffer) ReplaceRangeRunes(q0, q1 int, runes []rune) {
-	b.mutate(func() { b.replaceRangeRunesNoSave(q0, q1, runes) })
+	b.saveState()
+	b.replaceRangeRunesNoSave(q0, q1, runes)
 }
 
 func (b *Buffer) replaceRangeRunesNoSave(q0, q1 int, runes []rune) {
@@ -372,10 +372,10 @@ func (b *Buffer) MoveWordLeft() {
 		return
 	}
 	line := b.lines[y]
-	for x > 0 && !IsWordChar(line[x-1]) {
+	for x > 0 && !wordChar(line[x-1]) {
 		x--
 	}
-	for x > 0 && IsWordChar(line[x-1]) {
+	for x > 0 && wordChar(line[x-1]) {
 		x--
 	}
 	b.moveTo(b.Offset(y, x))
@@ -388,11 +388,42 @@ func (b *Buffer) MoveWordRight() {
 		b.MoveRight()
 		return
 	}
-	for x < len(line) && IsWordChar(line[x]) {
+	for x < len(line) && wordChar(line[x]) {
 		x++
 	}
-	for x < len(line) && !IsWordChar(line[x]) {
+	for x < len(line) && !wordChar(line[x]) {
 		x++
 	}
 	b.moveTo(b.Offset(y, x))
+}
+
+// wordChar reports whether r is part of a word for the word motions.
+func wordChar(r rune) bool {
+	return r != 0 && !unicode.IsSpace(r)
+}
+
+// Search selects the next occurrence of word from the end of dot on,
+// wrapping around to the start, and reports whether there is one.
+func (b *Buffer) Search(word string) bool {
+	text, w := []rune(b.GetText()), []rune(word)
+	if len(w) == 0 {
+		return false
+	}
+	find := func(from, to int) int {
+		for i := from; i < to && i+len(w) <= len(text); i++ {
+			if slices.Equal(text[i:i+len(w)], w) {
+				return i
+			}
+		}
+		return -1
+	}
+	q := find(b.q1, len(text))
+	if q < 0 {
+		q = find(0, b.q1)
+	}
+	if q < 0 {
+		return false
+	}
+	b.SetDot(q, q+len(w))
+	return true
 }
