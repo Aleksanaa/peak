@@ -86,11 +86,8 @@ func TestWindowSaveStateCleanFile(t *testing.T) {
 	if ws.Dirty || ws.Body != "" {
 		t.Error("clean file should not set Dirty or Body")
 	}
-	if ws.Scroll != 1 {
-		t.Errorf("Scroll = %d, want 1", ws.Scroll)
-	}
-	if ws.CursorLine != 2 || ws.CursorCol != 3 {
-		t.Errorf("cursor = (%d,%d), want (2,3)", ws.CursorLine, ws.CursorCol)
+	if ws.Org != 6 || ws.Q0 != 15 || ws.Q1 != 15 {
+		t.Errorf("org, dot = %d, [%d, %d), want 6, [15, 15)", ws.Org, ws.Q0, ws.Q1)
 	}
 	if ws.TabWidth != 8 {
 		t.Errorf("TabWidth = %d, want 8", ws.TabWidth)
@@ -135,11 +132,8 @@ func TestWindowSaveStateDir(t *testing.T) {
 	if ws.Kind != "dir" {
 		t.Errorf("Kind = %q, want dir", ws.Kind)
 	}
-	if ws.Scroll != 5 {
-		t.Errorf("Scroll = %d, want 5", ws.Scroll)
-	}
-	if ws.CursorLine != 3 || ws.CursorCol != 0 {
-		t.Errorf("cursor = (%d,%d), want (3,0)", ws.CursorLine, ws.CursorCol)
+	if ws.Org != 35 || ws.Q0 != 21 || ws.Q1 != 21 {
+		t.Errorf("org, dot = %d, [%d, %d), want 35, [21, 21)", ws.Org, ws.Q0, ws.Q1)
 	}
 	if ws.Dirty || ws.Body != "" {
 		t.Error("dir should not set Dirty or Body")
@@ -148,16 +142,13 @@ func TestWindowSaveStateDir(t *testing.T) {
 
 func TestWindowSaveStateTerm(t *testing.T) {
 	_, col := newTestEditorWithColumn(t)
-	win := col.AddWindow(" /home/user/-bash Del ", "")
-	win.kind = WinTerm
-	win.explicitHeight = 15
+	win := addTerm(t, col, " /tmp/-sh Del ", "sh")
 
 	ws := win.saveState(col.h)
 
-	if ws.Kind != "term" {
-		t.Errorf("Kind = %q, want term", ws.Kind)
+	if ws.Kind != "term" || ws.TermCmd != "sh" {
+		t.Errorf("Kind, TermCmd = %q, %q, want term, sh", ws.Kind, ws.TermCmd)
 	}
-	// TermCmd comes from TermView.cmd; empty here since body is a stub TextView.
 	if ws.TermDir != win.GetDir() {
 		t.Errorf("TermDir = %q, want %q", ws.TermDir, win.GetDir())
 	}
@@ -176,9 +167,9 @@ func TestWindowSaveStateTag(t *testing.T) {
 	}
 }
 
-// ── Window.applyPreset ───────────────────────────────────────────────────────
+// ── Window.restore ───────────────────────────────────────────────────────
 
-func TestWindowApplyPresetDirty(t *testing.T) {
+func TestWindowRestoreDirty(t *testing.T) {
 	_, col := newTestEditorWithColumn(t)
 	win := col.AddWindow(" /tmp/new.go Get Put Del ", "")
 
@@ -188,7 +179,7 @@ func TestWindowApplyPresetDirty(t *testing.T) {
 		Dirty: true,
 		Body:  "dirty content\nline2",
 	}
-	win.applyPreset(ws)
+	win.restore(ws)
 
 	if win.kind != WinFile {
 		t.Errorf("kind = %v, want WinFile", win.kind)
@@ -204,26 +195,26 @@ func TestWindowApplyPresetDirty(t *testing.T) {
 	}
 }
 
-func TestWindowApplyPresetDirtyTabWidth(t *testing.T) {
+func TestWindowRestoreDirtyTabWidth(t *testing.T) {
 	_, col := newTestEditorWithColumn(t)
 	win := col.AddWindow(" /tmp/f.go Get Put Del ", "")
 	ws := &WindowSession{
 		Tag: " /tmp/f.go Get Put Del ", Kind: "file",
 		Dirty: true, Body: "x", TabWidth: 8,
 	}
-	win.applyPreset(ws)
+	win.restore(ws)
 	if win.bodyTextView().tabWidth != 8 {
 		t.Errorf("tabWidth = %d, want 8", win.bodyTextView().tabWidth)
 	}
 }
 
-func TestWindowApplyPresetCleanFile(t *testing.T) {
+func TestWindowRestoreCleanFile(t *testing.T) {
 	_, col := newTestEditorWithColumn(t)
 	path := writeTempFile(t, "hello from disk\n")
 	win := col.AddWindow(" "+path+" Get Put Del ", "")
 
 	ws := &WindowSession{Tag: " " + path + " Get Put Del ", Kind: "file"}
-	win.applyPreset(ws)
+	win.restore(ws)
 
 	if win.kind != WinFile {
 		t.Errorf("kind = %v, want WinFile", win.kind)
@@ -237,25 +228,25 @@ func TestWindowApplyPresetCleanFile(t *testing.T) {
 	}
 }
 
-func TestWindowApplyPresetCleanDir(t *testing.T) {
+func TestWindowRestoreCleanDir(t *testing.T) {
 	_, col := newTestEditorWithColumn(t)
 	dir := t.TempDir()
 	win := col.AddWindow(" "+dir+"/ Get Del ", "")
 
 	ws := &WindowSession{Tag: " " + dir + "/ Get Del ", Kind: "dir"}
-	win.applyPreset(ws)
+	win.restore(ws)
 
 	if win.kind != WinDir {
 		t.Errorf("kind = %v, want WinDir", win.kind)
 	}
 }
 
-func TestWindowApplyPresetFileNotFound(t *testing.T) {
+func TestWindowRestoreFileNotFound(t *testing.T) {
 	_, col := newTestEditorWithColumn(t)
 	win := col.AddWindow(" /nonexistent/path/file.go Get Put Del ", "")
 
 	ws := &WindowSession{Tag: " /nonexistent/path/file.go Get Put Del ", Kind: "file"}
-	win.applyPreset(ws) // must not panic
+	win.restore(ws) // must not panic
 
 	// window stays in default state: empty body, not modified
 	if win.IsDirty() {
@@ -263,7 +254,7 @@ func TestWindowApplyPresetFileNotFound(t *testing.T) {
 	}
 }
 
-func TestWindowApplyPresetTabWidthZeroNoOverride(t *testing.T) {
+func TestWindowRestoreTabWidthZeroNoOverride(t *testing.T) {
 	_, col := newTestEditorWithColumn(t)
 	win := col.AddWindow(" /tmp/f.go Get Put Del ", "")
 	win.bodyTextView().tabWidth = 2
@@ -271,72 +262,28 @@ func TestWindowApplyPresetTabWidthZeroNoOverride(t *testing.T) {
 		Tag: " /tmp/f.go Get Put Del ", Kind: "file",
 		Dirty: true, Body: "x", TabWidth: 0,
 	}
-	win.applyPreset(ws)
+	win.restore(ws)
 	if win.bodyTextView().tabWidth != 2 {
 		t.Errorf("TabWidth=0 should not override existing tabWidth, got %d", win.bodyTextView().tabWidth)
 	}
 }
 
-// ── Window.restoreViewState ──────────────────────────────────────────────────
-
-func makeTextWindow(t *testing.T, col *Column, body string) *Window {
-	t.Helper()
-	win := col.AddWindow(" /tmp/f.go Get Put Del ", body)
-	win.kind = WinFile
-	win.savedVersion = win.bodyTextView().buffer.version
-	col.Resize(col.rect) // computes layout
-	return win
-}
-
-func TestWindowRestoreViewState(t *testing.T) {
+// restore puts the view and dot back as rune offsets, which hold at any
+// width; where the text has since shrunk, at its end.
+func TestWindowRestorePlacesViewAndDot(t *testing.T) {
 	_, col := newTestEditorWithColumn(t)
-	lines := strings.Repeat("line of text\n", 30)
-	win := makeTextWindow(t, col, lines)
-
-	win.restoreViewState(WindowSession{Scroll: 5, CursorLine: 10, CursorCol: 3})
-
-	tv := win.bodyTextView()
-	if tv.top() != 5 {
-		t.Errorf("Scroll = %d, want 5", tv.top())
-	}
-	if line, col := tv.buffer.Pos(tv.buffer.q0); line != 10 || col != 3 {
-		t.Errorf("cursor = (%d,%d), want (10,3)", line, col)
-	}
-}
-
-func TestWindowRestoreViewStateCursorAtOrigin(t *testing.T) {
-	_, col := newTestEditorWithColumn(t)
-	win := makeTextWindow(t, col, strings.Repeat("x\n", 20))
-	// put cursor somewhere else first
-	win.bodyTextView().buffer.moveTo(win.bodyTextView().buffer.Offset(5, 5))
-
-	win.restoreViewState(WindowSession{CursorLine: 0, CursorCol: 0})
-
-	if q := win.bodyTextView().buffer.q0; q != 0 {
-		t.Errorf("cursor = %d, want 0", q)
-	}
-}
-
-func TestWindowRestoreViewStateCursorClamped(t *testing.T) {
-	_, col := newTestEditorWithColumn(t)
-	win := makeTextWindow(t, col, "only one line")
-
-	win.restoreViewState(WindowSession{CursorLine: 999, CursorCol: 999})
-
-	if b := win.bodyTextView().buffer; b.q0 != b.Len() {
-		t.Errorf("cursor = %d, want clamped to the end, %d", b.q0, b.Len())
-	}
-}
-
-func TestWindowRestoreViewStateScrollClamped(t *testing.T) {
-	_, col := newTestEditorWithColumn(t)
-	win := makeTextWindow(t, col, "short\n")
-
-	win.restoreViewState(WindowSession{Scroll: 99999})
-
-	tv := win.bodyTextView()
-	if tv.top() > max(0, len(tv.lines())-1) {
-		t.Errorf("Scroll not clamped: pos=%d, layout=%d", tv.top(), len(tv.lines()))
+	body := strings.Repeat("line of text\n", 30)
+	for _, tt := range []struct{ org, q0, q1, wantOrg, wantQ0, wantQ1 int }{
+		{65, 133, 140, 65, 133, 140},
+		{9999, 9999, 9999, len(body), len(body), len(body)},
+	} {
+		win := col.AddWindow(" /tmp/f.go Get Put Del ", "")
+		win.restore(&WindowSession{Kind: "file", Dirty: true, Body: body, Org: tt.org, Q0: tt.q0, Q1: tt.q1})
+		tv := win.bodyTextView()
+		if tv.org != tt.wantOrg || tv.buffer.q0 != tt.wantQ0 || tv.buffer.q1 != tt.wantQ1 {
+			t.Errorf("restored org, dot = %d, [%d, %d), want %d, [%d, %d)",
+				tv.org, tv.buffer.q0, tv.buffer.q1, tt.wantOrg, tt.wantQ0, tt.wantQ1)
+		}
 	}
 }
 
@@ -517,7 +464,7 @@ func TestEditorRoundTripCleanFile(t *testing.T) {
 	e, col := newTestEditorWithColumn(t)
 	col.tag.buffer.SetText(" Custom Col Tag ")
 	win := addFileWindow(t, col, " "+path+" Get Put Del ", "")
-	win.bodyTextView().buffer.moveTo(win.bodyTextView().buffer.Offset(0, 3))
+	win.bodyTextView().buffer.SetDot(6, 10)
 
 	dest := filepath.Join(t.TempDir(), "session.json")
 	if err := e.Dump(dest); err != nil {
@@ -547,6 +494,9 @@ func TestEditorRoundTripCleanFile(t *testing.T) {
 	}
 	if w2.IsDirty() {
 		t.Error("restored clean file should not be dirty")
+	}
+	if b := w2.bodyTextView().buffer; b.q0 != 6 || b.q1 != 10 {
+		t.Errorf("dot = [%d, %d), want [6, 10)", b.q0, b.q1)
 	}
 }
 

@@ -11,7 +11,7 @@ import (
 	"github.com/aleksana/peak/internal/session"
 )
 
-const sessionVersion = 1
+const sessionVersion = 2
 
 type Session struct {
 	Version    int
@@ -27,17 +27,16 @@ type ColumnSession struct {
 }
 
 type WindowSession struct {
-	HeightPct  int
-	Kind       string // "file", "dir", "term"
-	Tag        string
-	Body       string // only for dirty WinFile
-	Dirty      bool
-	Scroll     int
-	CursorLine int
-	CursorCol  int
-	TabWidth   int
-	TermCmd    string
-	TermDir    string
+	HeightPct int
+	Kind      string // "file", "dir", "term"
+	Tag       string
+	Body      string // only for dirty WinFile
+	Dirty     bool
+	Org       int // the rune offset the view starts at
+	Q0, Q1    int // dot
+	TabWidth  int
+	TermCmd   string
+	TermDir   string
 }
 
 func defaultSessionFile() string {
@@ -51,10 +50,12 @@ func defaultSessionFile() string {
 //
 //	peak-session-v<N> / <currentDir> / <globalTag>
 //	c <widthPct>         → <colTag>
-//	f <h> <sc> <cl> <cc> <tw>          → <winTag>
-//	u <h> <sc> <cl> <cc> <tw> <blen>   → <winTag> → <body bytes>
-//	r <h> <sc> <cl> <cc>               → <winTag>
-//	t <h>                              → <termCmd> → <termDir> → <winTag>
+//	f <h> <org> <q0> <q1> <tw>          → <winTag>
+//	u <h> <org> <q0> <q1> <tw> <blen>   → <winTag> → <body bytes>
+//	r <h> <org> <q0> <q1>               → <winTag>
+//	t <h>                               → <termCmd> → <termDir> → <winTag>
+//
+// Positions are rune offsets, which hold at any width.
 func encode(s Session) []byte {
 	b := fmt.Appendf(nil, "peak-session-v%d\n%s\n%s\n", s.Version, s.CurrentDir, s.GlobalTag)
 	for _, cs := range s.Columns {
@@ -63,13 +64,13 @@ func encode(s Session) []byte {
 			switch ws.Kind {
 			case "file":
 				if ws.Dirty {
-					b = fmt.Appendf(b, "u %d %d %d %d %d %d\n%s\n", ws.HeightPct, ws.Scroll, ws.CursorLine, ws.CursorCol, ws.TabWidth, len(ws.Body), ws.Tag)
+					b = fmt.Appendf(b, "u %d %d %d %d %d %d\n%s\n", ws.HeightPct, ws.Org, ws.Q0, ws.Q1, ws.TabWidth, len(ws.Body), ws.Tag)
 					b = append(b, ws.Body...)
 				} else {
-					b = fmt.Appendf(b, "f %d %d %d %d %d\n%s\n", ws.HeightPct, ws.Scroll, ws.CursorLine, ws.CursorCol, ws.TabWidth, ws.Tag)
+					b = fmt.Appendf(b, "f %d %d %d %d %d\n%s\n", ws.HeightPct, ws.Org, ws.Q0, ws.Q1, ws.TabWidth, ws.Tag)
 				}
 			case "dir":
-				b = fmt.Appendf(b, "r %d %d %d %d\n%s\n", ws.HeightPct, ws.Scroll, ws.CursorLine, ws.CursorCol, ws.Tag)
+				b = fmt.Appendf(b, "r %d %d %d %d\n%s\n", ws.HeightPct, ws.Org, ws.Q0, ws.Q1, ws.Tag)
 			case "term":
 				b = fmt.Appendf(b, "t %d\n%s\n%s\n%s\n", ws.HeightPct, ws.TermCmd, ws.TermDir, ws.Tag)
 			}
@@ -137,7 +138,7 @@ func decode(data []byte) (Session, error) {
 				continue
 			}
 			curCol.Windows = append(curCol.Windows, WindowSession{
-				Kind: "file", HeightPct: n[0], Scroll: n[1], CursorLine: n[2], CursorCol: n[3], TabWidth: n[4],
+				Kind: "file", HeightPct: n[0], Org: n[1], Q0: n[2], Q1: n[3], TabWidth: n[4],
 				Tag: line(),
 			})
 		case 'u':
@@ -146,7 +147,7 @@ func decode(data []byte) (Session, error) {
 			}
 			tag := line()
 			curCol.Windows = append(curCol.Windows, WindowSession{
-				Kind: "file", HeightPct: n[0], Scroll: n[1], CursorLine: n[2], CursorCol: n[3], TabWidth: n[4],
+				Kind: "file", HeightPct: n[0], Org: n[1], Q0: n[2], Q1: n[3], TabWidth: n[4],
 				Dirty: true, Body: raw(n[5]), Tag: tag,
 			})
 		case 'r':
@@ -154,7 +155,7 @@ func decode(data []byte) (Session, error) {
 				continue
 			}
 			curCol.Windows = append(curCol.Windows, WindowSession{
-				Kind: "dir", HeightPct: n[0], Scroll: n[1], CursorLine: n[2], CursorCol: n[3],
+				Kind: "dir", HeightPct: n[0], Org: n[1], Q0: n[2], Q1: n[3],
 				Tag: line(),
 			})
 		case 't':
@@ -190,34 +191,30 @@ func (w *Window) saveState(colH int) WindowSession {
 	}
 	switch w.kind {
 	case WinFile:
+		tv := w.bodyTextView()
 		ws.Kind = "file"
-		if tv := w.bodyTextView(); tv != nil {
-			ws.Scroll = tv.top()
-			ws.CursorLine, ws.CursorCol = tv.buffer.Pos(tv.buffer.q0)
-			ws.TabWidth = tv.tabWidth
-			if w.IsDirty() {
-				ws.Dirty = true
-				ws.Body = tv.buffer.GetText()
-			}
+		ws.Org, ws.Q0, ws.Q1 = tv.org, tv.buffer.q0, tv.buffer.q1
+		ws.TabWidth = tv.tabWidth
+		if w.IsDirty() {
+			ws.Dirty = true
+			ws.Body = tv.buffer.GetText()
 		}
 	case WinDir:
+		tv := w.bodyTextView()
 		ws.Kind = "dir"
-		if tv := w.bodyTextView(); tv != nil {
-			ws.Scroll = tv.top()
-			ws.CursorLine, ws.CursorCol = tv.buffer.Pos(tv.buffer.q0)
-		}
+		ws.Org, ws.Q0, ws.Q1 = tv.org, tv.buffer.q0, tv.buffer.q1
 	case WinTerm:
 		ws.Kind = "term"
-		if tv, ok := w.body.(*TermView); ok {
-			ws.TermCmd = tv.cmd
-		}
+		ws.TermCmd = w.body.(*TermView).cmd
 		ws.TermDir = w.GetDir()
 	}
 	return ws
 }
 
-// applyPreset loads content into w from ws.
-func (w *Window) applyPreset(ws *WindowSession) {
+// restore loads w's text as ws says, the saved body or the file its tag
+// names, and puts the view and dot back where they were, as far as the text
+// still reaches.
+func (w *Window) restore(ws *WindowSession) {
 	filename, _ := quote.Cut(ws.Tag)
 	tv := w.bodyTextView()
 	if ws.TabWidth > 0 {
@@ -233,20 +230,9 @@ func (w *Window) applyPreset(ws *WindowSession) {
 			w.loaded(isDir, writable)
 		}
 	}
-}
-
-// restoreViewState sets scroll and cursor once Resize has set the final width.
-func (w *Window) restoreViewState(ws WindowSession) {
-	tv := w.bodyTextView()
-	if tv == nil {
-		return
-	}
-	if ws.Scroll > 0 {
-		tv.setTop(ws.Scroll)
-	}
-	line := max(0, min(ws.CursorLine, len(tv.buffer.lines)-1))
-	col := max(0, min(ws.CursorCol, len(tv.buffer.lines[line])))
-	tv.buffer.moveTo(tv.buffer.Offset(line, col))
+	n := tv.buffer.Len()
+	tv.org = min(ws.Org, n)
+	tv.buffer.SetDot(min(ws.Q0, n), min(ws.Q1, n))
 }
 
 func (e *Editor) Dump(file string) error {
@@ -277,46 +263,24 @@ func (e *Editor) Load(file string) error {
 		return err
 	}
 
-	for len(e.columns) > 0 {
-		col := e.columns[0]
-		for len(col.windows) > 0 {
-			e.ninep.UmountWindow(col.windows[0])
-			col.windows[0].Close()
-			col.windows = col.windows[1:]
-		}
-		e.columns = e.columns[1:]
+	for _, win := range e.allWindows() {
+		e.RemoveWindow(win)
 	}
-	e.active = nil
-	e.focusedView = e.tag
+	e.columns, e.active, e.focusedView = nil, nil, e.tag
 
 	if s.CurrentDir != "" {
 		os.Chdir(s.CurrentDir)
 	}
 	e.tag.buffer.SetText(s.GlobalTag)
 
-	// Pass 1: create columns so e.resize() can compute their dimensions.
+	// A column is as high as the editor whatever its width, so its windows
+	// take their heights at once; resize then lays everything out.
 	for _, cs := range s.Columns {
 		w := max(5, cs.WidthPct*e.w/100)
 		col := NewColumn(0, 1, w, e.h-1, e)
 		col.explicitWidth = w
 		col.tag.buffer.SetText(cs.Tag)
 		e.columns = append(e.columns, col)
-	}
-	if len(e.columns) == 0 {
-		col := NewColumn(0, 1, e.w, e.h-1, e)
-		col.explicitWidth = e.w
-		e.columns = append(e.columns, col)
-	}
-	e.resize()
-
-	// Pass 2: add windows now that col.h is set for height calculation.
-	type pending struct {
-		win *Window
-		ws  WindowSession
-	}
-	var deferred []pending
-	for i, cs := range s.Columns {
-		col := e.columns[i]
 		for _, ws := range cs.Windows {
 			var win *Window
 			if ws.Kind == "term" {
@@ -329,25 +293,21 @@ func (e *Editor) Load(file string) error {
 				}
 			} else {
 				win = col.AddWindow(ws.Tag, "")
-				win.applyPreset(&ws)
+				win.restore(&ws)
 			}
 			if ws.HeightPct > 0 {
 				win.explicitHeight = max(win.MinSize(), ws.HeightPct*col.h/100)
 			}
-			deferred = append(deferred, pending{win, ws})
 		}
 	}
-
-	for _, col := range e.columns {
-		col.Resize(col.rect)
+	if len(e.columns) == 0 {
+		col := NewColumn(0, 1, e.w, e.h-1, e)
+		col.explicitWidth = e.w
+		e.columns = append(e.columns, col)
 	}
-	// Restore scroll and cursor after Resize: the scroll saved is a visual
-	// line, which depends on the window's final width.
-	for _, p := range deferred {
-		p.win.restoreViewState(p.ws)
-	}
-	if len(e.columns) > 0 && len(e.columns[0].windows) > 0 {
-		e.ActivateWindow(e.columns[0].windows[0])
+	e.resize()
+	if first := e.columns[0]; len(first.windows) > 0 {
+		e.ActivateWindow(first.windows[0])
 	}
 	return nil
 }
