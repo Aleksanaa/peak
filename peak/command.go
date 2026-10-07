@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"slices"
@@ -599,46 +598,8 @@ func (e *Editor) cmdLook(win *Window, cmd string) {
 }
 
 func (e *Editor) cmdEdit(col *Column, win *Window, cmd string) {
-	target := e.getTargetWindow(win)
-	if target == nil {
-		return
-	}
-
-	arg := e.argText(target, cmd)
-	if arg == "" {
-		return
-	}
-
-	var pOut bytes.Buffer
-	res, err := SregxCompile(arg, &pOut)
-	if err != nil {
-		e.showError(col, target, err.Error())
-		return
-	}
-
-	buf := target.body.GetBuffer()
-	dot := Range{buf.q0, buf.q1}
-
-	log := &Elog{}
-	ctx := &Context{Editor: e, Column: col, Window: target, Buffer: buf, Out: &pOut, Log: log}
-	newDot, ok := res.Cmd.Execute(ctx, dot)
-	if !ok {
-		return
-	}
-
-	if target.kind == WinTerm && len(log.ops) > 0 {
-		e.showError(col, target, "Edit: text modifications not allowed on terminal windows")
-		return
-	}
-	log.Apply(buf)
-	buf.SetDot(newDot.q0, newDot.q1)
-	if res.Cmd.cmdc == '\n' {
-		target.body.Show(newDot.q0)
-	}
-
-	if pOut.Len() > 0 {
-		e.showError(col, target, pOut.String())
-	}
+	win = e.getTargetWindow(win)
+	e.Edit(col, win, e.argText(win, cmd))
 }
 
 // errorWindow returns the +Errors window of win's directory, or of peak's

@@ -319,10 +319,6 @@ func (b *Buffer) Delete() {
 // runes.
 func (b *Buffer) ReplaceRangeRunes(q0, q1 int, runes []rune) {
 	b.saveState()
-	b.replaceRangeRunesNoSave(q0, q1, runes)
-}
-
-func (b *Buffer) replaceRangeRunesNoSave(q0, q1 int, runes []rune) {
 	n := b.Len()
 	q0 = max(0, min(q0, n))
 	q1 = max(q0, min(q1, n))
