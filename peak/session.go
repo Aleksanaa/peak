@@ -14,7 +14,6 @@ import (
 const sessionVersion = 2
 
 type Session struct {
-	Version    int
 	CurrentDir string
 	GlobalTag  string
 	Columns    []ColumnSession
@@ -28,7 +27,7 @@ type ColumnSession struct {
 
 type WindowSession struct {
 	HeightPct int
-	Kind      string // "file", "dir", "term"
+	Kind      WinKind // WinFile, WinDir or WinTerm
 	Tag       string
 	Body      string // only for dirty WinFile
 	Dirty     bool
@@ -57,21 +56,21 @@ func defaultSessionFile() string {
 //
 // Positions are rune offsets, which hold at any width.
 func encode(s Session) []byte {
-	b := fmt.Appendf(nil, "peak-session-v%d\n%s\n%s\n", s.Version, s.CurrentDir, s.GlobalTag)
+	b := fmt.Appendf(nil, "peak-session-v%d\n%s\n%s\n", sessionVersion, s.CurrentDir, s.GlobalTag)
 	for _, cs := range s.Columns {
 		b = fmt.Appendf(b, "c %d\n%s\n", cs.WidthPct, cs.Tag)
 		for _, ws := range cs.Windows {
 			switch ws.Kind {
-			case "file":
+			case WinFile:
 				if ws.Dirty {
 					b = fmt.Appendf(b, "u %d %d %d %d %d %d\n%s\n", ws.HeightPct, ws.Org, ws.Q0, ws.Q1, ws.TabWidth, len(ws.Body), ws.Tag)
 					b = append(b, ws.Body...)
 				} else {
 					b = fmt.Appendf(b, "f %d %d %d %d %d\n%s\n", ws.HeightPct, ws.Org, ws.Q0, ws.Q1, ws.TabWidth, ws.Tag)
 				}
-			case "dir":
+			case WinDir:
 				b = fmt.Appendf(b, "r %d %d %d %d\n%s\n", ws.HeightPct, ws.Org, ws.Q0, ws.Q1, ws.Tag)
-			case "term":
+			case WinTerm:
 				b = fmt.Appendf(b, "t %d\n%s\n%s\n%s\n", ws.HeightPct, ws.TermCmd, ws.TermDir, ws.Tag)
 			}
 		}
@@ -115,7 +114,6 @@ func decode(data []byte) (Session, error) {
 	if magic := line(); magic != fmt.Sprintf("peak-session-v%d", sessionVersion) {
 		return s, fmt.Errorf("unknown session format %q", magic)
 	}
-	s.Version = sessionVersion
 	s.CurrentDir = line()
 	s.GlobalTag = line()
 
@@ -138,7 +136,7 @@ func decode(data []byte) (Session, error) {
 				continue
 			}
 			curCol.Windows = append(curCol.Windows, WindowSession{
-				Kind: "file", HeightPct: n[0], Org: n[1], Q0: n[2], Q1: n[3], TabWidth: n[4],
+				Kind: WinFile, HeightPct: n[0], Org: n[1], Q0: n[2], Q1: n[3], TabWidth: n[4],
 				Tag: line(),
 			})
 		case 'u':
@@ -147,7 +145,7 @@ func decode(data []byte) (Session, error) {
 			}
 			tag := line()
 			curCol.Windows = append(curCol.Windows, WindowSession{
-				Kind: "file", HeightPct: n[0], Org: n[1], Q0: n[2], Q1: n[3], TabWidth: n[4],
+				Kind: WinFile, HeightPct: n[0], Org: n[1], Q0: n[2], Q1: n[3], TabWidth: n[4],
 				Dirty: true, Body: raw(n[5]), Tag: tag,
 			})
 		case 'r':
@@ -155,7 +153,7 @@ func decode(data []byte) (Session, error) {
 				continue
 			}
 			curCol.Windows = append(curCol.Windows, WindowSession{
-				Kind: "dir", HeightPct: n[0], Org: n[1], Q0: n[2], Q1: n[3],
+				Kind: WinDir, HeightPct: n[0], Org: n[1], Q0: n[2], Q1: n[3],
 				Tag: line(),
 			})
 		case 't':
@@ -164,7 +162,7 @@ func decode(data []byte) (Session, error) {
 			}
 			cmd, dir, tag := line(), line(), line()
 			curCol.Windows = append(curCol.Windows, WindowSession{
-				Kind: "term", HeightPct: n[0], TermCmd: cmd, TermDir: dir, Tag: tag,
+				Kind: WinTerm, HeightPct: n[0], TermCmd: cmd, TermDir: dir, Tag: tag,
 			})
 		}
 	}
@@ -187,12 +185,12 @@ func (c *Column) saveState(totalW int) ColumnSession {
 func (w *Window) saveState(colH int) WindowSession {
 	ws := WindowSession{
 		HeightPct: 100 * w.explicitHeight / colH,
+		Kind:      w.kind,
 		Tag:       w.tag.buffer.GetText(),
 	}
 	switch w.kind {
 	case WinFile:
 		tv := w.bodyTextView()
-		ws.Kind = "file"
 		ws.Org, ws.Q0, ws.Q1 = tv.org, tv.buffer.q0, tv.buffer.q1
 		ws.TabWidth = tv.tabWidth
 		if w.IsDirty() {
@@ -201,10 +199,8 @@ func (w *Window) saveState(colH int) WindowSession {
 		}
 	case WinDir:
 		tv := w.bodyTextView()
-		ws.Kind = "dir"
 		ws.Org, ws.Q0, ws.Q1 = tv.org, tv.buffer.q0, tv.buffer.q1
 	case WinTerm:
-		ws.Kind = "term"
 		ws.TermCmd = w.body.(*TermView).cmd
 		ws.TermDir = w.GetDir()
 	}
@@ -240,7 +236,6 @@ func (e *Editor) Dump(file string) error {
 		file = defaultSessionFile()
 	}
 	s := Session{
-		Version:    sessionVersion,
 		CurrentDir: getwd(),
 		GlobalTag:  e.tag.buffer.GetText(),
 	}
@@ -283,7 +278,7 @@ func (e *Editor) Load(file string) error {
 		e.columns = append(e.columns, col)
 		for _, ws := range cs.Windows {
 			var win *Window
-			if ws.Kind == "term" {
+			if ws.Kind == WinTerm {
 				sess, err := session.NewLocal(ws.TermCmd, ws.TermDir)
 				if err == nil {
 					win, err = col.AddTermWindow(ws.Tag, ws.TermCmd, sess)

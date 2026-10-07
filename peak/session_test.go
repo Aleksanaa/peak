@@ -80,8 +80,8 @@ func TestWindowSaveStateCleanFile(t *testing.T) {
 
 	ws := win.saveState(col.h)
 
-	if ws.Kind != "file" {
-		t.Errorf("Kind = %q, want file", ws.Kind)
+	if ws.Kind != WinFile {
+		t.Errorf("Kind = %v, want WinFile", ws.Kind)
 	}
 	if ws.Dirty || ws.Body != "" {
 		t.Error("clean file should not set Dirty or Body")
@@ -108,8 +108,8 @@ func TestWindowSaveStateDirtyFile(t *testing.T) {
 
 	ws := win.saveState(col.h)
 
-	if ws.Kind != "file" {
-		t.Errorf("Kind = %q, want file", ws.Kind)
+	if ws.Kind != WinFile {
+		t.Errorf("Kind = %v, want WinFile", ws.Kind)
 	}
 	if !ws.Dirty {
 		t.Error("expected Dirty=true")
@@ -129,8 +129,8 @@ func TestWindowSaveStateDir(t *testing.T) {
 
 	ws := win.saveState(col.h)
 
-	if ws.Kind != "dir" {
-		t.Errorf("Kind = %q, want dir", ws.Kind)
+	if ws.Kind != WinDir {
+		t.Errorf("Kind = %v, want WinDir", ws.Kind)
 	}
 	if ws.Org != 35 || ws.Q0 != 21 || ws.Q1 != 21 {
 		t.Errorf("org, dot = %d, [%d, %d), want 35, [21, 21)", ws.Org, ws.Q0, ws.Q1)
@@ -146,8 +146,8 @@ func TestWindowSaveStateTerm(t *testing.T) {
 
 	ws := win.saveState(col.h)
 
-	if ws.Kind != "term" || ws.TermCmd != "sh" {
-		t.Errorf("Kind, TermCmd = %q, %q, want term, sh", ws.Kind, ws.TermCmd)
+	if ws.Kind != WinTerm || ws.TermCmd != "sh" {
+		t.Errorf("Kind, TermCmd = %v, %q, want WinTerm, sh", ws.Kind, ws.TermCmd)
 	}
 	if ws.TermDir != win.GetDir() {
 		t.Errorf("TermDir = %q, want %q", ws.TermDir, win.GetDir())
@@ -175,7 +175,7 @@ func TestWindowRestoreDirty(t *testing.T) {
 
 	ws := &WindowSession{
 		Tag:   " /tmp/new.go Get Put Del ",
-		Kind:  "file",
+		Kind:  WinFile,
 		Dirty: true,
 		Body:  "dirty content\nline2",
 	}
@@ -199,7 +199,7 @@ func TestWindowRestoreDirtyTabWidth(t *testing.T) {
 	_, col := newTestEditorWithColumn(t)
 	win := col.AddWindow(" /tmp/f.go Get Put Del ", "")
 	ws := &WindowSession{
-		Tag: " /tmp/f.go Get Put Del ", Kind: "file",
+		Tag: " /tmp/f.go Get Put Del ", Kind: WinFile,
 		Dirty: true, Body: "x", TabWidth: 8,
 	}
 	win.restore(ws)
@@ -213,7 +213,7 @@ func TestWindowRestoreCleanFile(t *testing.T) {
 	path := writeTempFile(t, "hello from disk\n")
 	win := col.AddWindow(" "+path+" Get Put Del ", "")
 
-	ws := &WindowSession{Tag: " " + path + " Get Put Del ", Kind: "file"}
+	ws := &WindowSession{Tag: " " + path + " Get Put Del ", Kind: WinFile}
 	win.restore(ws)
 
 	if win.kind != WinFile {
@@ -233,7 +233,7 @@ func TestWindowRestoreCleanDir(t *testing.T) {
 	dir := t.TempDir()
 	win := col.AddWindow(" "+dir+"/ Get Del ", "")
 
-	ws := &WindowSession{Tag: " " + dir + "/ Get Del ", Kind: "dir"}
+	ws := &WindowSession{Tag: " " + dir + "/ Get Del ", Kind: WinDir}
 	win.restore(ws)
 
 	if win.kind != WinDir {
@@ -245,7 +245,7 @@ func TestWindowRestoreFileNotFound(t *testing.T) {
 	_, col := newTestEditorWithColumn(t)
 	win := col.AddWindow(" /nonexistent/path/file.go Get Put Del ", "")
 
-	ws := &WindowSession{Tag: " /nonexistent/path/file.go Get Put Del ", Kind: "file"}
+	ws := &WindowSession{Tag: " /nonexistent/path/file.go Get Put Del ", Kind: WinFile}
 	win.restore(ws) // must not panic
 
 	// window stays in default state: empty body, not modified
@@ -259,7 +259,7 @@ func TestWindowRestoreTabWidthZeroNoOverride(t *testing.T) {
 	win := col.AddWindow(" /tmp/f.go Get Put Del ", "")
 	win.bodyTextView().tabWidth = 2
 	ws := &WindowSession{
-		Tag: " /tmp/f.go Get Put Del ", Kind: "file",
+		Tag: " /tmp/f.go Get Put Del ", Kind: WinFile,
 		Dirty: true, Body: "x", TabWidth: 0,
 	}
 	win.restore(ws)
@@ -278,7 +278,7 @@ func TestWindowRestorePlacesViewAndDot(t *testing.T) {
 		{9999, 9999, 9999, len(body), len(body), len(body)},
 	} {
 		win := col.AddWindow(" /tmp/f.go Get Put Del ", "")
-		win.restore(&WindowSession{Kind: "file", Dirty: true, Body: body, Org: tt.org, Q0: tt.q0, Q1: tt.q1})
+		win.restore(&WindowSession{Kind: WinFile, Dirty: true, Body: body, Org: tt.org, Q0: tt.q0, Q1: tt.q1})
 		tv := win.bodyTextView()
 		if tv.org != tt.wantOrg || tv.buffer.q0 != tt.wantQ0 || tv.buffer.q1 != tt.wantQ1 {
 			t.Errorf("restored org, dot = %d, [%d, %d), want %d, [%d, %d)",
@@ -304,9 +304,6 @@ func TestEditorDumpJSON(t *testing.T) {
 	s, err2 := decode(data)
 	if err2 != nil {
 		t.Fatalf("decode: %v", err2)
-	}
-	if s.Version != sessionVersion {
-		t.Errorf("Version = %d, want %d", s.Version, sessionVersion)
 	}
 	if s.GlobalTag != " NewCol Help Dump Exit " {
 		t.Errorf("GlobalTag = %q", s.GlobalTag)
@@ -434,7 +431,7 @@ func TestEditorLoadClearsExistingColumns(t *testing.T) {
 
 func TestEditorLoadFallbackColumn(t *testing.T) {
 	e, _ := setupTest(t, 200, 50)
-	f := writeTempFile(t, string(encode(Session{Version: sessionVersion, CurrentDir: "/tmp", GlobalTag: " tag "})))
+	f := writeTempFile(t, string(encode(Session{CurrentDir: "/tmp", GlobalTag: " tag "})))
 
 	e.Load(f)
 
