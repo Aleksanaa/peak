@@ -73,14 +73,14 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 		e.cmdUmount(win, cmd)
 	case "Dump":
 		if err := e.Dump(e.argName(win, cmd)); err != nil {
-			e.showError(nil, win, "", "Dump: "+err.Error())
+			e.showError(nil, win, "Dump: "+err.Error())
 		}
 	case "Load":
 		if !e.warnDirty(nil, win, e.allWindows()) {
 			return false
 		}
 		if err := e.Load(e.argName(win, cmd)); err != nil {
-			e.showError(nil, win, "", "Load: "+err.Error())
+			e.showError(nil, win, "Load: "+err.Error())
 		}
 	case "Help":
 		e.Open(win, "/peak/doc/README.md")
@@ -95,25 +95,25 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 func (e *Editor) cmdMount(win *Window, cmd string) {
 	args := e.argFields(win, cmd)
 	if len(args) < 2 {
-		e.showError(nil, win, "", "Usage: Mount socket path")
+		e.showError(nil, win, "Usage: Mount socket path")
 		return
 	}
 	socket, path := args[0], args[1]
 	if _, err := e.ninep.Mount(socket, path); err != nil {
-		e.showError(nil, win, "", "Mount failed: "+err.Error())
+		e.showError(nil, win, "Mount failed: "+err.Error())
 	}
 }
 
 func (e *Editor) cmdBind(win *Window, cmd string) {
 	args := e.argFields(win, cmd)
 	if len(args) < 2 {
-		e.showError(nil, win, "", "Usage: Bind src dest")
+		e.showError(nil, win, "Usage: Bind src dest")
 		return
 	}
 	src, dest := args[0], args[1]
 	err := e.ninep.Bind(src, dest)
 	if err != nil {
-		e.showError(nil, win, "", "Bind failed: "+err.Error())
+		e.showError(nil, win, "Bind failed: "+err.Error())
 	}
 }
 
@@ -202,7 +202,7 @@ func (e *Editor) OpenLine(win *Window, path string, line, col int, binaryFallbac
 				} else if fallback != nil && os.IsNotExist(err) {
 					fallback()
 				} else {
-					e.showError(nil, win, "", full+": "+normalizeError(err))
+					e.showError(nil, win, full+": "+normalizeError(err))
 				}
 			}
 		}
@@ -276,7 +276,7 @@ func (e *Editor) cmdGet(win *Window, cmd string) {
 					e.ninep.BroadcastGet(target)
 				}
 			} else {
-				e.showError(target.parent, target, "", path+": "+normalizeError(err))
+				e.showError(target.parent, target, path+": "+normalizeError(err))
 			}
 		}
 	}()
@@ -303,7 +303,7 @@ func (e *Editor) cmdPut(win *Window, cmd string) {
 			err := writeFile(path, []byte(text))
 			e.callCh <- func() {
 				if err != nil {
-					e.showError(target.parent, target, "", normalizeError(err))
+					e.showError(target.parent, target, normalizeError(err))
 				} else {
 					target.writable = true
 					target.markSaved(version)
@@ -407,7 +407,7 @@ func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {
 					}
 					if _, werr := newF.WriteAt([]byte(payload), 0); werr != nil {
 						e.callCh <- func() {
-							e.showError(targetCol, win, "", "remote session: "+werr.Error())
+							e.showError(targetCol, win, "remote session: "+werr.Error())
 						}
 						return
 					}
@@ -432,7 +432,7 @@ func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {
 	if localDir, ok := ns.ResolveLocalPath(dir); ok {
 		dir = localDir
 	} else {
-		e.showError(targetCol, win, "", dir+": don't know how to open terminal window")
+		e.showError(targetCol, win, dir+": don't know how to open terminal window")
 		return
 	}
 	var name string
@@ -449,7 +449,7 @@ func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {
 		newWin, err = targetCol.AddTermWindow(tagText(filepath.Join(dir, "-"+name), "Zerox Del"), arg, sess)
 	}
 	if err != nil {
-		e.showError(targetCol, win, "", err.Error())
+		e.showError(targetCol, win, err.Error())
 		return
 	}
 	e.showWindow(newWin)
@@ -462,7 +462,7 @@ func (e *Editor) openRemoteTermWindow(targetCol *Column, win *Window, mountPath,
 	ioRead, err := ns.OpenFile(ioPath, os.O_RDONLY, 0)
 	if err != nil {
 		e.callCh <- func() {
-			e.showError(targetCol, win, "", "remote io: "+err.Error())
+			e.showError(targetCol, win, "remote io: "+err.Error())
 		}
 		return
 	}
@@ -470,7 +470,7 @@ func (e *Editor) openRemoteTermWindow(targetCol *Column, win *Window, mountPath,
 	if err != nil {
 		ioRead.Close()
 		e.callCh <- func() {
-			e.showError(targetCol, win, "", "remote io: "+err.Error())
+			e.showError(targetCol, win, "remote io: "+err.Error())
 		}
 		return
 	}
@@ -479,7 +479,7 @@ func (e *Editor) openRemoteTermWindow(targetCol *Column, win *Window, mountPath,
 		ioRead.Close()
 		ioWrite.Close()
 		e.callCh <- func() {
-			e.showError(targetCol, win, "", "remote ctl: "+err.Error())
+			e.showError(targetCol, win, "remote ctl: "+err.Error())
 		}
 		return
 	}
@@ -490,7 +490,7 @@ func (e *Editor) openRemoteTermWindow(targetCol *Column, win *Window, mountPath,
 	e.Call(func() {
 		newWin, err := targetCol.AddTermWindow(tagText(title, "Zerox Del"), "", sess)
 		if err != nil {
-			e.showError(targetCol, win, "", err.Error())
+			e.showError(targetCol, win, err.Error())
 			return
 		}
 		e.showWindow(newWin)
@@ -550,7 +550,7 @@ func (e *Editor) cmdTab(col *Column, win *Window, cmd string) {
 		tv := target.bodyTextView()
 		if tv != nil {
 			msg := target.GetFilename() + ": Tab " + strconv.Itoa(tv.tabWidth) + "\n"
-			e.showError(col, target, "", msg)
+			e.showError(col, target, msg)
 		}
 		return
 	}
@@ -612,7 +612,7 @@ func (e *Editor) cmdEdit(col *Column, win *Window, cmd string) {
 	var pOut bytes.Buffer
 	res, err := SregxCompile(arg, &pOut)
 	if err != nil {
-		e.showError(col, target, "", err.Error())
+		e.showError(col, target, err.Error())
 		return
 	}
 
@@ -627,7 +627,7 @@ func (e *Editor) cmdEdit(col *Column, win *Window, cmd string) {
 	}
 
 	if target.kind == WinTerm && len(log.ops) > 0 {
-		e.showError(col, target, "", "Edit: text modifications not allowed on terminal windows")
+		e.showError(col, target, "Edit: text modifications not allowed on terminal windows")
 		return
 	}
 	log.Apply(buf)
@@ -637,31 +637,28 @@ func (e *Editor) cmdEdit(col *Column, win *Window, cmd string) {
 	}
 
 	if pOut.Len() > 0 {
-		e.showError(col, target, "", pOut.String())
+		e.showError(col, target, pOut.String())
 	}
 }
 
-func (e *Editor) findOrCreateErrorWindow(col *Column, win *Window, dir string) *Window {
-	if dir == "" {
-		if win != nil {
-			dir = win.GetDir()
-		} else {
-			dir = getwd()
-		}
+// errorWindow returns the +Errors window of win's directory, or of peak's
+// for no window. If there is none, it adds one to col, or else to the
+// column where win or the active window is.
+func (e *Editor) errorWindow(col *Column, win *Window) *Window {
+	dir := getwd()
+	if win != nil {
+		dir = win.GetDir()
 	}
-	errName := filepath.Join(dir, "+Errors")
-
+	name := filepath.Join(dir, "+Errors")
 	for _, w := range e.allWindows() {
-		if w.kind == WinOut && w.GetFilename() == errName {
+		if w.kind == WinOut && w.GetFilename() == name {
 			return w
 		}
 	}
-
-	targetCol := e.getTargetColumn(col, win)
-	newWin := targetCol.AddWindow(tagText(errName, "Get Del"), "")
-	newWin.kind = WinOut
-	e.showWindow(newWin)
-	return newWin
+	w := e.getTargetColumn(col, win).AddWindow(tagText(name, "Get Del"), "")
+	w.kind = WinOut
+	e.showWindow(w)
+	return w
 }
 
 func (e *Editor) allWindows() []*Window {
@@ -689,23 +686,21 @@ func (e *Editor) warnDirty(col *Column, win *Window, windows []*Window) bool {
 		w.Warn()
 		msg.WriteString(w.GetFilename() + " modified\n")
 	}
-	e.showError(col, win, "", msg.String())
+	e.showError(col, win, msg.String())
 	return false
 }
 
-func (e *Editor) appendToErrorWindow(col *Column, win *Window, msg string) {
-	tv := e.findOrCreateErrorWindow(col, win, "").bodyTextView()
-	existing := tv.buffer.GetText()
-	if existing != "" && !strings.HasSuffix(existing, "\n") {
-		existing += "\n"
+// showError adds msg to the end of win's +Errors window, on a line of its
+// own, shows it there and gives the window the focus, as acme's warnings do.
+func (e *Editor) showError(col *Column, win *Window, msg string) {
+	tv := e.errorWindow(col, win).bodyTextView()
+	b := tv.buffer
+	n := b.Len()
+	if n > 0 && b.RunesInRange(n-1, n)[0] != '\n' {
+		msg = "\n" + msg
 	}
-	tv.buffer.SetText(existing + msg)
-	e.focusedView = tv
-}
-
-func (e *Editor) showError(col *Column, win *Window, dir, msg string) {
-	tv := e.findOrCreateErrorWindow(col, win, dir).bodyTextView()
-	tv.buffer.SetText(msg)
+	b.ReplaceRangeRunes(n, n, []rune(msg))
+	tv.Show(n)
 	e.focusedView = tv
 }
 
@@ -764,7 +759,7 @@ func (e *Editor) showOutput(col *Column, win *Window, out string, err error) {
 		out = err.Error()
 	}
 	if out != "" {
-		e.showError(col, win, "", out)
+		e.showError(col, win, out)
 	}
 }
 
@@ -794,7 +789,7 @@ func (e *Editor) cmdTheme(win *Window, cmd string) {
 		return
 	}
 	if err := e.ApplyTheme(name); err != nil {
-		e.showError(nil, win, "", "Theme: "+err.Error())
+		e.showError(nil, win, "Theme: "+err.Error())
 		return
 	}
 	e.Redraw()

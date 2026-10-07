@@ -719,30 +719,30 @@ func TestLifecycleEventsGetPut(t *testing.T) {
 	}
 }
 
-// ---- findOrCreateErrorWindow ----
+// ---- errorWindow ----
 
-func TestFindOrCreateErrorWindowReuse(t *testing.T) {
+func TestErrorWindowReuse(t *testing.T) {
 	e, col, win, _ := setupWindowTest(t)
 
 	// First call creates the window
 	var w1, w2 *Window
 	e.Call(func() {
-		w1 = e.findOrCreateErrorWindow(col, win, "")
+		w1 = e.errorWindow(col, win)
 	})
 	if w1 == nil {
-		t.Fatal("findOrCreateErrorWindow returned nil")
+		t.Fatal("errorWindow returned nil")
 	}
 
 	// Second call should return the same window
 	e.Call(func() {
-		w2 = e.findOrCreateErrorWindow(col, win, "")
+		w2 = e.errorWindow(col, win)
 	})
 	if w1 != w2 {
-		t.Error("findOrCreateErrorWindow created a duplicate instead of reusing")
+		t.Error("errorWindow created a duplicate instead of reusing")
 	}
 }
 
-func TestFindOrCreateErrorWindowSkipsTerminal(t *testing.T) {
+func TestErrorWindowSkipsTerminal(t *testing.T) {
 	e, col, _, _ := setupWindowTest(t)
 
 	// Pre-create a terminal window named /tmp/+Errors
@@ -754,14 +754,14 @@ func TestFindOrCreateErrorWindowSkipsTerminal(t *testing.T) {
 
 	var errWin *Window
 	e.Call(func() {
-		errWin = e.findOrCreateErrorWindow(col, srcWin, "")
+		errWin = e.errorWindow(col, srcWin)
 	})
 
 	if errWin == nil {
 		t.Fatal("expected a text error window, got nil")
 	}
 	if errWin == termWin {
-		t.Error("findOrCreateErrorWindow returned terminal window instead of creating a text one")
+		t.Error("errorWindow returned terminal window instead of creating a text one")
 	}
 	if errWin.bodyTextView() == nil {
 		t.Error("returned error window has no text view")
@@ -905,5 +905,27 @@ func TestRemoveColumnUnmountsAllWindows(t *testing.T) {
 		if c == col {
 			t.Error("column still present in editor after RemoveColumn")
 		}
+	}
+}
+
+// Messages pile up in +Errors, each on a line of its own, as acme's
+// warnings do; the window shows the newest and has the focus.
+func TestShowErrorAppends(t *testing.T) {
+	e, col, win, _ := setupWindowTest(t)
+	var tv *TextView
+	e.Call(func() {
+		e.showError(col, win, "first")
+		e.showError(col, win, "second\n")
+		e.showError(col, win, "third")
+		tv = e.errorWindow(col, win).bodyTextView()
+	})
+	if got, want := tv.buffer.GetText(), "first\nsecond\nthird"; got != want {
+		t.Errorf("+Errors holds %q, want %q", got, want)
+	}
+	if e.focusedView != tv {
+		t.Error("+Errors does not have the focus")
+	}
+	if tv.buffer.q0 != tv.buffer.Len() {
+		t.Errorf("cursor at %d, want the end, %d", tv.buffer.q0, tv.buffer.Len())
 	}
 }

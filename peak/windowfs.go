@@ -186,6 +186,6 @@ func (f *winErrorsFile) Close() error {
 		return nil
 	}
 	win, col, text := f.win, f.win.parent, string(f.Writes)
-	win.editor.callCh <- func() { win.editor.appendToErrorWindow(col, win, text) }
+	win.editor.callCh <- func() { win.editor.showError(col, win, text) }
 	return nil
 }

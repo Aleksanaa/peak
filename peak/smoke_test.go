@@ -996,10 +996,10 @@ func TestExternalCommand(t *testing.T) {
 	}
 	e.HandleEvent(tcell.NewEventMouse(bx, by, tcell.ButtonMiddle, 0))
 
-	// 9. Observe result isn't changed (replaces buffer with same output)
+	// 9. The output is added on a line of its own after what is there
+	want := expected + "\n\nuname -a\n" + expected
 	waitFor(t, e, s, func() bool {
-		newOutput := strings.TrimSpace(errWin.body.GetBuffer().GetText())
-		return newOutput == expected
+		return strings.TrimSpace(errWin.body.GetBuffer().GetText()) == want
 	})
 }
 
