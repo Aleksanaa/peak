@@ -152,36 +152,7 @@ func (f *winEventFile) Close() error {
 	return nil
 }
 
-// ---- winAddrFile ----
-
-func newWinAddrFile(win *Window, flag int) *winAddrFile {
-	f := &winAddrFile{win: win}
-	if flag&os.O_WRONLY == 0 {
-		win.editor.Call(func() { f.Data = fmt.Appendf(nil, "#%d,#%d\n", win.addrQ0, win.addrQ1) })
-	}
-	return f
-}
-
-type winAddrFile struct {
-	vfs.ReadWriteFile
-	win *Window
-}
-
-func (f *winAddrFile) Close() error {
-	if f.Writes == nil {
-		return nil
-	}
-	s := strings.TrimSpace(string(f.Writes))
-	win := f.win
-	win.editor.Call(func() {
-		buf := win.body.GetBuffer()
-		if q0, q1, err := parseAddr(s, buf); err == nil {
-			win.addrQ0 = clampAddr(q0, buf)
-			win.addrQ1 = clampAddr(q1, buf)
-		}
-	})
-	return nil
-}
+// ---- addr ----
 
 // parseAddr parses an address expression like "#n", "#n,#n", or "n" (line number).
 func parseAddr(s string, buf *Buffer) (q0, q1 int, err error) {
@@ -227,37 +198,6 @@ func clampAddr(q int, buf *Buffer) int {
 		return n
 	}
 	return q
-}
-
-// ---- winDataFile ----
-
-func newWinDataFile(win *Window, flag int) *winDataFile {
-	f := &winDataFile{win: win}
-	if flag&os.O_WRONLY == 0 {
-		win.editor.Call(func() { f.Data = []byte(string(win.body.GetBuffer().RunesInRange(win.addrQ0, win.addrQ1))) })
-	}
-	return f
-}
-
-type winDataFile struct {
-	vfs.ReadWriteFile
-	win *Window
-}
-
-func (f *winDataFile) Close() error {
-	if f.Writes == nil {
-		return nil
-	}
-	win := f.win
-	if _, ok := win.body.(*TermView); ok {
-		return nil
-	}
-	runes := []rune(string(f.Writes))
-	win.editor.Call(func() {
-		win.body.GetBuffer().ReplaceRangeRunes(win.addrQ0, win.addrQ1, runes)
-		win.addrQ1 = win.addrQ0 + len(runes)
-	})
-	return nil
 }
 
 // ---- winColorFile ----

@@ -34,7 +34,7 @@ func newPeakNamespaceFs(editor *Editor, bus *eventBus) *peakNamespaceFs {
 					return &globalEventFile{bus: bus, sub: bus.subscribe()}, nil
 				}},
 				{Name: "index", Mode: 0444, Open: func(_ int) (afero.File, error) {
-					return &indexFile{ReadonlyFile: vfs.ReadonlyFile{Data: indexSnap(editor)}}, nil
+					return &vfs.ReadonlyFile{Data: indexSnap(editor)}, nil
 				}},
 				{Name: "mount", Mode: 0600, Open: func(_ int) (afero.File, error) {
 					return &mountFile{editor: editor, ReadonlyFile: vfs.ReadonlyFile{Data: []byte(editor.ninep.ListMounts())}}, nil
@@ -189,11 +189,6 @@ func indexSnap(editor *Editor) []byte {
 		}
 	})
 	return []byte(sb.String())
-}
-
-// indexFile is the read-only /peak/index snapshot.
-type indexFile struct {
-	vfs.ReadonlyFile
 }
 
 // ---- /srv ----

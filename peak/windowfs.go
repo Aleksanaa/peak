@@ -15,109 +15,113 @@ import (
 type windowFs struct{ *vfs.NamespaceFs }
 
 func newWindowFs(win *Window) *windowFs {
+	file := func(read func() string, write func(string)) func(int) (afero.File, error) {
+		return func(flag int) (afero.File, error) { return newWinFile(win, flag, read, write), nil }
+	}
+	body := func() *Buffer { return win.body.GetBuffer() }
+	_, term := win.body.(*TermView)
 	return &windowFs{&vfs.NamespaceFs{
 		Entries: []vfs.FileEntry{
-			{Name: "body", Mode: 0644, Open: func(flag int) (afero.File, error) { return newWinBodyFile(win, flag), nil }},
-			{Name: "tag", Mode: 0644, Open: func(flag int) (afero.File, error) { return newWinTagFile(win, flag), nil }},
-			{Name: "ctl", Mode: 0600, Open: func(flag int) (afero.File, error) { return newWinCtlFile(win, flag), nil }},
+			{Name: "body", Mode: 0644, Open: file(func() string { return body().GetText() }, func(s string) {
+				if term {
+					win.body.(*TermView).session.Write([]byte(s))
+				} else {
+					body().SetText(s)
+				}
+			})},
+			{Name: "tag", Mode: 0644, Open: file(win.tag.buffer.GetText, win.tag.buffer.SetText)},
+			{Name: "ctl", Mode: 0600, Open: func(flag int) (afero.File, error) {
+				return &winCtlFile{newWinFile(win, flag, func() string { return ctlText(win) }, nil)}, nil
+			}},
 			{Name: "event", Mode: 0644, Open: func(flag int) (afero.File, error) { return newWinEventFile(win, flag), nil }},
-			{Name: "addr", Mode: 0644, Open: func(flag int) (afero.File, error) { return newWinAddrFile(win, flag), nil }},
-			{Name: "data", Mode: 0644, Open: func(flag int) (afero.File, error) { return newWinDataFile(win, flag), nil }},
-			{Name: "rdsel", Mode: 0444, Open: func(_ int) (afero.File, error) { return newWinRdselFile(win), nil }},
-			{Name: "wrsel", Mode: 0200, Open: func(_ int) (afero.File, error) { return newWinWrselFile(win), nil }},
-			{Name: "errors", Mode: 0200, Open: func(_ int) (afero.File, error) { return &winErrorsFile{win: win}, nil }},
+			{Name: "addr", Mode: 0644, Open: file(func() string {
+				return fmt.Sprintf("#%d,#%d\n", win.addrQ0, win.addrQ1)
+			}, func(s string) {
+				b := body()
+				if q0, q1, err := parseAddr(strings.TrimSpace(s), b); err == nil {
+					win.addrQ0, win.addrQ1 = clampAddr(q0, b), clampAddr(q1, b)
+				}
+			})},
+			{Name: "data", Mode: 0644, Open: file(func() string {
+				return string(body().RunesInRange(win.addrQ0, win.addrQ1))
+			}, func(s string) {
+				if !term {
+					r := []rune(s)
+					body().ReplaceRangeRunes(win.addrQ0, win.addrQ1, r)
+					win.addrQ1 = win.addrQ0 + len(r)
+				}
+			})},
+			{Name: "rdsel", Mode: 0444, Open: file(func() string { return body().GetSelectedText() }, nil)},
+			// wrsel replaces what was selected when it was opened, as acme's does.
+			{Name: "wrsel", Mode: 0200, Open: func(flag int) (afero.File, error) {
+				var q0, q1 int
+				win.editor.Call(func() { q0, q1 = body().q0, body().q1 })
+				return newWinFile(win, flag, nil, func(s string) {
+					if !term {
+						body().ReplaceRangeRunes(q0, q1, []rune(s))
+					}
+				}), nil
+			}},
+			{Name: "errors", Mode: 0200, Open: file(nil, func(s string) { win.editor.showError(win.parent, win, s) })},
 			{Name: "color", Mode: 0200, Open: func(_ int) (afero.File, error) { return &winColorFile{win: win}, nil }},
 		},
 	}}
 }
 
-// ---- body ----
+// A winFile reads as the window was when it was opened, and what is written
+// to it is applied when it is closed, if anything was. Both happen on the
+// main goroutine. A file without read reads empty; one without write
+// refuses writes.
+type winFile struct {
+	vfs.ReadWriteFile
+	win   *Window
+	write func(string)
+}
 
-func newWinBodyFile(win *Window, flag int) *winBodyFile {
-	f := &winBodyFile{win: win}
-	if flag&os.O_WRONLY == 0 {
-		win.editor.Call(func() { f.Data = []byte(win.body.GetBuffer().GetText()) })
+func newWinFile(win *Window, flag int, read func() string, write func(string)) *winFile {
+	f := &winFile{win: win, write: write}
+	if read != nil && flag&os.O_WRONLY == 0 {
+		win.editor.Call(func() { f.Data = []byte(read()) })
 	}
 	return f
 }
 
-type winBodyFile struct {
-	vfs.ReadWriteFile
-	win *Window
+func (f *winFile) WriteAt(p []byte, off int64) (int, error) {
+	if f.write == nil {
+		return 0, os.ErrPermission
+	}
+	return f.ReadWriteFile.WriteAt(p, off)
 }
 
-func (f *winBodyFile) Close() error {
-	if f.Writes == nil {
-		return nil
+func (f *winFile) Close() error {
+	if f.Writes != nil {
+		s := string(f.Writes)
+		f.win.editor.Call(func() { f.write(s) })
 	}
-	if tv, ok := f.win.body.(*TermView); ok {
-		tv.session.Write(f.Writes)
-		return nil
-	}
-	f.win.editor.Call(func() { f.win.body.GetBuffer().SetText(string(f.Writes)) })
 	return nil
 }
 
-// ---- tag ----
-
-func newWinTagFile(win *Window, flag int) *winTagFile {
-	f := &winTagFile{win: win}
-	if flag&os.O_WRONLY == 0 {
-		win.editor.Call(func() { f.Data = []byte(win.tag.buffer.GetText()) })
-	}
-	return f
-}
-
-type winTagFile struct {
-	vfs.ReadWriteFile
-	win *Window
-}
-
-func (f *winTagFile) Close() error {
-	if f.Writes == nil {
-		return nil
-	}
-	f.win.editor.Call(func() { f.win.tag.buffer.SetText(string(f.Writes)) })
-	return nil
-}
-
-// ---- ctl ----
-
-// ctlSnap returns the structured read payload for /<id>/ctl:
+// ctlText is what /<id>/ctl reads:
 // "<id> <taglen> <bodylen> <isdir> <isdirty> <width> terminal <maxtab>\n"
 // All lengths are rune counts; width is terminal columns.
-func ctlSnap(win *Window) (snap []byte) {
-	win.editor.Call(func() {
-		isDir, isDirty, maxtab := 0, 0, 4
-		if win.kind == WinDir {
-			isDir = 1
-		}
-		if win.IsDirty() {
-			isDirty = 1
-		}
-		if tv, ok := win.body.(*TextView); ok {
-			maxtab = tv.tabWidth
-		}
-		snap = fmt.Appendf(nil, "%d %d %d %d %d %d terminal %d\n",
-			win.ID, win.tag.buffer.Len(), win.body.GetBuffer().Len(), isDir, isDirty, win.w-1, maxtab)
-	})
-	return snap
-}
-
-func newWinCtlFile(win *Window, flag int) *winCtlFile {
-	f := &winCtlFile{win: win}
-	if flag&os.O_WRONLY == 0 {
-		f.Data = ctlSnap(win)
+func ctlText(win *Window) string {
+	isDir, isDirty, maxtab := 0, 0, 4
+	if win.kind == WinDir {
+		isDir = 1
 	}
-	return f
+	if win.IsDirty() {
+		isDirty = 1
+	}
+	if tv, ok := win.body.(*TextView); ok {
+		maxtab = tv.tabWidth
+	}
+	return fmt.Sprintf("%d %d %d %d %d %d terminal %d\n",
+		win.ID, win.tag.buffer.Len(), win.body.GetBuffer().Len(), isDir, isDirty, win.w-1, maxtab)
 }
 
-type winCtlFile struct {
-	vfs.ReadonlyFile
-	win *Window
-}
+// winCtlFile runs each write as an editor command, as it comes.
+type winCtlFile struct{ *winFile }
 
-// WriteAt executes the trimmed string as an editor command.
 func (f *winCtlFile) WriteAt(p []byte, _ int64) (int, error) {
 	cmd := strings.TrimSpace(string(p))
 	if cmd == "" {
@@ -126,66 +130,4 @@ func (f *winCtlFile) WriteAt(p []byte, _ int64) (int, error) {
 	win, col := f.win, f.win.parent
 	win.editor.callCh <- func() { win.editor.Execute(col, win, cmd) }
 	return len(p), nil
-}
-
-// ---- rdsel ----
-
-func newWinRdselFile(win *Window) *winRdselFile {
-	f := &winRdselFile{}
-	win.editor.Call(func() {
-		f.Data = []byte(win.body.GetBuffer().GetSelectedText())
-	})
-	return f
-}
-
-// winRdselFile is a read-only snapshot of the window's current selection at open time.
-type winRdselFile struct {
-	vfs.ReadonlyFile
-}
-
-// ---- wrsel ----
-
-func newWinWrselFile(win *Window) *winWrselFile {
-	f := &winWrselFile{win: win}
-	win.editor.Call(func() {
-		buf := win.body.GetBuffer()
-		f.q0, f.q1 = buf.q0, buf.q1
-	})
-	return f
-}
-
-// winWrselFile is a write-only file; on Close it replaces the selection captured at
-// open time with the written bytes.
-type winWrselFile struct {
-	vfs.WriteOnlyFile
-	win    *Window
-	q0, q1 int
-}
-
-func (f *winWrselFile) Close() error {
-	if f.Writes == nil {
-		return nil
-	}
-	if _, ok := f.win.body.(*TermView); ok {
-		return nil
-	}
-	runes := []rune(string(f.Writes))
-	f.win.editor.Call(func() { f.win.body.GetBuffer().ReplaceRangeRunes(f.q0, f.q1, runes) })
-	return nil
-}
-
-// ---- errors ----
-
-type winErrorsFile struct {
-	vfs.WriteOnlyFile
-	win *Window
-}
-
-func (f *winErrorsFile) Close() error {
-	if len(f.Writes) == 0 {
-		return nil
-	}
-	win, col, text := f.win, f.win.parent, string(f.Writes)
-	win.editor.callCh <- func() { win.editor.showError(col, win, text) }
-	return nil
 }
