@@ -1,146 +1,111 @@
 # Peak Virtual Filesystem
 
-Peak exposes its internal state as a virtual filesystem (VFS) rooted at
-/peak. The VFS is served over a 9P socket at ~/.peak/9p, which makes it
-accessible both inside Peak (by typing /peak/... paths) and from external
-tools over the socket.
-
-
-## Accessing via 9P
-
-To access the VFS from outside Peak, mount the socket:
-
-Using 9pfuse:
+Peak serves its state as files under /peak. Inside Peak they are opened like
+any path; outside it, they are served over 9P on the Unix socket ~/.peak/9p:
 
     9 9pfuse unix!$HOME/.peak/9p <mountpoint>
-
-Using Linux kernel 9P:
-
     mount -t 9p ~/.peak/9p <mountpoint> -o trans=unix,uname=$USER
-
-Note: when inspecting the VFS from a shell, use a plain shell (e.g. sh)
-rather than a configured one. Configured shells may probe the working
-directory on startup, which can trigger unwanted behavior inside paths
-like /peak/ssh.
 
 
 ## Control Files
 
-These files live directly under /peak:
+- event             Window events, a line each: "<kind> <id> <name>",
+                    where kind is new, close, focus, get or put, and name
+                    is the window's name, the rest of the line, unquoted.
+                    Reads block until there is one.
+- index             A line for each window, in the format of acme's index:
+                    <id> <taglen> <bodylen> <isdir> <isdirty> <tag>,
+                    each number 11 characters wide.
+- mount             Write "<socket> <path>" to mount a 9P server at path:
+                    a service posted in srv/, or one on a Unix socket.
+                    Read for the mounts.
+- unmount           Write a path to unmount it.
+- bind              Write "<src> <dst>" to bind src onto dst. Read for the
+                    binds.
+- new/              Walking into it makes a new window, as New does, and
+                    leads to its directory, /peak/<id>/.
+- srv/              Posted 9P services. Open srv/<name> read-write and
+                    serve 9P on it to post one; mount it through mount.
+                    All mounts of a service share one conversation with
+                    it, as on Plan 9.
 
-- event             Global event stream, one line per event:
-                    "<kind> <id> <name>", where kind is new, close,
-                    focus, get, or put, and name is the window's file
-                    name: the rest of the line, as is (not quoted).
-                    Reads block until an event arrives.
-- index             Snapshot of all open windows. Each line has the format:
-                    <id> <taglen> <bodylen> <isdir> <isdirty> <tag>
-                    Fields are right-aligned in 11-character columns, matching
-                    acme's /acme/index format.
-- exec              Write a window title to create an externally-driven
-                    terminal window; read back the window ID.
-- mount             Write "<socket> <path>" to mount a 9P server at
-                    path: a service posted in /peak/srv/, or one on
-                    a Unix socket. Read to list current mounts.
-- unmount           Write a path to detach it from the VFS.
-- bind              Write "<src> <dst>" to overlay src onto dst. Read
-                    to list current binds.
-
-Paths in mount, unmount, and bind, written or listed, are backtick-quoted
-when they contain spaces (see Quoting in Commands).
-- new/              Walking into this directory creates a new empty
-                    window and redirects to its /peak/<id>/ directory.
-- srv/              Posted 9P services. Open srv/<name> read-write
-                    and serve 9P on it to post one; mount it through
-                    the mount file. All mounts of a service share one
-                    conversation with it, as on Plan 9.
+Paths in mount, unmount and bind are backtick-quoted when they contain
+spaces (see Quoting in Commands).
 
 
-## Per-Window Files
+## Window Files
 
-Each open window is accessible at /peak/<id>/:
+Each window has a directory, /peak/<id>/. What is written to a file takes
+effect when it is closed, except for ctl and event.
 
-- body              Window body text. Readable and writable.
-- tag               Window tag text. Readable and writable. Its first
-                    field is the file name, backtick-quoted if it
-                    contains spaces.
-- ctl               Control file. Read returns the window status:
-                    <id> <taglen> <bodylen> <isdir> <isdirty> <width>
-                    terminal <maxtab>. Write executes a command.
-- event             Window event stream for externally-driven windows.
-                    Reads block until an event arrives.
-- addr              Current address as #q0,#q1 character offsets.
-                    Readable and writable.
-- data              Text within the current address range. Readable and
-                    writable. Writing replaces the addressed range.
-- rdsel             Read-only snapshot of the selection at open time.
-- wrsel             Write-only. Replaces the open-time selection on close.
-- errors            Write-only. Appends text to the window error output.
-- color             Write-only. Sets the window handle color.
-- io                PTY I/O for terminal windows only.
+- body              The body. Writing replaces it; in a terminal, what is
+                    written is typed instead.
+- tag               The tag. Its first field is the window's name,
+                    backtick-quoted if it contains spaces.
+- ctl               Reads "<id> <taglen> <bodylen> <isdir> <isdirty>
+                    <width> terminal <maxtab>". Each write runs a command,
+                    as if executed in the tag.
+- event             Reads the window's events as records:
+                    <origin><type><q0> <q1> <flag> <nr> <text>: KI and KD
+                    for text inserted and deleted, Mx and Ml for
+                    text clicked to execute and to plumb.
+                    Writing an x or l record back executes or plumbs its
+                    text.
+- addr              The address, as #q0,#q1. Write #n, #n,#m or a line
+                    number to set it.
+- data              The text at the address. Writing replaces it, and the
+                    address becomes what was written.
+- rdsel             The selection when it was opened.
+- wrsel             Writing replaces the selection as it was when the file
+                    was opened.
+- errors            Writing appends to the window's +Errors.
+- color             Lines of "<q0> <q1> <attr>" color the body: the range
+                    is drawn in the theme's syntax color attr, as keyword
+                    for SynKeyword. A write replaces the ranges before it,
+                    and an empty one clears them, as does closing the
+                    event file of a program reading it.
 
 
 ## Built-in Paths
 
-- /peak/doc/        Peak's embedded documentation files.
-- /peak/theme/      Color themes. Read to list; write a name to apply
-                    (via the Theme command).
-- /peak/mirage/     In-memory scratch space. Contents lost on exit.
+- /peak/doc/        This documentation.
+- /peak/theme/      The color themes, a file each, applied by Theme <name>.
+                    Changes to them last until Peak exits.
+- /peak/mirage/     Files kept in memory until Peak exits.
 
 
 ## SSH (peak-ssh)
 
-SSH filesystem support is provided by the external peak-ssh program.
-Run it to mount remote hosts into the VFS:
+peak-ssh serves remote hosts' files, mounted at /peak/ssh:
 
     peak-ssh
 
-By default it mounts at /peak/ssh. Files are accessed as:
+A file is /peak/ssh/[user@]host[:port]/path; the user defaults to yours
+and the port to 22. ~ is the remote home directory, as in
+/peak/ssh/host/~/.bashrc. It authenticates through SSH_AUTH_SOCK.
 
-    /peak/ssh/[user@]host[::port]/path/to/file
-
-If no user is given, the current username is used. Authentication uses
-SSH_AUTH_SOCK. Use ~ in the path for the remote home directory
-(e.g. /peak/ssh/host/~/.bashrc).
-
-Use host::port to specify a non-standard port. A single colon is
-reserved for line and column numbers in the plumb syntax.
-
-Commands executed from a window inside /peak/ssh/... run on the remote
-host.
+Commands executed in a window under /peak/ssh/ run on the remote host.
 
 
 ## Git (peak-git)
 
-Git repository access is provided by the external peak-git program. Run
-it alongside Peak:
+peak-git serves the git repositories of the files Peak has open:
 
     peak-git
 
-peak-git watches window lifecycle events. When a window opens a file
-inside a git repository, it mounts that repository's VFS at
-<repo>/.git/fs/. The mount is removed when the last window from that
-repository is closed.
+When a window opens a file in a repository, it mounts the repository at
+<repo>/.git/fs/, and unmounts it when the repository's last window closes.
 
-Each mounted repository exposes:
-
-- HEAD              Current HEAD ref.
-- log               Commit log for HEAD.
-- status            Working tree status.
-- diff              Diff of the working tree against HEAD.
-- staged            Staged changes. Readable and writable.
-- commit            Write-only. Commits staged changes.
-- reset             Write-only. Resets staged changes.
-- heads/<branch>/   Local branch directory.
-- remotes/<r>/<b>/  Remote branch directory.
-
-Each local branch directory (heads/<branch>/) exposes:
-
-  - log             Commit log.
-  - diff            Diff against HEAD.
-  - <path>          Files in the branch tree.
-
-Each remote branch directory (remotes/<r>/<b>/) exposes:
-
-  - log             Commit log.
-  - <path>          Files in the remote branch tree.
+- HEAD              The current HEAD.
+- log               The log of HEAD.
+- status            The working tree's status.
+- diff              The working tree's diff against HEAD.
+- staged            The staged changes. Writing a list of paths stages
+                    them instead.
+- commit            Writing a message commits the staged changes; lines
+                    starting with # are left out.
+- reset             Writing hard or soft resets so; anything else is a
+                    mixed reset.
+- heads/<branch>/   A branch: its log, its diff against HEAD, and its
+                    files.
+- remotes/<r>/<b>/  A remote branch: its log and its files.
