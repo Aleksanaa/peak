@@ -584,7 +584,7 @@ func TestEditorRoundTripNewWindow(t *testing.T) {
 	if err := os.WriteFile(dir+"x", nil, 0644); err != nil {
 		t.Fatal(err)
 	}
-	e.createWindow(col, dir)
+	e.createWindow(col, dir).loaded(false, true)
 	dest := filepath.Join(t.TempDir(), "session")
 	if err := e.Dump(dest); err != nil {
 		t.Fatal(err)

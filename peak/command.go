@@ -168,7 +168,7 @@ func (e *Editor) OpenLine(win *Window, path string, line, col int, failed func(f
 
 	// /peak/new is a new window, as walking it over 9P makes.
 	if full == "/peak/new" {
-		e.createWindow(e.getTargetColumn(nil, win), e.dirOf(win))
+		e.newFileWindow(e.getTargetColumn(nil, win), win)
 		return
 	}
 
@@ -214,11 +214,18 @@ func (e *Editor) dirOf(win *Window) string {
 }
 
 // createWindow adds a window for the file name to col and shows it. It is
-// empty until it is got.
+// empty, and not writable, until it is got.
 func (e *Editor) createWindow(col *Column, name string) *Window {
 	w := col.AddWindow(tagText(name, "Get Put Undo Redo Snarf Zerox Del"), "")
-	w.loaded(false, true)
 	e.showWindow(w)
+	return w
+}
+
+// newFileWindow adds an empty window to col for a new file in the directory
+// of win, which it is named after until the file is named; see fileName.
+func (e *Editor) newFileWindow(col *Column, win *Window) *Window {
+	w := e.createWindow(col, e.dirOf(win))
+	w.loaded(false, true)
 	return w
 }
 
@@ -382,7 +389,7 @@ func (e *Editor) cmdDelcol(col *Column, win *Window) {
 func (e *Editor) cmdNewCol() {
 	nc := NewColumn(e.w, 1, 0, e.h-1, e)
 	e.columns = append(e.columns, nc)
-	e.createWindow(nc, e.dirOf(nil))
+	e.newFileWindow(nc, nil)
 	e.resize()
 }
 
@@ -393,7 +400,7 @@ func (e *Editor) cmdNew(col *Column, win *Window, cmd string) {
 		return
 	}
 
-	e.createWindow(e.getTargetColumn(col, win), e.dirOf(win))
+	e.newFileWindow(e.getTargetColumn(col, win), win)
 }
 
 func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {

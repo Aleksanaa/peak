@@ -71,7 +71,7 @@ func (fs *peakNamespaceFs) WalkRedirect(dir, name string) (string, os.FileInfo, 
 		var win *Window
 		fs.editor.Call(func() {
 			e := fs.editor
-			win = e.createWindow(e.getTargetColumn(nil, nil), e.dirOf(nil))
+			win = e.newFileWindow(e.getTargetColumn(nil, nil), nil)
 		})
 		id := strconv.Itoa(win.ID)
 		return "/" + id, vfs.NewFileInfo(id, 0555, true), true

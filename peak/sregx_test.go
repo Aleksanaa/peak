@@ -516,6 +516,7 @@ func TestEditWriteNamesNewWindow(t *testing.T) {
 	var w *Window
 	e.Call(func() {
 		w = e.createWindow(col, dir)
+		w.loaded(false, true)
 		w.body.GetBuffer().SetText("new\n")
 	})
 	if out := runEdit(e, w, "w f.txt"); out != "" {

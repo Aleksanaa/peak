@@ -2214,3 +2214,27 @@ func TestNewWindowIsNamedByPut(t *testing.T) {
 		}
 	})
 }
+
+// A window opened on a file is not writable, and so not marked as such,
+// until the file is loaded into it.
+func TestOpenedWindowWritableOnceLoaded(t *testing.T) {
+	e, _ := setupTest(t, 120, 30)
+	path := toDir(t.TempDir()) + "f.txt"
+	if err := os.WriteFile(path, []byte("hi"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var win *Window
+	e.Call(func() {
+		e.Open(nil, path)
+		win = e.active
+		if win.writable {
+			t.Error("writable before its file is loaded")
+		}
+	})
+	waitGot(t, e, win)
+	e.Call(func() {
+		if !win.writable || win.IsDirty() {
+			t.Errorf("writable %v, dirty %v once loaded; want writable, clean", win.writable, win.IsDirty())
+		}
+	})
+}
