@@ -575,3 +575,28 @@ func TestEditorRoundTripWindowTag(t *testing.T) {
 		t.Errorf("tag = %q", got)
 	}
 }
+
+// A new window, its file not named yet, comes back as one, not as its
+// directory's listing.
+func TestEditorRoundTripNewWindow(t *testing.T) {
+	e, col := newTestEditorWithColumn(t)
+	dir := toDir(t.TempDir())
+	if err := os.WriteFile(dir+"x", nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	e.createWindow(col, dir)
+	dest := filepath.Join(t.TempDir(), "session")
+	if err := e.Dump(dest); err != nil {
+		t.Fatal(err)
+	}
+
+	e2, _ := setupTest(t, 200, 50)
+	if err := e2.Load(dest); err != nil {
+		t.Fatal(err)
+	}
+	w := e2.columns[0].windows[0]
+	if w.GetFilename() != dir || w.fileName() != "" || !w.writable || w.body.GetBuffer().GetText() != "" {
+		t.Errorf("restored %q, file %q, writable %v, body %q; want a new window in %q",
+			w.GetFilename(), w.fileName(), w.writable, w.body.GetBuffer().GetText(), dir)
+	}
+}

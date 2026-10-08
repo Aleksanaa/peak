@@ -508,3 +508,25 @@ func runAddrTests(t *testing.T, tt []addrTest, parse func(*cmdParser) (*Addr, er
 		}
 	}
 }
+
+// w names a new window's file, as it does a file with no name in acme.
+func TestEditWriteNamesNewWindow(t *testing.T) {
+	e, col := editSetup(t, testName, Range{0, 0})
+	dir := toDir(t.TempDir())
+	var w *Window
+	e.Call(func() {
+		w = e.createWindow(col, dir)
+		w.body.GetBuffer().SetText("new\n")
+	})
+	if out := runEdit(e, w, "w f.txt"); out != "" {
+		t.Errorf("printed %q", out)
+	}
+	if data, _ := os.ReadFile(dir + "f.txt"); string(data) != "new\n" {
+		t.Errorf("wrote %q", data)
+	}
+	e.Call(func() {
+		if got := w.GetFilename(); got != dir+"f.txt" || w.IsDirty() {
+			t.Errorf("window %q, dirty %v; want %q, clean", got, w.IsDirty(), dir+"f.txt")
+		}
+	})
+}

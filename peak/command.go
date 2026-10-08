@@ -168,17 +168,11 @@ func (e *Editor) Open(win *Window, path string) {
 // selects the line for a negative col; a negative line goes nowhere. If
 // path, made absolute as full, cannot be opened, it calls failed instead.
 func (e *Editor) OpenLine(win *Window, path string, line, col int, failed func(full string, err error)) {
-	base := ""
-	if win != nil {
-		base = win.GetDir()
-	} else if e.active != nil {
-		base = e.active.GetDir()
-	}
-	full := normalizePath(path, base)
+	full := normalizePath(path, e.dirOf(win))
 
-	// /peak/new creates a fresh text window, same semantics as walking the 9P /new path.
+	// /peak/new is a new window, as walking it over 9P makes.
 	if full == "/peak/new" {
-		e.showWindow(e.getTargetColumn(nil, win).AddWindow(" New ", ""))
+		e.createWindow(e.getTargetColumn(nil, win), e.dirOf(win))
 		return
 	}
 
@@ -209,6 +203,18 @@ func (e *Editor) OpenLine(win *Window, path string, line, col int, failed func(f
 			w.bodyTextView().GotoLineCol(line, col)
 		}
 	})
+}
+
+// dirOf returns the directory win is in, or else the active window, or else
+// peak.
+func (e *Editor) dirOf(win *Window) string {
+	if win == nil {
+		win = e.active
+	}
+	if win == nil {
+		return getwd()
+	}
+	return win.GetDir()
 }
 
 // createWindow adds a window for the file name to col and shows it. It is
@@ -304,29 +310,34 @@ func (e *Editor) cmdPut(win *Window, cmd string) {
 	}
 	arg := e.argName(target, cmd)
 	if arg == "" {
-		arg = target.GetFilename()
+		arg = target.fileName()
+	}
+	if arg == "" {
+		e.showError(target.parent, target, "no file name")
+		return
 	}
 	path := normalizePath(arg, target.GetDir())
-	if path != "" {
-		tv := target.bodyTextView()
-		if tv == nil {
-			return
-		}
-		text := tv.buffer.GetText()
-		version := tv.buffer.version
-		go func() {
-			err := writeFile(path, []byte(text))
-			e.callCh <- func() {
-				if err != nil {
-					e.showError(target.parent, target, normalizeError(err))
-				} else {
-					target.writable = true
-					target.markSaved(version)
-					e.ninep.BroadcastPut(target)
-				}
-			}
-		}()
+	if target.fileName() == "" {
+		target.SetName(path) // naming a new window's file
 	}
+	tv := target.bodyTextView()
+	if tv == nil {
+		return
+	}
+	text := tv.buffer.GetText()
+	version := tv.buffer.version
+	go func() {
+		err := writeFile(path, []byte(text))
+		e.callCh <- func() {
+			if err != nil {
+				e.showError(target.parent, target, normalizeError(err))
+			} else {
+				target.writable = true
+				target.markSaved(version)
+				e.ninep.BroadcastPut(target)
+			}
+		}
+	}()
 }
 
 func (e *Editor) cmdDel(win *Window) {
@@ -390,7 +401,7 @@ func (e *Editor) cmdDelcol(col *Column, win *Window) {
 func (e *Editor) cmdNewCol() {
 	nc := NewColumn(e.w, 1, 0, e.h-1, e)
 	e.columns = append(e.columns, nc)
-	e.createWindow(nc, "./untitled.txt")
+	e.createWindow(nc, e.dirOf(nil))
 	e.resize()
 }
 
@@ -401,7 +412,7 @@ func (e *Editor) cmdNew(col *Column, win *Window, cmd string) {
 		return
 	}
 
-	e.createWindow(e.getTargetColumn(col, win), "./untitled.txt")
+	e.createWindow(e.getTargetColumn(col, win), e.dirOf(win))
 }
 
 func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {

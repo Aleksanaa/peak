@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -2178,4 +2179,38 @@ func TestTabRewraps(t *testing.T) {
 	if n := len(tv.lines()); n != 2 {
 		t.Errorf("%d visual lines at tab width 8, want 2", n)
 	}
+}
+
+// New makes a window named after the directory it is in. Put needs a file
+// name for it, and names the window after the file it is given.
+func TestNewWindowIsNamedByPut(t *testing.T) {
+	e, s := setupTest(t, 120, 30)
+	dir := toDir(t.TempDir())
+	var col *Column
+	var win *Window
+	e.Call(func() {
+		col = e.getTargetColumn(nil, nil)
+		e.Execute(col, e.createWindow(col, dir+"a.txt"), "New")
+		win = e.active
+		if win.GetFilename() != dir || win.fileName() != "" {
+			t.Errorf("New window %q, file %q; want %q, none", win.GetFilename(), win.fileName(), dir)
+		}
+		e.Execute(col, win, "Put")
+		if errs := e.errorWindow(col, win).body.GetBuffer().GetText(); errs != "no file name" {
+			t.Errorf("Put printed %q", errs)
+		}
+		win.body.GetBuffer().Insert("hi")
+		e.Execute(col, win, "Put b.txt")
+	})
+	waitFor(t, e, s, func() bool {
+		data, _ := os.ReadFile(dir + "b.txt")
+		var clean bool
+		e.Call(func() { clean = !win.IsDirty() })
+		return string(data) == "hi" && clean
+	})
+	e.Call(func() {
+		if got := win.GetFilename(); got != dir+"b.txt" {
+			t.Errorf("window %q after Put, want %q", got, dir+"b.txt")
+		}
+	})
 }

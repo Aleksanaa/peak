@@ -822,7 +822,7 @@ func (ed *edit) B(w *Window, cp *Cmd) bool {
 		editerror(Enoname)
 	}
 	if len(names) == 0 {
-		ed.e.createWindow(ed.e.getTargetColumn(nil, w), "./untitled.txt")
+		ed.e.createWindow(ed.e.getTargetColumn(nil, w), ed.e.dirOf(w))
 	}
 	for _, name := range names {
 		ed.e.Open(w, name)
@@ -868,7 +868,7 @@ func (ed *edit) D(w *Window, cp *Cmd) bool {
 func (ed *edit) lookfile(s string) *Window {
 	s = strings.TrimSuffix(s, "/")
 	for _, w := range ed.e.allWindows() {
-		if strings.TrimSuffix(w.GetFilename(), "/") == s {
+		if strings.TrimSuffix(w.fileName(), "/") == s {
 			return w
 		}
 	}
@@ -889,7 +889,7 @@ func (ed *edit) e_r(w *Window, cp *Cmd) bool {
 	if name == "" {
 		editerror(Enoname)
 	}
-	samename := name == w.GetFilename()
+	samename := name == w.fileName()
 	var data []byte
 	var isdir bool
 	var err error
@@ -1063,7 +1063,7 @@ func (ed *edit) putfile(w *Window, q0, q1 int, name string) {
 		ed.warn("can't write file %s: %v\n", name, err)
 		return
 	}
-	if q0 == 0 && q1 == len(ed.text(w)) && name == w.GetFilename() {
+	if q0 == 0 && q1 == len(ed.text(w)) && name == w.fileName() {
 		w.writable = true
 		w.markSaved(w.body.GetBuffer().version)
 		ed.e.ninep.BroadcastPut(w)
@@ -1127,7 +1127,7 @@ const (
 
 func (ed *edit) printposn(w *Window, mode int) {
 	addr := ed.addr
-	if name := w.GetFilename(); name != "" {
+	if name := w.fileName(); name != "" {
 		ed.warn("%s:", name)
 	}
 	switch mode {
@@ -1218,7 +1218,7 @@ func (ed *edit) pfilename(w *Window) {
 	if ed.curtext == w {
 		fc = '.'
 	}
-	ed.warn("%c%c%c %s\n", dirtychar, '+', fc, w.GetFilename())
+	ed.warn("%c%c%c %s\n", dirtychar, '+', fc, w.fileName())
 }
 
 func (ed *edit) loopcmd(w *Window, cp *Cmd, rp []Range) {
@@ -1319,7 +1319,7 @@ func (ed *edit) filelooper(cp *Cmd, XY bool) {
 	var ws []*Window
 	for _, w := range ed.e.allWindows() {
 		// no auto-execute on files without names
-		if w.kind == WinTerm || cp.re == "" && w.GetFilename() == "" {
+		if w.kind == WinTerm || cp.re == "" && w.fileName() == "" {
 			continue
 		}
 		if cp.re == "" || ed.filematch(w, cp.re) == XY {
@@ -1470,7 +1470,7 @@ func isfile(w *Window) bool { return w.kind == WinFile }
 func (ed *edit) toWindow(r string) *Window {
 	r = strings.TrimLeft(r, " \t\n")
 	for _, w := range ed.e.allWindows() {
-		if isfile(w) && w.GetFilename() == r {
+		if isfile(w) && w.fileName() == r {
 			return w
 		}
 	}
@@ -1507,7 +1507,7 @@ func (ed *edit) filematch(w *Window, r string) bool {
 	if ed.curtext == w {
 		fmark = '.'
 	}
-	buf := []rune(fmt.Sprintf("%c%c%c %s\n", dmark, '+', fmark, w.GetFilename()))
+	buf := []rune(fmt.Sprintf("%c%c%c %s\n", dmark, '+', fmark, w.fileName()))
 	return are.FindForward(buf, 0, len(buf), 1) != nil
 }
 
@@ -1603,7 +1603,7 @@ func (ed *edit) lineaddr(l int, addr Address, sign int) Address {
 func (ed *edit) cmdname(w *Window, str string, set bool) string {
 	if str == "" {
 		// no name; use existing
-		return w.GetFilename()
+		return w.fileName()
 	}
 	r := ""
 	if s := strings.TrimLeft(str, " \t"); s != "" {
@@ -1612,15 +1612,15 @@ func (ed *edit) cmdname(w *Window, str string, set bool) string {
 			r = filepath.Join(w.GetDir(), s)
 		}
 		for _, o := range ed.e.allWindows() {
-			if o != w && o.GetFilename() == r {
+			if o != w && o.fileName() == r {
 				ed.warn("warning: duplicate file name \"%s\"\n", r)
 			}
 		}
-		if w.GetFilename() == "" {
+		if w.fileName() == "" {
 			set = true
 		}
 	}
-	if set && r != w.GetFilename() {
+	if set && r != w.fileName() {
 		w.SetName(r)
 		w.markSaved(-1)
 	}

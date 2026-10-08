@@ -525,6 +525,15 @@ func (win *Window) GetFilename() string {
 	return name
 }
 
+// fileName is the name of the file win holds, or "" for a new window: one
+// for a file whose name is still its directory's, until the file is named.
+func (win *Window) fileName() string {
+	if name := win.GetFilename(); win.kind != WinFile || !strings.HasSuffix(name, "/") {
+		return name
+	}
+	return ""
+}
+
 func (win *Window) GetDir() string {
 	return getPathDir(win.GetFilename())
 }

@@ -12,7 +12,10 @@ Commands can be typed in any tag or body and executed by middle-clicking.
 
 ## 2. Column Commands
 
-- New [path]         Open a file in this column, or create a new empty window.
+- New [path]         Open a file in this column, or create a new empty window
+                     named after the current directory. Name its file by
+                     typing the name after the directory in the tag, or with
+                     Put name.
 - Win [cmd]          Open a terminal window in this column.
 - Zerox              Duplicate the focused window into this column.
 - Delcol             Close the column. Warns if any window has unsaved changes.

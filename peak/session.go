@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/aleksana/peak/internal/quote"
 	"github.com/aleksana/peak/internal/session"
 )
 
@@ -211,7 +210,6 @@ func (w *Window) saveState(colH int) WindowSession {
 // names, and puts the view and dot back where they were, as far as the text
 // still reaches. A file since gone leaves the window empty.
 func (w *Window) restore(ws *WindowSession) {
-	filename, _ := quote.Cut(ws.Tag)
 	tv := w.bodyTextView()
 	if ws.TabWidth > 0 {
 		tv.tabWidth = ws.TabWidth
@@ -221,14 +219,17 @@ func (w *Window) restore(ws *WindowSession) {
 		tv.org = min(ws.Org, n)
 		tv.buffer.SetDot(min(ws.Q0, n), min(ws.Q1, n))
 	}
+	w.kind = ws.Kind
 	switch {
 	case ws.Dirty:
 		tv.buffer.SetText(ws.Body)
-		w.kind, w.writable = WinFile, true
+		w.writable = true
 		w.markSaved(-1)
 		place(nil)
-	case filename != "":
-		w.editor.get(w, filename, place)
+	case w.fileName() == "": // a new window, whose file is not named yet
+		w.loaded(false, true)
+	default:
+		w.editor.get(w, w.GetFilename(), place)
 	}
 }
 
