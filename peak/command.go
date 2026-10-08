@@ -323,6 +323,7 @@ func (e *Editor) cmdPut(win *Window, cmd string) {
 	if target.fileName() == "" {
 		target.SetName(path) // naming a new window's file
 	}
+	own := path == normalizePath(target.fileName(), target.GetDir())
 	b := target.bodyTextView().buffer
 	text, version := b.GetText(), b.version
 	go func() {
@@ -330,13 +331,20 @@ func (e *Editor) cmdPut(win *Window, cmd string) {
 		e.callCh <- func() {
 			if err != nil {
 				e.showError(target.parent, target, normalizeError(err))
-			} else {
-				target.writable = true
-				target.markSaved(version)
-				e.ninep.BroadcastPut(target)
+			} else if own {
+				e.saved(target, version)
 			}
 		}
 	}()
+}
+
+// saved records that win's own file holds its text as of version: the
+// window is clean, and its file writable. Writing another file, or part of
+// the text, saves nothing, as in acme.
+func (e *Editor) saved(win *Window, version int) {
+	win.writable = true
+	win.markSaved(version)
+	e.ninep.BroadcastPut(win)
 }
 
 func (e *Editor) cmdDel(win *Window) {

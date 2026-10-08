@@ -2238,3 +2238,39 @@ func TestOpenedWindowWritableOnceLoaded(t *testing.T) {
 		}
 	})
 }
+
+// Put to another file writes the text there but leaves the window modified:
+// its own file still differs. Put to its own file saves it.
+func TestPutOtherFileLeavesWindowModified(t *testing.T) {
+	e, s := setupTest(t, 120, 30)
+	dir := toDir(t.TempDir())
+	path := dir + "a.txt"
+	if err := os.WriteFile(path, []byte("a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var win *Window
+	e.Call(func() {
+		e.Open(nil, path)
+		win = e.active
+	})
+	waitGot(t, e, win)
+	e.Call(func() {
+		win.body.GetBuffer().Insert("b")
+		e.Execute(win.parent, win, "Put other.txt")
+	})
+	waitFor(t, e, s, func() bool {
+		data, _ := os.ReadFile(dir + "other.txt")
+		return string(data) == "ba"
+	})
+	e.Call(func() {
+		if !win.IsDirty() {
+			t.Error("Put other.txt left the window clean")
+		}
+		e.Execute(win.parent, win, "Put")
+	})
+	waitFor(t, e, s, func() bool {
+		var clean bool
+		e.Call(func() { clean = !win.IsDirty() })
+		return clean
+	})
+}

@@ -1064,9 +1064,7 @@ func (ed *edit) putfile(w *Window, q0, q1 int, name string) {
 		return
 	}
 	if q0 == 0 && q1 == len(ed.text(w)) && name == w.fileName() {
-		w.writable = true
-		w.markSaved(w.body.GetBuffer().version)
-		ed.e.ninep.BroadcastPut(w)
+		ed.e.saved(w, w.body.GetBuffer().version)
 	}
 }
 
