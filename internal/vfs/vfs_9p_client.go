@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/aleksana/peak/internal/vfs/afero"
-	"github.com/knusbaum/go9p/client"
+	"github.com/aleksana/peak/internal/vfs/go9p/client"
 	"github.com/knusbaum/go9p/proto"
 )
 
