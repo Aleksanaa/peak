@@ -3,12 +3,12 @@ package main
 import (
 	"os"
 	"os/exec"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
 
 	"github.com/aleksana/peak/internal/quote"
+	"github.com/aleksana/peak/peak/regexp"
 )
 
 var (
