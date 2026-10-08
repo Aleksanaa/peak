@@ -15,7 +15,7 @@ import (
 
 func main() {
 	socketPath := flag.String("s", "", "serve on this Unix socket (omit to post to peak's /srv/ssh)")
-	peakSocket := flag.String("p", "", "peak 9P socket (default ~/.peak/9p); required when -s is omitted")
+	peakSocket := flag.String("p", "", "peak 9P socket (default $PEAK); required when -s is omitted")
 	mountPath := flag.String("m", "/peak/ssh", "auto-mount path in peak's namespace")
 	noMount := flag.Bool("M", false, "skip auto-mount; mount manually")
 	flag.Usage = func() {

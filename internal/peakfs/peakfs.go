@@ -5,17 +5,16 @@ package peakfs
 import (
 	"bufio"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/aleksana/peak/internal/vfs/afero"
 )
 
-// Socket returns the path of peak's 9P socket.
+// Socket returns the path of the 9P socket of the peak that runs this program,
+// which peak sets in $PEAK.
 func Socket() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".peak", "9p")
+	return os.Getenv("PEAK")
 }
 
 // Event is one line of peak's /event stream: "<kind> <id> [name]".

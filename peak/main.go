@@ -332,5 +332,6 @@ func main() {
 	e := &Editor{}
 	e.Init(*cols, flag.Args(), *load)
 	defer e.screen.Fini()
+	defer e.ninep.Close()
 	e.Run()
 }

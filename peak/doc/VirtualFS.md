@@ -1,10 +1,11 @@
 # Peak Virtual Filesystem
 
 Peak serves its state as files under /peak. Inside Peak they are opened like
-any path; outside it, they are served over 9P on the Unix socket ~/.peak/9p:
+any path; outside it, they are served over 9P on the Unix socket
+~/.peak/9p.<pid>, which Peak sets in $PEAK for the programs it runs:
 
-    9 9pfuse unix!$HOME/.peak/9p <mountpoint>
-    mount -t 9p ~/.peak/9p <mountpoint> -o trans=unix,uname=$USER
+    9 9pfuse unix!$PEAK <mountpoint>
+    mount -t 9p $PEAK <mountpoint> -o trans=unix,uname=$USER
 
 
 ## Control Files

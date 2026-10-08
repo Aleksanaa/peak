@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/aleksana/peak/internal/peakfs"
 	"github.com/aleksana/peak/internal/quote"
 	"github.com/aleksana/peak/internal/vfs"
 	"github.com/aleksana/peak/internal/vfs/afero"
@@ -31,6 +30,7 @@ type NineP struct {
 	bus    *eventBus
 	nsFs   *peakNamespaceFs
 	nsBase string // VFS path where nsFs is mounted
+	sock   string // path of the 9P socket
 }
 
 // NewNineP builds the process namespace, ns, and peak's file server over it.
@@ -56,17 +56,26 @@ func NewNineP(e *Editor) *NineP {
 	return p
 }
 
+// Listen serves the namespace on ~/.peak/9p.<pid> and sets $PEAK to it for
+// the programs peak runs.
 func (p *NineP) Listen() {
-	sockPath := peakfs.Socket()
-	os.MkdirAll(filepath.Dir(sockPath), 0700)
-	os.Remove(sockPath)
+	home, _ := os.UserHomeDir()
+	p.sock = filepath.Join(home, ".peak", "9p."+strconv.Itoa(os.Getpid()))
+	os.MkdirAll(filepath.Dir(p.sock), 0700)
+	os.Remove(p.sock)
 
 	srv := vfs.NewNinePSrv(vfs.NewRootedFs(ns, p.nsBase))
 	go func() {
-		if err := srv.Serve(sockPath); err != nil {
+		if err := srv.Serve(p.sock); err != nil {
 			log.Printf("9P server error: %v", err)
 		}
 	}()
+	os.Setenv("PEAK", p.sock)
+}
+
+// Close removes the socket.
+func (p *NineP) Close() {
+	os.Remove(p.sock)
 }
 
 // MountWindow exposes a window's namespace at /peak/<id>/.
