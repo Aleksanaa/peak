@@ -18,9 +18,10 @@ type NinePClientFs struct {
 	client *client.Client
 }
 
-// NewNinePClientFs dials a 9P server and wraps the client as an afero.Fs.
-func NewNinePClientFs(network, address string) (*NinePClientFs, error) {
-	conn, err := net.Dial(network, address)
+// NewNinePClientFs dials the 9P server on the Unix socket path and wraps the
+// client as an afero.Fs.
+func NewNinePClientFs(path string) (*NinePClientFs, error) {
+	conn, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {
 		return nil, err
 	}

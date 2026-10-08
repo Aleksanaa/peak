@@ -20,7 +20,7 @@ import (
 func main() {
 	peakSocket := flag.String("p", peakfs.Socket(), "peak 9P socket")
 	flag.Parse()
-	peakFs, err := vfs.NewNinePClientFs("unix", *peakSocket)
+	peakFs, err := vfs.NewNinePClientFs(*peakSocket)
 	if err != nil {
 		log.Fatalf("connect to peak: %v", err)
 	}

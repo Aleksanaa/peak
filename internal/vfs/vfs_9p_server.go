@@ -484,8 +484,9 @@ func (s *NinePSrv) ServeConn(rwc io.ReadWriteCloser) {
 	pr.Close()
 }
 
-func (s *NinePSrv) Serve(network, address string) error {
-	l, err := net.Listen(network, address)
+// Serve serves s on the Unix socket path.
+func (s *NinePSrv) Serve(path string) error {
+	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {
 		return err
 	}

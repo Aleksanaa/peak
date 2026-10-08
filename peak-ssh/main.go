@@ -34,7 +34,7 @@ func main() {
 			sock = peakfs.Socket()
 		}
 		var err error
-		peakFs, err = vfs.NewNinePClientFs("unix", sock)
+		peakFs, err = vfs.NewNinePClientFs(sock)
 		if err != nil {
 			if *socketPath == "" {
 				log.Fatalf("connect to peak at %s: %v", sock, err)

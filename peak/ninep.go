@@ -63,7 +63,7 @@ func (p *NineP) Listen() {
 
 	srv := vfs.NewNinePSrv(vfs.NewRootedFs(ns, p.nsBase))
 	go func() {
-		if err := srv.Serve("unix", sockPath); err != nil {
+		if err := srv.Serve(sockPath); err != nil {
 			log.Printf("9P server error: %v", err)
 		}
 	}()
@@ -102,7 +102,7 @@ func (p *NineP) Mount(socket, path string) (string, error) {
 	if name, ok := strings.CutPrefix(normalizePath(socket, ""), p.nsBase+"/srv/"); ok {
 		clientFs, err = p.nsFs.srvReg.fs(name)
 	} else {
-		clientFs, err = vfs.NewNinePClientFs("unix", normalizePath(socket, ""))
+		clientFs, err = vfs.NewNinePClientFs(normalizePath(socket, ""))
 	}
 	if err != nil {
 		return "", err
