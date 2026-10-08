@@ -119,19 +119,11 @@ func (e *Editor) Init(numCols int, args []string, sessionFile string) {
 
 	if len(args) > 0 {
 		for _, arg := range args {
-			full := normalizePath(arg, "")
-			content, isDir, writable, err := readFileOrDir(full)
-			if err == nil {
-				e.createWindow(e.columns[0], full, content, isDir, writable, -1, 0)
-			}
+			e.Open(nil, normalizePath(arg, ""))
 		}
 	} else {
-		dir := getwd()
 		lastCol := e.columns[len(e.columns)-1]
-		win := e.createWindow(lastCol, dir, "", true, true, -1, 0)
-
-		// Initial directory listing
-		e.Execute(lastCol, win, "Get")
+		e.Execute(lastCol, e.createWindow(lastCol, getwd()), "Get")
 	}
 	e.resize()
 }

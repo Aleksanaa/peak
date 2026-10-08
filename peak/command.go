@@ -157,11 +157,17 @@ func (e *Editor) argFields(win *Window, cmd string) []string {
 	return quote.Fields(e.argText(win, cmd))
 }
 
+// Open opens path in a window, or shows the one it is open in.
 func (e *Editor) Open(win *Window, path string) {
-	e.OpenLine(win, path, -1, 0, nil, nil)
+	e.OpenLine(win, path, -1, 0, func(full string, err error) {
+		e.showError(nil, win, full+": "+normalizeError(err))
+	})
 }
 
-func (e *Editor) OpenLine(win *Window, path string, line, col int, binaryFallback, fallback func()) {
+// OpenLine opens path as Open does and goes to column col of line, or
+// selects the line for a negative col; a negative line goes nowhere. If
+// path, made absolute as full, cannot be opened, it calls failed instead.
+func (e *Editor) OpenLine(win *Window, path string, line, col int, failed func(full string, err error)) {
 	base := ""
 	if win != nil {
 		base = win.GetDir()
@@ -189,33 +195,47 @@ func (e *Editor) OpenLine(win *Window, path string, line, col int, binaryFallbac
 		}
 	}
 
-	// 2. Try to open new window
-	go func() {
-		content, isDir, writable, err := readFileOrDir(full)
-		e.callCh <- func() {
-			if err == nil {
-				e.createWindow(e.getTargetColumn(nil, win), full, content, isDir, writable, line, col)
-			} else {
-				if binaryFallback != nil && err.Error() == "binary file" {
-					binaryFallback()
-				} else if fallback != nil && os.IsNotExist(err) {
-					fallback()
-				} else {
-					e.showError(nil, win, full+": "+normalizeError(err))
-				}
-			}
+	// 2. Open a new one, unless there is no such file.
+	if _, err := ns.Stat(full); err != nil {
+		failed(full, err)
+		return
+	}
+	w := e.createWindow(e.getTargetColumn(nil, win), full)
+	e.get(w, full, func(err error) {
+		if err != nil {
+			e.RemoveWindow(w)
+			failed(full, err)
+		} else if line >= 0 {
+			w.bodyTextView().GotoLineCol(line, col)
 		}
-	}()
+	})
 }
 
-func (e *Editor) createWindow(target *Column, full string, content string, isDir bool, writable bool, line, col int) *Window {
-	newWin := target.AddWindow(tagText(full, "Get Put Undo Redo Snarf Zerox Del"), content)
-	newWin.loaded(isDir, writable)
-	e.showWindow(newWin)
-	if line >= 0 {
-		newWin.bodyTextView().GotoLineCol(line, col)
-	}
-	return newWin
+// createWindow adds a window for the file name to col and shows it. It is
+// empty until it is got.
+func (e *Editor) createWindow(col *Column, name string) *Window {
+	w := col.AddWindow(tagText(name, "Get Put Undo Redo Snarf Zerox Del"), "")
+	w.loaded(false, true)
+	e.showWindow(w)
+	return w
+}
+
+// get reads the file or directory path into win's body in the background
+// and names the window after it. Then, on the main goroutine, it calls done
+// with how it failed. It is the one way a file's text comes into a window.
+func (e *Editor) get(win *Window, path string, done func(error)) {
+	go func() {
+		content, isDir, writable, err := readFileOrDir(path)
+		e.callCh <- func() {
+			if err == nil {
+				win.SetName(path)
+				win.bodyTextView().buffer.SetText(content)
+				win.loaded(isDir, writable)
+				e.ninep.BroadcastGet(win)
+			}
+			done(err)
+		}
+	}()
 }
 
 func (e *Editor) getTargetWindow(win *Window) *Window {
@@ -256,29 +276,25 @@ func normalizeError(err error) string {
 func (e *Editor) cmdGet(win *Window, cmd string) {
 	target := e.getTargetWindow(win)
 	if target == nil {
-		col := e.getTargetColumn(nil, win)
-		target = e.createWindow(col, "./untitled.txt", "", false, true, -1, 0)
+		// With no window to get into, Get file opens it.
+		if arg := e.argName(nil, cmd); arg != "" {
+			e.Open(nil, arg)
+		}
+		return
+	}
+	if target.kind == WinTerm {
+		return
 	}
 	arg := e.argName(target, cmd)
 	if arg == "" {
 		arg = target.GetFilename()
 	}
 	path := normalizePath(arg, target.GetDir())
-	go func() {
-		content, isDir, writable, err := readFileOrDir(path)
-		e.callCh <- func() {
-			if err == nil {
-				target.SetName(path)
-				if tv := target.bodyTextView(); tv != nil {
-					tv.buffer.SetText(content)
-					target.loaded(isDir, writable)
-					e.ninep.BroadcastGet(target)
-				}
-			} else {
-				e.showError(target.parent, target, path+": "+normalizeError(err))
-			}
+	e.get(target, path, func(err error) {
+		if err != nil {
+			e.showError(target.parent, target, path+": "+normalizeError(err))
 		}
-	}()
+	})
 }
 
 func (e *Editor) cmdPut(win *Window, cmd string) {
@@ -374,7 +390,7 @@ func (e *Editor) cmdDelcol(col *Column, win *Window) {
 func (e *Editor) cmdNewCol() {
 	nc := NewColumn(e.w, 1, 0, e.h-1, e)
 	e.columns = append(e.columns, nc)
-	e.createWindow(nc, "./untitled.txt", "", false, true, -1, 0)
+	e.createWindow(nc, "./untitled.txt")
 	e.resize()
 }
 
@@ -385,7 +401,7 @@ func (e *Editor) cmdNew(col *Column, win *Window, cmd string) {
 		return
 	}
 
-	e.createWindow(e.getTargetColumn(col, win), "./untitled.txt", "", false, true, -1, 0)
+	e.createWindow(e.getTargetColumn(col, win), "./untitled.txt")
 }
 
 func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {

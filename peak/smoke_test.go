@@ -305,7 +305,9 @@ func TestZeroxKeepsDirtyState(t *testing.T) {
 	for _, saved := range []bool{true, false} {
 		e, col := newTestEditorWithColumn(t)
 		path := writeTempFile(t, "hello\n")
-		win := e.createWindow(col, path, "hello\n", false, true, -1, 0)
+		win := e.createWindow(col, path)
+		win.body.GetBuffer().SetText("hello\n")
+		win.loaded(false, true)
 		win.bodyTextView().buffer.Insert("x")
 		if saved {
 			win.markSaved(win.body.GetBuffer().version) // as Put does
@@ -1147,17 +1149,16 @@ func TestPlumbLineCol(t *testing.T) {
 }
 
 func TestAutoCreationCommands(t *testing.T) {
-	// Test Get
+	// Get with no window opens its file, and so says there is none.
 	t.Run("Get", func(t *testing.T) {
 		e, _ := setupTest(t, 80, 24)
 		if len(e.columns) != 0 {
 			t.Fatalf("Expected 0 columns initially, got %d", len(e.columns))
 		}
 		e.Execute(nil, nil, "Get /nonexistent")
-		if len(e.columns) == 0 {
-			t.Error("Expected Get to create a column when none exist")
-		} else if len(e.columns[0].windows) == 0 {
-			t.Error("Expected Get to create a window when none exist")
+		if ws := e.allWindows(); len(ws) != 1 || ws[0].kind != WinOut ||
+			!strings.Contains(ws[0].body.GetBuffer().GetText(), "/nonexistent: No such file") {
+			t.Error("Expected Get /nonexistent to report the missing file in +Errors")
 		}
 	})
 

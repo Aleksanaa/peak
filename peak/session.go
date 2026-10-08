@@ -209,26 +209,27 @@ func (w *Window) saveState(colH int) WindowSession {
 
 // restore loads w's text as ws says, the saved body or the file its tag
 // names, and puts the view and dot back where they were, as far as the text
-// still reaches.
+// still reaches. A file since gone leaves the window empty.
 func (w *Window) restore(ws *WindowSession) {
 	filename, _ := quote.Cut(ws.Tag)
 	tv := w.bodyTextView()
 	if ws.TabWidth > 0 {
 		tv.tabWidth = ws.TabWidth
 	}
-	if ws.Dirty {
+	place := func(error) {
+		n := tv.buffer.Len()
+		tv.org = min(ws.Org, n)
+		tv.buffer.SetDot(min(ws.Q0, n), min(ws.Q1, n))
+	}
+	switch {
+	case ws.Dirty:
 		tv.buffer.SetText(ws.Body)
 		w.kind, w.writable = WinFile, true
 		w.markSaved(-1)
-	} else if filename != "" {
-		if content, isDir, writable, err := readFileOrDir(filename); err == nil {
-			tv.buffer.SetText(content)
-			w.loaded(isDir, writable)
-		}
+		place(nil)
+	case filename != "":
+		w.editor.get(w, filename, place)
 	}
-	n := tv.buffer.Len()
-	tv.org = min(ws.Org, n)
-	tv.buffer.SetDot(min(ws.Q0, n), min(ws.Q1, n))
 }
 
 func (e *Editor) Dump(file string) error {

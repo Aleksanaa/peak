@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"os/exec"
 	"regexp"
 	"runtime"
@@ -54,16 +55,17 @@ func (e *Editor) Plumb(win *Window, word string) bool {
 	if m[4] != "" {
 		col, _ = strconv.Atoi(m[4])
 	}
-	base := ""
-	if win != nil {
-		base = win.GetDir()
-	} else if e.active != nil {
-		base = e.active.GetDir()
-	}
-	e.OpenLine(win, path, line-1, col, func() {
-		OpenExternal(normalizePath(path, base))
-	}, func() {
-		e.Execute(nil, win, "Look "+word)
+	// A word that is no file is looked for; a file that is not text is the
+	// system's to open.
+	e.OpenLine(win, path, line-1, col, func(full string, err error) {
+		switch {
+		case os.IsNotExist(err):
+			e.Execute(nil, win, "Look "+word)
+		case err == errBinary:
+			OpenExternal(full)
+		default:
+			e.showError(nil, win, full+": "+normalizeError(err))
+		}
 	})
 	return false
 }

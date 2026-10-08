@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -115,83 +117,35 @@ func writeFile(path string, data []byte) error {
 	return afero.WriteFile(ns, path, data, 0644)
 }
 
-// readFileOrDir returns the content of a file or a listing if it's a directory,
-// and whether the file is writable (owner-write permission bit set).
-func readFileOrDir(path string) (string, bool, bool, error) {
+// errBinary is how reading a file that is not text fails.
+var errBinary = errors.New("binary file")
+
+// readFileOrDir returns the content of a file, or the listing of a
+// directory, and whether the file is writable (owner-write permission bit
+// set). A file whose first 512 bytes hold a NUL is binary. It reads to
+// EOF, since a served file's size need not be its length.
+func readFileOrDir(path string) (content string, isDir, writable bool, err error) {
 	fi, err := ns.Stat(path)
 	if err != nil {
 		return "", false, false, err
 	}
-	writable := !fi.IsDir() && fi.Mode().Perm()&0200 != 0
 	if fi.IsDir() {
 		content, err := listDir(path)
-		return content, true, writable, err
+		return content, true, false, err
 	}
-
 	f, err := ns.Open(path)
 	if err != nil {
-		return "", false, writable, err
+		return "", false, false, err
 	}
 	defer f.Close()
-
-	size := fi.Size()
-	if size > 0 {
-		data := make([]byte, size)
-		n, err := f.ReadAt(data, 0)
-		if err != nil && err != io.EOF {
-			return "", false, writable, err
-		}
-		if int64(n) < int64(len(data)) || err == io.EOF {
-			if err := isBinary(data[:n]); err != nil {
-				return "", false, writable, err
-			}
-			return string(data[:n]), false, writable, nil
-		}
-		if err := isBinary(data); err != nil {
-			return "", false, writable, err
-		}
-		content, err := readFileTail(f, data, int64(len(data)))
-		return content, false, writable, err
+	data, err := io.ReadAll(io.NewSectionReader(f, 0, math.MaxInt64))
+	if err != nil {
+		return "", false, false, err
 	}
-	content, err := readFileTail(f, nil, 0)
-	return content, false, writable, err
-}
-
-func isBinary(data []byte) error {
-	checkLen := len(data)
-	if checkLen > 512 {
-		checkLen = 512
+	if bytes.IndexByte(data[:min(len(data), 512)], 0) >= 0 {
+		return "", false, false, errBinary
 	}
-	for i := 0; i < checkLen; i++ {
-		if data[i] == 0 {
-			return fmt.Errorf("binary file")
-		}
-	}
-	return nil
-}
-
-func readFileTail(f afero.File, prefix []byte, off int64) (string, error) {
-	chunks := prefix
-	buf := make([]byte, 4096)
-	for {
-		n, err := f.ReadAt(buf, off)
-		if n > 0 {
-			if len(chunks) == 0 {
-				if err := isBinary(buf[:n]); err != nil {
-					return "", err
-				}
-			}
-			chunks = append(chunks, buf[:n]...)
-			off += int64(n)
-		}
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			break
-		}
-		if err != nil {
-			return "", err
-		}
-	}
-	return string(chunks), nil
+	return string(data), false, fi.Mode().Perm()&0200 != 0, nil
 }
 
 // listDir returns a formatted string listing the contents of a directory.

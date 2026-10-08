@@ -822,7 +822,7 @@ func (ed *edit) B(w *Window, cp *Cmd) bool {
 		editerror(Enoname)
 	}
 	if len(names) == 0 {
-		ed.e.createWindow(ed.e.getTargetColumn(nil, w), "./untitled.txt", "", false, true, -1, 0)
+		ed.e.createWindow(ed.e.getTargetColumn(nil, w), "./untitled.txt")
 	}
 	for _, name := range names {
 		ed.e.Open(w, name)

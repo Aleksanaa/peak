@@ -47,8 +47,8 @@ func TestPlumbQuotedNameFromListing(t *testing.T) {
 	if listing != "`my file.txt`" {
 		t.Fatalf("listing = %q", listing)
 	}
-	win := e.createWindow(col, toDir(dir), listing, true, false, -1, 0)
-	col.Resize(col.rect)
+	win := e.createWindow(col, toDir(dir))
+	win.body.GetBuffer().SetText(listing)
 
 	tv := win.bodyTextView()
 	_, _, word := clickRange(tv.buffer, tv.PosAt(5, 0)) // inside the quoted name

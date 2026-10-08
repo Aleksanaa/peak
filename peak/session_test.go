@@ -29,6 +29,17 @@ func addFileWindow(t *testing.T, col *Column, tag, body string) *Window {
 	return win
 }
 
+// waitGot waits until w has got its file: its body has changed since the
+// window was made.
+func waitGot(t *testing.T, e *Editor, w *Window) {
+	t.Helper()
+	waitFor(t, e, e.screen, func() bool {
+		var got bool
+		e.Call(func() { got = w.body.GetBuffer().version != 0 })
+		return got
+	})
+}
+
 func writeTempFile(t *testing.T, content string) string {
 	t.Helper()
 	f, err := os.CreateTemp(t.TempDir(), "peak-session-test-*")
@@ -209,12 +220,13 @@ func TestWindowRestoreDirtyTabWidth(t *testing.T) {
 }
 
 func TestWindowRestoreCleanFile(t *testing.T) {
-	_, col := newTestEditorWithColumn(t)
+	e, col := newTestEditorWithColumn(t)
 	path := writeTempFile(t, "hello from disk\n")
 	win := col.AddWindow(" "+path+" Get Put Del ", "")
 
 	ws := &WindowSession{Tag: " " + path + " Get Put Del ", Kind: WinFile}
 	win.restore(ws)
+	waitGot(t, e, win)
 
 	if win.kind != WinFile {
 		t.Errorf("kind = %v, want WinFile", win.kind)
@@ -229,12 +241,13 @@ func TestWindowRestoreCleanFile(t *testing.T) {
 }
 
 func TestWindowRestoreCleanDir(t *testing.T) {
-	_, col := newTestEditorWithColumn(t)
+	e, col := newTestEditorWithColumn(t)
 	dir := t.TempDir()
 	win := col.AddWindow(" "+dir+"/ Get Del ", "")
 
 	ws := &WindowSession{Tag: " " + dir + "/ Get Del ", Kind: WinDir}
 	win.restore(ws)
+	waitGot(t, e, win)
 
 	if win.kind != WinDir {
 		t.Errorf("kind = %v, want WinDir", win.kind)
@@ -483,6 +496,7 @@ func TestEditorRoundTripCleanFile(t *testing.T) {
 		t.Fatalf("windows = %d, want 1", len(e2.columns[0].windows))
 	}
 	w2 := e2.columns[0].windows[0]
+	waitGot(t, e2, w2)
 	if w2.kind != WinFile {
 		t.Errorf("kind = %v, want WinFile", w2.kind)
 	}
