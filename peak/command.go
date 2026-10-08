@@ -133,11 +133,7 @@ func (e *Editor) argText(win *Window, cmd string) string {
 	}
 	sel := e.focusedView.GetBuffer().GetSelectedText()
 	if sel == "" {
-		target := win
-		if target == nil {
-			target = e.active
-		}
-		if target != nil {
+		if target := e.getTargetWindow(win); target != nil {
 			sel = target.body.GetBuffer().GetSelectedText()
 			if sel == "" {
 				sel = target.tag.buffer.GetSelectedText()
@@ -305,7 +301,7 @@ func (e *Editor) cmdGet(win *Window, cmd string) {
 
 func (e *Editor) cmdPut(win *Window, cmd string) {
 	target := e.getTargetWindow(win)
-	if target == nil {
+	if target == nil || target.kind == WinTerm {
 		return
 	}
 	arg := e.argName(target, cmd)
@@ -320,12 +316,8 @@ func (e *Editor) cmdPut(win *Window, cmd string) {
 	if target.fileName() == "" {
 		target.SetName(path) // naming a new window's file
 	}
-	tv := target.bodyTextView()
-	if tv == nil {
-		return
-	}
-	text := tv.buffer.GetText()
-	version := tv.buffer.version
+	b := target.bodyTextView().buffer
+	text, version := b.GetText(), b.version
 	go func() {
 		err := writeFile(path, []byte(text))
 		e.callCh <- func() {
@@ -370,32 +362,21 @@ func (e *Editor) RemoveWindow(target *Window) {
 	target.Close()
 	col.remove(target)
 	if e.active == target {
+		e.active, e.focusedView = nil, col.tag
 		if len(col.windows) > 0 {
 			e.active = col.windows[0]
-		} else {
-			e.active = nil
-		}
-		if e.active != nil {
 			e.focusedView = e.active.body
-		} else {
-			e.focusedView = col.tag
 		}
 	}
 }
 
 func (e *Editor) cmdDelcol(col *Column, win *Window) {
-	target := col
-	if target == nil && win != nil {
-		target = win.parent
+	if col == nil && win != nil {
+		col = win.parent
 	}
-	if target == nil {
-		return
+	if col != nil && e.warnDirty(col, nil, col.windows) {
+		e.RemoveColumn(col)
 	}
-
-	if !e.warnDirty(target, nil, target.windows) {
-		return
-	}
-	e.RemoveColumn(target)
 }
 
 func (e *Editor) cmdNewCol() {
@@ -419,42 +400,33 @@ func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {
 	arg := e.argText(win, cmd)
 	win = e.getTargetWindow(win)
 	targetCol := e.getTargetColumn(col, win)
-	if win != nil {
-		winPath := win.GetFilename()
-		if mountPath, mountFs := ns.FindMount(winPath); mountPath != "" {
-			dir := getPathDir(winPath)
-			relPath, _ := filepath.Rel(mountPath, dir)
-			if newF, err := mountFs.OpenFile("new", os.O_RDWR, 0); err == nil {
-				go func() {
-					defer newF.Close()
-					payload := toDir(relPath)
-					if arg != "" {
-						payload += "\n" + arg
+	dir := e.dirOf(win)
+	if mountPath, mountFs := ns.FindMount(dir); mountPath != "" {
+		relPath, _ := filepath.Rel(mountPath, dir)
+		if newF, err := mountFs.OpenFile("new", os.O_RDWR, 0); err == nil {
+			go func() {
+				defer newF.Close()
+				payload := toDir(relPath)
+				if arg != "" {
+					payload += "\n" + arg
+				}
+				if _, werr := newF.WriteAt([]byte(payload), 0); werr != nil {
+					e.callCh <- func() {
+						e.showError(targetCol, win, "remote session: "+werr.Error())
 					}
-					if _, werr := newF.WriteAt([]byte(payload), 0); werr != nil {
-						e.callCh <- func() {
-							e.showError(targetCol, win, "remote session: "+werr.Error())
-						}
-						return
-					}
-					buf := make([]byte, 256)
-					n, _ := newF.ReadAt(buf, 0)
-					sessRel := strings.TrimSpace(string(buf[:n]))
-					if sessRel != "" {
-						e.openRemoteTermWindow(targetCol, win, mountPath, sessRel, dir)
-					}
-				}()
-				return
-			}
+					return
+				}
+				buf := make([]byte, 256)
+				n, _ := newF.ReadAt(buf, 0)
+				sessRel := strings.TrimSpace(string(buf[:n]))
+				if sessRel != "" {
+					e.openRemoteTermWindow(targetCol, win, mountPath, sessRel, dir)
+				}
+			}()
+			return
 		}
 	}
 
-	dir := ""
-	if win != nil {
-		dir = win.GetDir()
-	} else {
-		dir = getwd()
-	}
 	if localDir, ok := ns.ResolveLocalPath(dir); ok {
 		dir = localDir
 	} else {
@@ -542,7 +514,7 @@ func (e *Editor) cmdZerox(col *Column, win *Window) {
 			newWin.markSaved(newTv.buffer.version)
 		}
 		e.showWindow(newWin)
-	} else if target.kind == WinTerm {
+	} else {
 		e.cmdWin(col, target, "Win")
 	}
 }
