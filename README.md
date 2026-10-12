@@ -1,25 +1,56 @@
-# Peak - An Acme-inspired TUI Text Editor
+# Peak
 
 <img width="2422" height="1517" alt="image" src="https://github.com/user-attachments/assets/ff8f6813-bd30-43bd-b1dd-aaba209870cc" />
 
+Peak is a terminal text editor, modeled on Plan 9's acme. Middle click to run. Right click to plumb (open or find).
 
-## What
-*   This is a replicate of Plan 9 Acme in a TUI environment. It doesn't aim to be a bit-by-bit clone but strives to be somewhat usable and potentially better than other simple terminal text editors.
-*   This project was developed with the assistance of Gemini CLI. However, this does not mean it is vibe coded. I stop and review its code at almost every change, and roll back or modify any changes that don't meet my preferences (As a result, at least 2/3 of changes was reset). You can confirm the code quality.
-*   I hope Rob Pike won't see this. If he does, he can consult Gemini directly, as he, Go, and Gemini all belong to the same company.
-*   Some people may ask me why I did this, because when I first made this project, I was just looking for something to do in a few days of boring classes, and an idea I had many years ago popped into my head.
-*   **Warning: this is a toy project that may not become mature.**
+## Use of AI
 
-## How
+Peak is written with AI assistance. If you consider any AI-assisted code to be slop, I'm sorry that this project is not for you.
+
+I do review the changes and throw away a lot of them.
+
+It's also not just letting the agent copy acme or edwood to TUI. I built it from my experience with acme while adding some nice-to-have features along the way.
+
+Some parts are borrowed intentionally:
+
+- `Edit` (sam's command language) is ported from Edwood's port of acme. Check `peak/sregx.go`.
+- `peak/term` is from micro-editor/terminal.
+- `peak/regexp` is Edwood's regexp engine, which is itself a modified copy of Go's.
+- `internal/vfs/afero` is a trimmed fork of afero, dropping HTTP parts.
+
+## Features
+
+- Mouse chording (Doesn't work for ghostty linux, GTK issue)
+- Handles colored by window state
+- True SREGX (`Edit`), same as acme's
+- `Win` opens terminal window, also support remote ones
+- `/peak` VFS, 9P file server for editor state
+- Mount and bind filesystems: `Mount`, `Bind`, `Umount`
+- External syntax coloring and tree-sitter highlighting (`peak-lsp`)
+- Remote files, commands, terminal over SSH (`peak-ssh`)
+- Git as `.git/fs` filesystem (`peak-git`)
+- 40 themes, including plain old acme style
+- No CGO. Pure Go, main executable only 4M in size
+
+## Building
 
 ```bash
-cd peak
-CGO_ENABLED=0 go build .
-./peak
+CGO_ENABLED=0 go build -o bin/ ./peak ./peak-ssh ./peak-git ./peak-lsp
+./bin/peak
 ```
 
-Note that macOS doesn't support middle-click. You may want to install and run [MiddleClick](https://github.com/artginzburg/MiddleClick).
+Or with Nix: `nix build`.
 
-## Usage
+macOS has no middle-click by default. To use this editor you need [MiddleClick](https://github.com/artginzburg/MiddleClick).
 
-Simimar to [Acme's](https://9p.io/wiki/plan9/Using_acme/index.html) but sometimes may be different.
+## Documentation
+
+Check [`peak/doc`](peak/doc). In editor they are at `/peak/doc`. Run `Help` to open the path.
+
+- [Basics](peak/doc/Basics.md): layout, mouse, terminal windows
+- [Commands](peak/doc/Commands.md)
+- [Shortcuts](peak/doc/Shortcuts.md)
+- [Structural regular expressions](peak/doc/StructuralRegex.md)
+- [Virtual filesystem](peak/doc/VirtualFS.md): the 9P interface,
+  `peak-ssh` and `peak-git`
