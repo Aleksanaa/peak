@@ -361,7 +361,7 @@ func TestKill(t *testing.T) {
 	}
 	started := t.TempDir() + "/started"
 	e.Call(func() { e.Execute(col, win, "sleep 30 | cat & touch "+started+"; wait") })
-	if got := tag(); got != " sleep NewCol Kill Help Exit " {
+	if got := tag(); got != " sleep NewCol Kill Dump Help Exit " {
 		t.Fatalf("row tag %q while sleep runs", got)
 	}
 	waitFor(t, e, e.screen, func() bool { _, err := os.Stat(started); return err == nil })
@@ -369,7 +369,7 @@ func TestKill(t *testing.T) {
 	e.Call(func() { e.Execute(col, win, "Kill nosuch") })
 	e.Call(func() { e.Execute(col, win, "Kill sleep") })
 	// Killing only the shell would leave sleep holding the output.
-	waitFor(t, e, e.screen, func() bool { return tag() == " NewCol Kill Help Exit " })
+	waitFor(t, e, e.screen, func() bool { return tag() == " NewCol Kill Dump Help Exit " })
 	var errors string
 	e.Call(func() { errors = e.errorWindow(col, win).body.GetBuffer().GetText() })
 	if !strings.Contains(errors, "Kill: no process nosuch") {
@@ -393,9 +393,9 @@ func TestKillSelection(t *testing.T) {
 		win.body.GetBuffer().SetDot(0, 5)
 		e.Execute(col, win, "Kill")
 	})
-	waitFor(t, e, e.screen, func() bool { return tag() == " true; NewCol Kill Help Exit " })
+	waitFor(t, e, e.screen, func() bool { return tag() == " true; NewCol Kill Dump Help Exit " })
 	e.Call(func() { e.cmdKill(win, nil) })
-	waitFor(t, e, e.screen, func() bool { return tag() == " NewCol Kill Help Exit " })
+	waitFor(t, e, e.screen, func() bool { return tag() == " NewCol Kill Dump Help Exit " })
 }
 
 func TestZeroxClick(t *testing.T) {

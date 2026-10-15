@@ -142,7 +142,7 @@ func (e *Editor) setup(s tcell.Screen) {
 		log.Printf("theme: %v", err)
 	}
 
-	e.tag = NewTextView(" NewCol Kill Help Exit ", e.w, 1, &e.theme, &e.theme.GlobalTag, true, false)
+	e.tag = NewTextView(" NewCol Kill Dump Help Exit ", e.w, 1, &e.theme, &e.theme.GlobalTag, true, false)
 	e.focusedView = e.tag
 }
 

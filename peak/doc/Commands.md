@@ -8,6 +8,7 @@ Commands can be typed in any tag or body and executed by middle-clicking.
 - NewCol             Create a new column.
 - Kill [name...]     Kill the external commands named, or those selected,
                      or else all of them.
+- Dump [file]        Save the session to file, or ~/.peak/peak.dump.
 - Help               Open the documentation index.
 - Exit               Quit Peak. Warns if any window has unsaved changes.
                      Kills the commands still running.

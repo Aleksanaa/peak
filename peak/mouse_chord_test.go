@@ -213,7 +213,7 @@ func TestMouseChordGlobalTagCut(t *testing.T) {
 	press(e, 8, 0, tcell.ButtonPrimary)
 	press(e, 8, 0, tcell.ButtonPrimary|tcell.ButtonMiddle)
 
-	if got, want := e.tag.buffer.GetText(), " Kill Help Exit "; got != want {
+	if got, want := e.tag.buffer.GetText(), " Kill Dump Help Exit "; got != want {
 		t.Fatalf("global tag text after cut chord = %q, want %q", got, want)
 	}
 }
