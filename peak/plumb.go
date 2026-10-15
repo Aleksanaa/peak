@@ -20,11 +20,13 @@ var (
 
 // OpenExternal opens a path using the system's default application
 func OpenExternal(path string) error {
-	cmdName := "xdg-open"
-	if runtime.GOOS == "darwin" {
-		cmdName = "open"
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("open", path).Start()
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", path).Start()
 	}
-	return exec.Command(cmdName, path).Start()
+	return exec.Command("xdg-open", path).Start()
 }
 
 // Plumb attempts to handle a string (path or search).
