@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -418,7 +419,7 @@ func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {
 	targetCol := e.getTargetColumn(col, win)
 	dir := e.dirOf(win)
 	if mountPath, mountFs := ns.FindMount(dir); mountPath != "" {
-		relPath, _ := filepath.Rel(mountPath, dir)
+		relPath := relPath(mountPath, dir)
 		if newF, err := mountFs.OpenFile("new", os.O_RDWR, 0); err == nil {
 			go func() {
 				defer newF.Close()
@@ -443,9 +444,8 @@ func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {
 		}
 	}
 
-	if localDir, ok := ns.ResolveLocalPath(dir); ok {
-		dir = localDir
-	} else {
+	localDir, ok := ns.ResolveLocalPath(dir)
+	if !ok {
 		e.showError(targetCol, win, dir+": don't know how to open terminal window")
 		return
 	}
@@ -457,10 +457,10 @@ func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {
 	} else {
 		name = filepath.Base(strings.Fields(arg)[0])
 	}
-	sess, err := session.NewLocal(arg, dir)
+	sess, err := session.NewLocal(arg, localDir)
 	var newWin *Window
 	if err == nil {
-		newWin, err = targetCol.AddTermWindow(tagText(filepath.Join(dir, "-"+name), "Zerox Del"), arg, sess)
+		newWin, err = targetCol.AddTermWindow(tagText(path.Join(dir, "-"+name), "Zerox Del"), arg, sess)
 	}
 	if err != nil {
 		e.showError(targetCol, win, err.Error())
@@ -470,8 +470,8 @@ func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {
 }
 
 func (e *Editor) openRemoteTermWindow(targetCol *Column, win *Window, mountPath, sessRel, dir string) {
-	ioPath := filepath.Join(mountPath, sessRel, "io")
-	ctlPath := filepath.Join(mountPath, sessRel, "ctl")
+	ioPath := path.Join(mountPath, sessRel, "io")
+	ctlPath := path.Join(mountPath, sessRel, "ctl")
 
 	ioRead, err := ns.OpenFile(ioPath, os.O_RDONLY, 0)
 	if err != nil {
@@ -499,7 +499,7 @@ func (e *Editor) openRemoteTermWindow(targetCol *Column, win *Window, mountPath,
 	}
 
 	sess := session.NewRemote(ioRead, ioWrite, ctlF)
-	title := filepath.Join(dir, "-"+filepath.Base(mountPath))
+	title := path.Join(dir, "-"+path.Base(mountPath))
 
 	e.Call(func() {
 		newWin, err := targetCol.AddTermWindow(tagText(title, "Zerox Del"), "", sess)
@@ -625,7 +625,7 @@ func (e *Editor) errorWindow(col *Column, win *Window) *Window {
 	if win != nil {
 		dir = win.GetDir()
 	}
-	name := filepath.Join(dir, "+Errors")
+	name := path.Join(dir, "+Errors")
 	for _, w := range e.allWindows() {
 		if w.kind == WinOut && w.GetFilename() == name {
 			return w

@@ -39,7 +39,7 @@ func NewNineP(e *Editor) *NineP {
 	ns = vfs.NewCompositeFs()
 	p := &NineP{editor: e, bus: &eventBus{}, nsBase: nsBase}
 
-	ns.Mount("/", afero.NewOsFs(), "")
+	ns.MountLocal()
 	p.nsFs = newPeakNamespaceFs(e, p.bus)
 	ns.Mount(nsBase, p.nsFs, "")
 
@@ -108,10 +108,13 @@ func (p *NineP) BroadcastPut(win *Window) {
 func (p *NineP) Mount(socket, path string) (string, error) {
 	var clientFs *vfs.NinePClientFs
 	var err error
-	if name, ok := strings.CutPrefix(normalizePath(socket, ""), p.nsBase+"/srv/"); ok {
+	sock := normalizePath(socket, "")
+	if name, ok := strings.CutPrefix(sock, p.nsBase+"/srv/"); ok {
 		clientFs, err = p.nsFs.srvReg.fs(name)
+	} else if local, ok := ns.ResolveLocalPath(sock); ok {
+		clientFs, err = vfs.NewNinePClientFs(local)
 	} else {
-		clientFs, err = vfs.NewNinePClientFs(normalizePath(socket, ""))
+		err = fmt.Errorf("%s: not a local socket", socket)
 	}
 	if err != nil {
 		return "", err

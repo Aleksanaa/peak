@@ -3,7 +3,7 @@ package afero
 import (
 	"fmt"
 	"os"
-	"path/filepath"
+	"path"
 	"syscall"
 	"time"
 )
@@ -113,7 +113,7 @@ func (u *CopyOnWriteFs) canWriteAt(dir string) bool {
 	if err == nil {
 		return fi.Mode().Perm()&0200 != 0
 	}
-	parent := filepath.Dir(dir)
+	parent := path.Dir(dir)
 	if parent == dir {
 		return false
 	}
@@ -125,7 +125,7 @@ func (u *CopyOnWriteFs) canWriteAt(dir string) bool {
 // the parent directory already exists in the layer with write permission, or
 // because a writable ancestor means MkdirAll can create it).
 func (u *CopyOnWriteFs) withWritePerm(fi os.FileInfo, name string) os.FileInfo {
-	if u.canWriteAt(filepath.Dir(name)) {
+	if u.canWriteAt(path.Dir(name)) {
 		return &copyOnWriteInfo{fi}
 	}
 	return fi
@@ -256,7 +256,7 @@ func (u *CopyOnWriteFs) OpenFile(name string, flag int, perm os.FileMode) (File,
 			return u.layer.OpenFile(name, flag, perm)
 		}
 
-		dir := filepath.Dir(name)
+		dir := path.Dir(name)
 		isaDir, err := IsDir(u.base, dir)
 		if err != nil && !os.IsNotExist(err) {
 			return nil, err

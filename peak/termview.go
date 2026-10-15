@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/aleksana/peak/internal/session"
+	"github.com/aleksana/peak/internal/vfs"
 	terminal "github.com/aleksana/peak/peak/term"
 	"github.com/atotto/clipboard"
 	"github.com/gdamore/tcell/v3"
@@ -116,7 +117,7 @@ func NewTermView(editor *Editor, sess session.Session, onClose func()) (*TermVie
 		case tv.editor.callCh <- func() {
 			if tv.OnCWD != nil {
 				tv.onCWDStarted = true
-				tv.OnCWD(path)
+				tv.OnCWD(vfs.FromOS(path))
 			}
 		}:
 		default:

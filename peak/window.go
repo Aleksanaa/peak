@@ -1,7 +1,7 @@
 package main
 
 import (
-	"path/filepath"
+	"path"
 	"strings"
 
 	"github.com/aleksana/peak/internal/quote"
@@ -428,7 +428,7 @@ func newTermWindow(tag, cmd string, sess session.Session, col *Column) (*Window,
 	win.body = term
 	filename := win.GetFilename()
 	suffix := ""
-	if base := filepath.Base(filename); strings.HasPrefix(base, "-") {
+	if base := path.Base(filename); strings.HasPrefix(base, "-") {
 		suffix = base
 	}
 	tagDir := getPathDir(filename)
@@ -437,14 +437,14 @@ func newTermWindow(tag, cmd string, sess session.Session, col *Column) (*Window,
 		remoteDirBase string
 		enabled       bool
 	)
-	term.OnCWD = func(path string) {
+	term.OnCWD = func(cwd string) {
 		if !enabled {
-			tagDirBase, remoteDirBase = commonPathBase(tagDir, path)
+			tagDirBase, remoteDirBase = commonPathBase(tagDir, cwd)
 			enabled = true
 		}
 		var newPath string
-		if strings.HasPrefix(path+"/", remoteDirBase+"/") {
-			newPath = tagDirBase + path[len(remoteDirBase):]
+		if strings.HasPrefix(cwd+"/", remoteDirBase+"/") {
+			newPath = tagDirBase + cwd[len(remoteDirBase):]
 		} else {
 			newPath = tagDirBase + "/"
 		}
@@ -452,7 +452,7 @@ func newTermWindow(tag, cmd string, sess session.Session, col *Column) (*Window,
 			if _, err := ns.Stat(newPath); err == nil {
 				break
 			}
-			if parent := filepath.Dir(newPath); parent != newPath {
+			if parent := path.Dir(newPath); parent != newPath {
 				newPath = parent
 			} else {
 				newPath = tagDirBase + "/"
@@ -460,7 +460,7 @@ func newTermWindow(tag, cmd string, sess session.Session, col *Column) (*Window,
 			}
 		}
 		if suffix != "" {
-			win.SetName(filepath.Join(newPath, suffix))
+			win.SetName(path.Join(newPath, suffix))
 		} else {
 			win.SetName(newPath + "/")
 		}

@@ -3,7 +3,7 @@ package afero
 import (
 	"io"
 	"os"
-	"path/filepath"
+	"path"
 	"syscall"
 )
 
@@ -270,12 +270,12 @@ func (f *UnionFile) WriteString(s string) (n int, err error) {
 
 func copyFile(base Fs, layer Fs, name string, bfh File) error {
 	// First make sure the directory exists
-	exists, err := Exists(layer, filepath.Dir(name))
+	exists, err := Exists(layer, path.Dir(name))
 	if err != nil {
 		return err
 	}
 	if !exists {
-		err = layer.MkdirAll(filepath.Dir(name), 0o777) // FIXME?
+		err = layer.MkdirAll(path.Dir(name), 0o777) // FIXME?
 		if err != nil {
 			return err
 		}

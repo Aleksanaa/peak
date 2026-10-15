@@ -21,7 +21,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"path/filepath"
+	"path"
 	"slices"
 	"strings"
 
@@ -851,8 +851,8 @@ func (ed *edit) D(w *Window, cp *Cmd) bool {
 		dir = w.GetDir()
 	}
 	for _, s := range names {
-		if s != "" && !filepath.IsAbs(s) {
-			s = filepath.Join(dir, s)
+		if s != "" && !path.IsAbs(s) {
+			s = path.Join(dir, s)
 		}
 		w := ed.lookfile(s)
 		if w == nil {
@@ -1606,8 +1606,8 @@ func (ed *edit) cmdname(w *Window, str string, set bool) string {
 	r := ""
 	if s := strings.TrimLeft(str, " \t"); s != "" {
 		r = s
-		if !filepath.IsAbs(s) {
-			r = filepath.Join(w.GetDir(), s)
+		if !path.IsAbs(s) {
+			r = path.Join(w.GetDir(), s)
 		}
 		for _, o := range ed.e.allWindows() {
 			if o != w && o.fileName() == r {

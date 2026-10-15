@@ -265,8 +265,8 @@ func (e *Editor) Load(file string) error {
 	}
 	e.columns, e.active, e.focusedView = nil, nil, e.tag
 
-	if s.CurrentDir != "" {
-		os.Chdir(s.CurrentDir)
+	if dir, ok := ns.ResolveLocalPath(s.CurrentDir); ok {
+		os.Chdir(dir)
 	}
 	e.tag.buffer.SetText(s.GlobalTag)
 
@@ -281,7 +281,8 @@ func (e *Editor) Load(file string) error {
 		for _, ws := range cs.Windows {
 			var win *Window
 			if ws.Kind == WinTerm {
-				sess, err := session.NewLocal(ws.TermCmd, ws.TermDir)
+				dir, _ := ns.ResolveLocalPath(ws.TermDir)
+				sess, err := session.NewLocal(ws.TermCmd, dir)
 				if err == nil {
 					win, err = col.AddTermWindow(ws.Tag, ws.TermCmd, sess)
 				}

@@ -3,6 +3,7 @@ package afero
 import (
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -34,7 +35,7 @@ type BasePathFile struct {
 
 func (f *BasePathFile) Name() string {
 	sourcename := f.File.Name()
-	return strings.TrimPrefix(sourcename, filepath.Clean(f.path))
+	return strings.TrimPrefix(sourcename, path.Clean(f.path))
 }
 
 func (f *BasePathFile) ReadDir(n int) ([]fs.DirEntry, error) {
@@ -50,18 +51,18 @@ func NewBasePathFs(source Fs, path string) Fs {
 
 // on a file outside the base path it returns the given file name and an error,
 // else the given file with the base path prepended
-func (b *BasePathFs) RealPath(name string) (path string, err error) {
+func (b *BasePathFs) RealPath(name string) (p string, err error) {
 	if err := validateBasePathName(name); err != nil {
 		return name, err
 	}
 
-	bpath := filepath.Clean(b.path)
-	path = filepath.Clean(filepath.Join(bpath, name))
-	if !strings.HasPrefix(path, bpath) {
+	bpath := path.Clean(b.path)
+	p = path.Join(bpath, name)
+	if !strings.HasPrefix(p, bpath) {
 		return name, os.ErrNotExist
 	}
 
-	return path, nil
+	return p, nil
 }
 
 func validateBasePathName(name string) error {

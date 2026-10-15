@@ -64,7 +64,9 @@ func (e *Editor) Plumb(win *Window, word string) bool {
 		case os.IsNotExist(err):
 			e.Execute(nil, win, "Look "+word)
 		case err == errBinary:
-			OpenExternal(full)
+			if local, ok := ns.ResolveLocalPath(full); ok {
+				OpenExternal(local)
+			}
 		default:
 			e.showError(nil, win, full+": "+normalizeError(err))
 		}

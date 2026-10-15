@@ -5,7 +5,7 @@ import (
 	"io"
 	"maps"
 	"os"
-	"path/filepath"
+	"path"
 	"slices"
 	"strings"
 	"sync"
@@ -38,8 +38,8 @@ func NewCompositeFs() *CompositeFs {
 // Mount attaches mountFs at path, replacing what was there. src says what
 // mountFs is, for listing; it is empty for file servers that are part of the
 // namespace's makeup rather than mounted into it.
-func (fs *CompositeFs) Mount(path string, mountFs afero.Fs, src string) {
-	cleanPath := filepath.Clean(path)
+func (fs *CompositeFs) Mount(name string, mountFs afero.Fs, src string) {
+	cleanPath := path.Clean(name)
 	// Ensure the mount point exists in the root memory FS
 	_ = fs.root.MkdirAll(cleanPath, 0755)
 
@@ -58,8 +58,8 @@ func (fs *CompositeFs) Mounts() []Mount {
 }
 
 // Umount detaches an afero.Fs from the given path.
-func (fs *CompositeFs) Umount(path string) {
-	cleanPath := filepath.Clean(path)
+func (fs *CompositeFs) Umount(name string) {
+	cleanPath := path.Clean(name)
 	fs.mu.Lock()
 	delete(fs.mounts, cleanPath)
 	fs.mu.Unlock()
@@ -69,22 +69,17 @@ func (fs *CompositeFs) Umount(path string) {
 func (fs *CompositeFs) getMountAndFs(name string) (mountPath string, mountedFs afero.Fs, relPath string) {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
-	cleanName := filepath.Clean(name)
+	cleanName := path.Clean(name)
 	bestMatch := ""
 	for m := range fs.mounts {
-		if cleanName == m || strings.HasPrefix(cleanName, m+string(os.PathSeparator)) || (m == "/" && strings.HasPrefix(cleanName, "/")) {
+		if cleanName == m || strings.HasPrefix(cleanName, m+"/") || (m == "/" && strings.HasPrefix(cleanName, "/")) {
 			if len(m) > len(bestMatch) {
 				bestMatch = m
 			}
 		}
 	}
 	if bestMatch != "" {
-		rel, _ := filepath.Rel(bestMatch, cleanName)
-		if rel == "." {
-			rel = "/"
-		} else {
-			rel = "/" + rel
-		}
+		rel := path.Join("/", strings.TrimPrefix(cleanName, bestMatch))
 		return bestMatch, fs.mounts[bestMatch].Fs, rel
 	}
 	return "", fs.root, name
@@ -100,7 +95,7 @@ func (fs *CompositeFs) getFs(name string) (afero.Fs, string) {
 // called with a dir relative to its mount point; the returned path is converted
 // back to a composite-absolute path.
 func (fs *CompositeFs) WalkRedirect(dir, name string) (string, os.FileInfo, bool) {
-	mountPath, targetFs, relDir := fs.getMountAndFs(filepath.Clean(dir))
+	mountPath, targetFs, relDir := fs.getMountAndFs(path.Clean(dir))
 	wr, ok := targetFs.(WalkRedirector)
 	if !ok {
 		return "", nil, false
@@ -112,7 +107,7 @@ func (fs *CompositeFs) WalkRedirect(dir, name string) (string, os.FileInfo, bool
 	if mountPath == "" {
 		return rp, fi, true
 	}
-	return filepath.Join(mountPath, strings.TrimPrefix(rp, "/")), fi, true
+	return path.Join(mountPath, strings.TrimPrefix(rp, "/")), fi, true
 }
 
 func (fs *CompositeFs) Create(name string) (afero.File, error) {
@@ -189,8 +184,8 @@ func (fs *CompositeFs) Name() string { return "CompositeFs" }
 func (fs *CompositeFs) ResolveLocalPath(name string) (string, bool) {
 	_, mountedFs, relPath := fs.getMountAndFs(name)
 	switch mfs := mountedFs.(type) {
-	case *afero.OsFs:
-		return filepath.Clean(relPath), true
+	case LocalFs:
+		return mfs.RealPath(relPath), true
 	case *afero.BasePathFs:
 		realPath, err := mfs.RealPath(relPath)
 		if err != nil {
@@ -206,13 +201,13 @@ func (fs *CompositeFs) ResolveLocalPath(name string) (string, bool) {
 func (fs *CompositeFs) FindMount(name string) (string, afero.Fs) {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
-	cleanName := filepath.Clean(name)
+	cleanName := path.Clean(name)
 	bestMatch := ""
 	for m := range fs.mounts {
 		if m == "/" {
 			continue
 		}
-		if cleanName == m || strings.HasPrefix(cleanName, m+string(os.PathSeparator)) {
+		if cleanName == m || strings.HasPrefix(cleanName, m+"/") {
 			if len(m) > len(bestMatch) {
 				bestMatch = m
 			}

@@ -2,7 +2,7 @@ package vfs
 
 import (
 	"os"
-	"path/filepath"
+	"path"
 	"strings"
 	"time"
 
@@ -20,10 +20,10 @@ type rootedFs struct {
 
 // NewRootedFs returns an afero.Fs that exposes the composite subtree at base.
 func NewRootedFs(composite *CompositeFs, base string) afero.Fs {
-	return &rootedFs{composite: composite, base: filepath.Clean(base)}
+	return &rootedFs{composite: composite, base: path.Clean(base)}
 }
 
-func (f *rootedFs) abs(name string) string { return filepath.Join(f.base, name) }
+func (f *rootedFs) abs(name string) string { return path.Join(f.base, name) }
 
 func (f *rootedFs) Open(name string) (afero.File, error) {
 	return f.composite.Open(f.abs(name))
@@ -63,7 +63,7 @@ func (f *rootedFs) WalkRedirect(dir, name string) (string, os.FileInfo, bool) {
 	if !ok {
 		return "", nil, false
 	}
-	rel := strings.TrimPrefix(filepath.Clean(rp), f.base)
+	rel := strings.TrimPrefix(path.Clean(rp), f.base)
 	if rel == "" {
 		rel = "/"
 	}

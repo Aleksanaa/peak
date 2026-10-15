@@ -7,68 +7,75 @@ import (
 	"io"
 	"math"
 	"os"
-	"path/filepath"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/aleksana/peak/internal/quote"
 	"github.com/aleksana/peak/internal/session"
+	"github.com/aleksana/peak/internal/vfs"
 	"github.com/aleksana/peak/internal/vfs/afero"
 )
 
 // toDir ensures a directory path ends with a trailing slash.
-func toDir(path string) string {
-	if path != "" && !strings.HasSuffix(path, "/") {
-		return path + "/"
+func toDir(p string) string {
+	if p != "" && !strings.HasSuffix(p, "/") {
+		return p + "/"
 	}
-	return path
+	return p
 }
 
 // getPathDir returns the directory associated with a normalized path.
-func getPathDir(path string) string {
-	if path == "" {
+func getPathDir(p string) string {
+	if p == "" {
 		return getwd()
 	}
-	if strings.HasSuffix(path, "/") {
-		return path
+	if strings.HasSuffix(p, "/") {
+		return p
 	}
-	return toDir(filepath.Dir(path))
+	return toDir(path.Dir(p))
+}
+
+// relPath returns p, which is in dir base, relative to base.
+func relPath(base, p string) string {
+	if rel := strings.Trim(strings.TrimPrefix(p, base), "/"); rel != "" {
+		return rel
+	}
+	return "."
 }
 
 // normalizePath converts any user-input path to a canonical absolute form.
 // Expands ~, ./, and relative segments; relative paths are resolved against
-// base (cwd if base is empty). If the target exists in the VFS, a trailing
+// base (cwd if base is empty). An OS path (C:\Users on Windows) becomes the
+// namespace's (/c/Users). If the target exists in the VFS, a trailing
 // slash is added for directories and stripped for files. For paths that do
 // not yet exist, the trailing slash from the input is preserved.
-func normalizePath(path, base string) string {
-	if path == "" {
-		return path
+func normalizePath(p, base string) string {
+	if p == "" {
+		return p
 	}
-	if !filepath.IsAbs(path) && !strings.HasPrefix(path, "~") {
+	p = vfs.FromOS(p)
+	if !path.IsAbs(p) && !strings.HasPrefix(p, "~") {
 		if base == "" {
 			base = getwd()
 		}
-		joined := filepath.Join(base, path)
-		if strings.HasSuffix(path, "/") && !strings.HasSuffix(joined, "/") {
+		joined := path.Join(base, p)
+		if strings.HasSuffix(p, "/") && !strings.HasSuffix(joined, "/") {
 			joined += "/"
 		}
-		path = joined
+		p = joined
 	}
-	trailingSlash := strings.HasSuffix(path, "/")
+	trailingSlash := strings.HasSuffix(p, "/")
 	var abs string
-	if strings.HasPrefix(path, "~") {
+	if strings.HasPrefix(p, "~") {
 		if home, err := os.UserHomeDir(); err == nil {
-			if path == "~" || path == "~/" {
-				abs = home
-			} else {
-				abs = filepath.Join(home, path[1:])
-			}
+			abs = path.Join(vfs.FromOS(home), p[1:])
 		} else {
-			abs = path
+			abs = p
 		}
 	} else {
-		abs, _ = filepath.Abs(path)
+		abs = path.Clean(p)
 	}
 	if fi, err := ns.Stat(abs); err == nil {
 		if fi.IsDir() {
@@ -104,7 +111,7 @@ func commonPathBase(tagDir, firstPath string) (tagBase, remoteBase string) {
 // getwd returns the current working directory with a trailing slash.
 func getwd() string {
 	dir, _ := os.Getwd()
-	return toDir(dir)
+	return toDir(vfs.FromOS(dir))
 }
 
 // readFile reads data from a file.
@@ -176,7 +183,7 @@ func runCommand(cmd, path, input string, winid int) (string, error) {
 	if mountPath, mountFs := ns.FindMount(dir); mountPath != "" {
 		if f, err := mountFs.OpenFile("run", os.O_RDWR, 0); err == nil {
 			defer f.Close()
-			relPath, _ := filepath.Rel(mountPath, dir)
+			relPath := relPath(mountPath, dir)
 			if _, err := f.WriteAt([]byte(toDir(relPath)+"\n"+cmd+"\n"), 0); err != nil {
 				return "", err
 			}
