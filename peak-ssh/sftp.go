@@ -1,7 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"crypto/ed25519"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"os/user"
@@ -16,6 +20,7 @@ import (
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 type SSHClient struct {
@@ -25,6 +30,7 @@ type SSHClient struct {
 
 type SftpFs struct {
 	conns     sync.Map // string -> *SSHClient
+	refused   sync.Map // host -> refusal
 	statMu    sync.RWMutex
 	statCache map[string]os.FileInfo // "conn:path" -> FileInfo, populated by Readdir
 	dirKeys   map[string][]string    // "conn:dirPath" -> child keys in statCache
@@ -85,11 +91,16 @@ func (s *SftpFs) getClient(connStr string) (*SSHClient, error) {
 		}
 	}
 
+	check, algos, err := s.hostKeys(host)
+	if err != nil {
+		return nil, err
+	}
 	config := &ssh.ClientConfig{
-		User:            userStr,
-		Auth:            auths,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         10 * time.Second,
+		User:              userStr,
+		Auth:              auths,
+		HostKeyCallback:   check,
+		HostKeyAlgorithms: algos,
+		Timeout:           10 * time.Second,
 	}
 
 	sshConn, err := ssh.Dial("tcp", host, config)
@@ -106,6 +117,71 @@ func (s *SftpFs) getClient(connStr string) (*SSHClient, error) {
 	client := &SSHClient{ssh: sshConn, sftp: sftpClient}
 	s.conns.Store(connStr, client)
 	return client, nil
+}
+
+// hostKeys checks host's key against ~/.ssh/known_hosts. An unknown host's
+// key is refused, then trusted if offered again a second or more later.
+func (s *SftpFs) hostKeys(host string) (ssh.HostKeyCallback, []string, error) {
+	home, _ := os.UserHomeDir()
+	file := filepath.Join(home, ".ssh", "known_hosts")
+	check, err := knownhosts.New(file)
+	if errors.Is(err, fs.ErrNotExist) {
+		check, err = knownhosts.New()
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	trust := func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		err := check(hostname, remote, key)
+		var keyErr *knownhosts.KeyError
+		if !errors.As(err, &keyErr) || len(keyErr.Want) > 0 {
+			return err
+		}
+		r, ok := s.refused.LoadAndDelete(host)
+		if !ok || !bytes.Equal(r.(refusal).key.Marshal(), key.Marshal()) || time.Since(r.(refusal).at) < time.Second {
+			s.refused.Store(host, refusal{key, time.Now()})
+			return fmt.Errorf("unknown host key %s; connect again to trust it", ssh.FingerprintSHA256(key))
+		}
+		return addKnownHost(file, hostname, key)
+	}
+	return trust, knownAlgos(check, host), nil
+}
+
+// knownAlgos returns the algorithms of the keys known for host, so that it
+// offers one of them: Go would rather ask for RSA than ed25519.
+func knownAlgos(check ssh.HostKeyCallback, host string) []string {
+	// A key no host has is refused with the keys host has.
+	pub, _, _ := ed25519.GenerateKey(nil)
+	probe, _ := ssh.NewPublicKey(pub)
+	var keyErr *knownhosts.KeyError
+	var algos []string
+	if errors.As(check(host, &net.TCPAddr{}, probe), &keyErr) {
+		for _, k := range keyErr.Want {
+			if t := k.Key.Type(); t == ssh.KeyAlgoRSA {
+				algos = append(algos, ssh.KeyAlgoRSASHA512, ssh.KeyAlgoRSASHA256)
+			} else {
+				algos = append(algos, t)
+			}
+		}
+	}
+	return algos
+}
+
+// A refusal is an unknown host's key and when it was refused.
+type refusal struct {
+	key ssh.PublicKey
+	at  time.Time
+}
+
+// addKnownHost adds hostname, known by key, to the known_hosts file.
+func addKnownHost(file, hostname string, key ssh.PublicKey) error {
+	os.MkdirAll(filepath.Dir(file), 0700)
+	f, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(f, knownhosts.Line([]string{knownhosts.Normalize(hostname)}, key))
+	return errors.Join(err, f.Close())
 }
 
 func (s *SftpFs) parse(name string) (string, string) {

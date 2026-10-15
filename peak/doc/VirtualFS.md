@@ -83,7 +83,10 @@ peak-ssh serves remote hosts' files, mounted at /peak/ssh:
 
 A file is /peak/ssh/[user@]host[:port]/path; the user defaults to yours
 and the port to 22. ~ is the remote home directory, as in
-/peak/ssh/host/~/.bashrc. It authenticates through SSH_AUTH_SOCK.
+/peak/ssh/host/~/.bashrc. It authenticates through SSH_AUTH_SOCK, and
+checks the host key against ~/.ssh/known_hosts. A new host is refused
+with its key's fingerprint in +Errors; open it again to trust the key.
+A known host offering another key is always refused.
 
 Commands executed in a window under /peak/ssh/ run on the remote host.
 
