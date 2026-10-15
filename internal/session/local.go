@@ -72,3 +72,11 @@ func (s *localSession) Resize(rows, cols int) error {
 		Cols: uint16(cols),
 	})
 }
+
+// Command returns a command that runs cmdStr with sh -c, in a new session:
+// with no terminal, a program that opens /dev/tty can't take over peak's.
+func Command(cmdStr string) *exec.Cmd {
+	c := exec.Command("sh", "-c", cmdStr)
+	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	return c
+}
