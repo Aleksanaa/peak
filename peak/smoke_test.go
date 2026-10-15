@@ -350,6 +350,54 @@ func TestPipeOutputAfterEdit(t *testing.T) {
 	}
 }
 
+// A running command's name leads the row tag until it exits, as in acme.
+// Kill name stops it, pipeline and all, and an unknown name is reported.
+func TestKill(t *testing.T) {
+	e, col := newTestEditorWithColumn(t)
+	win := col.AddWindow(" /tmp/kill.txt Get Put Del ", "")
+	tag := func() (text string) {
+		e.Call(func() { text = e.tag.buffer.GetText() })
+		return text
+	}
+	started := t.TempDir() + "/started"
+	e.Call(func() { e.Execute(col, win, "sleep 30 | cat & touch "+started+"; wait") })
+	if got := tag(); got != " sleep NewCol Kill Help Exit " {
+		t.Fatalf("row tag %q while sleep runs", got)
+	}
+	waitFor(t, e, e.screen, func() bool { _, err := os.Stat(started); return err == nil })
+
+	e.Call(func() { e.Execute(col, win, "Kill nosuch") })
+	e.Call(func() { e.Execute(col, win, "Kill sleep") })
+	// Killing only the shell would leave sleep holding the output.
+	waitFor(t, e, e.screen, func() bool { return tag() == " NewCol Kill Help Exit " })
+	var errors string
+	e.Call(func() { errors = e.errorWindow(col, win).body.GetBuffer().GetText() })
+	if !strings.Contains(errors, "Kill: no process nosuch") {
+		t.Errorf("+Errors %q does not report the unknown name", errors)
+	}
+}
+
+// Kill with no name kills the commands the selection names, and only those.
+func TestKillSelection(t *testing.T) {
+	e, col := newTestEditorWithColumn(t)
+	win := col.AddWindow(" /tmp/kill.txt Get Put Del ", "sleep")
+	tag := func() (text string) {
+		e.Call(func() { text = e.tag.buffer.GetText() })
+		return text
+	}
+	e.Call(func() {
+		e.Execute(col, win, "sleep 30")
+		e.Execute(col, win, "true; sleep 30")
+	})
+	e.Call(func() {
+		win.body.GetBuffer().SetDot(0, 5)
+		e.Execute(col, win, "Kill")
+	})
+	waitFor(t, e, e.screen, func() bool { return tag() == " true; NewCol Kill Help Exit " })
+	e.Call(func() { e.cmdKill(win, nil) })
+	waitFor(t, e, e.screen, func() bool { return tag() == " NewCol Kill Help Exit " })
+}
+
 func TestZeroxClick(t *testing.T) {
 	e, s := setupTest(t, 100, 24)
 

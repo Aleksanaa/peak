@@ -34,6 +34,7 @@ type Editor struct {
 	nextWinID int
 	ninep     *NineP
 	gesture   mouseGesture
+	commands  []*command // the external commands running
 }
 
 // Redraw signals the main loop to redraw on the next iteration.
@@ -141,7 +142,7 @@ func (e *Editor) setup(s tcell.Screen) {
 		log.Printf("theme: %v", err)
 	}
 
-	e.tag = NewTextView(" NewCol Help Exit ", e.w, 1, &e.theme, &e.theme.GlobalTag, true, false)
+	e.tag = NewTextView(" NewCol Kill Help Exit ", e.w, 1, &e.theme, &e.theme.GlobalTag, true, false)
 	e.focusedView = e.tag
 }
 
