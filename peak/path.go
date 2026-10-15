@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/aleksana/peak/internal/quote"
 	"github.com/aleksana/peak/internal/vfs/afero"
@@ -189,6 +190,8 @@ func runCommand(cmd, path, input string, winid int) (string, error) {
 		return "", fmt.Errorf("%s: don't know how to run command", path)
 	}
 	c := exec.Command("sh", "-c", cmd)
+	// With no terminal, a program that opens /dev/tty can't take over peak's.
+	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	c.Dir = localDir
 	c.Env = append(os.Environ(), "samfile="+path, "winid="+strconv.Itoa(winid))
 	c.Stdin = strings.NewReader(input)

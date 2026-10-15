@@ -32,6 +32,8 @@
                 ldflags = [
                   "-s"
                 ];
+
+                nativeCheckInputs = [ procps ];
               };
             default = peak;
           };

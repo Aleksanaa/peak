@@ -97,6 +97,15 @@ func TestRunCommandLocal(t *testing.T) {
 	}
 }
 
+// A local command has no terminal: it leads a session of its own.
+func TestRunCommandNoTerminal(t *testing.T) {
+	setupTest(t, 80, 24)
+	out, err := runCommand(`[ "$(ps -o sid= -p $$ | tr -d ' ')" = $$ ] && echo own`, t.TempDir()+"/x", "", 7)
+	if err != nil || out != "own\n" {
+		t.Errorf("output %q, %v; want the command in a session of its own", out, err)
+	}
+}
+
 // runStub is a file server's run file: it takes the request written to it
 // and replies with output.
 type runStub struct {
