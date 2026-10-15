@@ -200,5 +200,5 @@ func runCommand(cmd, path, input string, winid int) (string, error) {
 	c.Env = append(os.Environ(), "samfile="+path, "winid="+strconv.Itoa(winid))
 	c.Stdin = strings.NewReader(input)
 	out, err := c.CombinedOutput()
-	return string(out), err
+	return session.Output(out), err
 }

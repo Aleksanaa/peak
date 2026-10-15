@@ -15,3 +15,6 @@ func NewLocal(cmdStr, dir string) (Session, error) {
 func Command(cmdStr string) *exec.Cmd {
 	return exec.Command(Runner(), "-c", cmdStr)
 }
+
+// Output returns a command's output as text.
+func Output(b []byte) string { return string(b) }

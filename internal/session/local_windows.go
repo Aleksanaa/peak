@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"unicode/utf16"
+	"unicode/utf8"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -153,4 +155,29 @@ func (s *localSession) Resize(rows, cols int) error {
 		return nil
 	}
 	return windows.ResizePseudoConsole(s.hpc, windows.Coord{X: int16(cols), Y: int16(rows)})
+}
+
+// Output returns a command's output as text: decoded from the OEM code page,
+// which console programs such as cmd write to a pipe, unless it is UTF-8,
+// and with lines ending in LF, not CRLF.
+func Output(b []byte) string {
+	if !utf8.Valid(b) {
+		b = fromOEM(b)
+	}
+	return strings.ReplaceAll(string(b), "\r\n", "\n")
+}
+
+// fromOEM converts b from the system's OEM code page to UTF-8, or returns it
+// unchanged if it can't.
+func fromOEM(b []byte) []byte {
+	const cpOEM = 1 // CP_OEMCP
+	n, err := windows.MultiByteToWideChar(cpOEM, 0, &b[0], int32(len(b)), nil, 0)
+	if err != nil {
+		return b
+	}
+	u := make([]uint16, n)
+	if _, err := windows.MultiByteToWideChar(cpOEM, 0, &b[0], int32(len(b)), &u[0], n); err != nil {
+		return b
+	}
+	return []byte(string(utf16.Decode(u)))
 }

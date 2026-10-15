@@ -78,3 +78,6 @@ func Command(cmdStr string) *exec.Cmd {
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	return c
 }
+
+// Output returns a command's output as text.
+func Output(b []byte) string { return string(b) }
