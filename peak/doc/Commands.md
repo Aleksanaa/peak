@@ -77,6 +77,9 @@ Relative paths are resolved from the current window's directory.
 - +<name>            Output window (holds command output). +Errors is
                      the default for shell and command output.
 - -<name>            Terminal window.
+- /c/...             On Windows, drive C: (as in Git Bash). Paths are
+                     written with slashes; C:\Users may be typed too.
+- /unc/server/share  On Windows, the network share \\server\share.
 
 
 ## 7. Arguments

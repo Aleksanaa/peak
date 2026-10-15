@@ -184,8 +184,8 @@ func (fs *CompositeFs) Name() string { return "CompositeFs" }
 func (fs *CompositeFs) ResolveLocalPath(name string) (string, bool) {
 	_, mountedFs, relPath := fs.getMountAndFs(name)
 	switch mfs := mountedFs.(type) {
-	case LocalFs:
-		return mfs.RealPath(relPath), true
+	case interface{ RealPath(string) (string, bool) }: // LocalFs, uncFs
+		return mfs.RealPath(relPath)
 	case *afero.BasePathFs:
 		realPath, err := mfs.RealPath(relPath)
 		if err != nil {
