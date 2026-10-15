@@ -11,7 +11,7 @@ func NewLocal(cmdStr, dir string) (Session, error) {
 	return nil, errors.New("local sessions not supported on this platform")
 }
 
-// Command returns a command that runs cmdStr with sh -c.
+// Command returns a command that runs cmdStr with the Runner.
 func Command(cmdStr string) *exec.Cmd {
-	return exec.Command("sh", "-c", cmdStr)
+	return exec.Command(Runner(), "-c", cmdStr)
 }

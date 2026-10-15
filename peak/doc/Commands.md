@@ -17,7 +17,9 @@ Commands can be typed in any tag or body and executed by middle-clicking.
                      named after the current directory. Name its file by
                      typing the name after the directory in the tag, or with
                      Put name.
-- Win [cmd]          Open a terminal window in this column.
+- Win [cmd]          Open a terminal window in this column, running cmd
+                     with the command runner (see 5), or else $PEAKSHELL,
+                     $SHELL, or %ComSpec% on Windows (/bin/sh elsewhere).
 - Zerox              Duplicate the focused window into this column.
 - Delcol             Close the column. Warns if any window has unsaved changes.
 - Sort               Sort windows in the column alphabetically by filename.
@@ -60,6 +62,11 @@ Pipe operators work on the current selection:
 - <cmd               Replace the selection with the command output.
 - >cmd               Pipe the selection into the command (discards output).
 - |cmd               Pipe the selection through the command and replace it.
+
+Commands run with $PEAKRUNNER, else sh, else %ComSpec% on Windows, given
+the command after -c (/C for cmd). Unlike Win, they do not follow $SHELL,
+so a command means the same whatever your login shell. $samfile and
+$winid name the window the command was run from.
 
 
 ## 6. Path Syntax

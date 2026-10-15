@@ -3,6 +3,8 @@ package session
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -18,15 +20,15 @@ type localSession struct {
 	hpc windows.Handle // the pseudo console; 0 once closed
 }
 
-// shellCommand returns the program and command line that run cmdStr: with
-// sh -c if sh is on PATH (as with Git for Windows), else with cmd /C.
+// shellCommand returns the program and command line that run cmdStr with
+// the Runner.
 func shellCommand(cmdStr string) (app, cmdLine string) {
-	if sh, err := exec.LookPath("sh"); err == nil {
-		return sh, windows.ComposeCommandLine([]string{sh, "-c", cmdStr})
+	app = Runner()
+	if base := strings.ToLower(filepath.Base(app)); base == "cmd.exe" || base == "cmd" {
+		// cmd parses the rest of its command line itself, unquoted.
+		return app, windows.EscapeArg(app) + " /C " + cmdStr
 	}
-	// cmd parses the rest of its command line itself, unquoted.
-	app = os.Getenv("ComSpec")
-	return app, windows.EscapeArg(app) + " /C " + cmdStr
+	return app, windows.ComposeCommandLine([]string{app, "-c", cmdStr})
 }
 
 // Command returns a command that runs cmdStr, in a console of its own that
@@ -38,18 +40,13 @@ func Command(cmdStr string) *exec.Cmd {
 	return c
 }
 
-// NewLocal starts cmdStr (or $SHELL, else %ComSpec%, if empty) in dir under
+// NewLocal starts cmdStr with the Runner (or the Shell if empty) in dir under
 // a new ConPTY.
 func NewLocal(cmdStr, dir string) (Session, error) {
 	var app, cmdLine string
 	if cmdStr == "" {
-		// Git Bash sets $SHELL to an MSYS path, which only resolves when
-		// its directory is on PATH too.
-		shell, err := exec.LookPath(os.Getenv("SHELL"))
-		if err != nil {
-			shell = os.Getenv("ComSpec")
-		}
-		app, cmdLine = shell, windows.EscapeArg(shell)
+		app = Shell()
+		cmdLine = windows.EscapeArg(app)
 	} else {
 		app, cmdLine = shellCommand(cmdStr)
 	}

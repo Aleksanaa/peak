@@ -88,7 +88,11 @@ See Commands.md for the full reference.
 
 ## 4. Terminal Windows
 
-Win opens a terminal window running your shell in the current directory.
+Win opens a terminal window running your shell in the current directory:
+$PEAKSHELL, else $SHELL, else %ComSpec% on Windows. To pick a shell for
+Peak alone, set $PEAKSHELL, e.g. to pwsh or to Git Bash's
+C:\Program Files\Git\bin\bash.exe.
+
 Input goes directly to the shell, so text editing commands (Get, Put,
 Undo, Redo, and text modification part in Edit) do not apply. Keyboard
 shortcuts that would conflict with shell input require the Alt modifier:

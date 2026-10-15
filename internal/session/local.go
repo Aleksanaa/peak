@@ -16,17 +16,14 @@ type localSession struct {
 	exited chan struct{} // closed once the child has been reaped
 }
 
-// NewLocal starts cmdStr (or $SHELL if empty) in dir under a new PTY.
+// NewLocal starts cmdStr with the Runner (or the Shell if empty) in dir under
+// a new PTY.
 func NewLocal(cmdStr, dir string) (Session, error) {
 	var cmd *exec.Cmd
 	if cmdStr == "" {
-		shell := os.Getenv("SHELL")
-		if shell == "" {
-			shell = "/bin/sh"
-		}
-		cmd = exec.Command(shell)
+		cmd = exec.Command(Shell())
 	} else {
-		cmd = exec.Command("/bin/sh", "-c", cmdStr)
+		cmd = exec.Command(Runner(), "-c", cmdStr)
 	}
 	cmd.Dir = dir
 
@@ -73,10 +70,11 @@ func (s *localSession) Resize(rows, cols int) error {
 	})
 }
 
-// Command returns a command that runs cmdStr with sh -c, in a new session:
-// with no terminal, a program that opens /dev/tty can't take over peak's.
+// Command returns a command that runs cmdStr with the Runner, in a new
+// session: with no terminal, a program that opens /dev/tty can't take over
+// peak's.
 func Command(cmdStr string) *exec.Cmd {
-	c := exec.Command("sh", "-c", cmdStr)
+	c := exec.Command(Runner(), "-c", cmdStr)
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	return c
 }
