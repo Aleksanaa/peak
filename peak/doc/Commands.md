@@ -6,12 +6,9 @@ Commands can be typed in any tag or body and executed by middle-clicking.
 ## 1. Global Commands
 
 - NewCol             Create a new column.
-- Kill [name...]     Kill the external commands named, or those selected,
-                     or else all of them.
 - Dump [file]        Save the session to file, or ~/.peak/peak.dump.
 - Help               Open the documentation index.
 - Exit               Quit Peak. Warns if any window has unsaved changes.
-                     Kills the commands still running.
 
 
 ## 2. Column Commands
@@ -56,7 +53,7 @@ Commands can be typed in any tag or body and executed by middle-clicking.
 
 Any word or selection that is not a built-in is run as a shell command.
 Output appears in a +Errors window. While a command runs, its name
-leads the top tag; Kill stops it.
+leads the top tag; stop it with pkill name.
 
 Pipe operators work on the current selection:
 

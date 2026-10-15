@@ -8,7 +8,7 @@ interface: you write what you want to do and execute it.
 
 The editor is divided into several areas, all editable:
 
-- Global Tag (top row): Contains global commands NewCol Kill Dump Help Exit.
+- Global Tag (top row): Contains global commands NewCol Dump Help Exit.
   You can type any command here and execute it.
 - Columns: The screen is divided vertically into columns. Each column
   has a Column Tag at the top with commands New Zerox Win Delcol.

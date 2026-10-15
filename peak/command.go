@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -29,10 +28,7 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 		if !e.warnDirty(nil, nil, e.allWindows()) {
 			return false
 		}
-		e.cmdKill(win, nil)
 		return true
-	case "Kill":
-		e.cmdKill(win, e.argFields(win, cmd))
 	case "Get":
 		e.cmdGet(win, cmd)
 	case "Put":
@@ -718,25 +714,16 @@ func (e *Editor) runExternal(col *Column, win *Window, cmd string) {
 	})
 }
 
-// A command is an external command running, as acme's Command is.
-type command struct {
-	name string // its first word, which the row tag shows
-	kill context.CancelFunc
-}
-
 // run runs cmd for win, or for no window in peak's directory, in the
 // background, with input on its standard input. While it runs its name
-// leads the row tag, as in acme, and Kill can stop it. Then, on the main
-// goroutine, it calls done with what cmd printed and how it failed.
+// leads the row tag, as in acme. Then, on the main goroutine, it calls
+// done with what cmd printed and how it failed.
 func (e *Editor) run(win *Window, cmd, input string, done func(out string, err error)) {
 	path, winid := getwd(), 0
 	if win != nil {
 		path, winid = win.GetFilename(), win.ID
 	}
-	ctx, kill := context.WithCancel(context.Background())
 	name, _ := quote.Cut(cmd)
-	c := &command{name, kill}
-	e.commands = append(e.commands, c)
 	// The name goes after the tag's leading space, which aligns it.
 	q := 0
 	if strings.HasPrefix(e.tag.buffer.GetText(), " ") {
@@ -744,10 +731,8 @@ func (e *Editor) run(win *Window, cmd, input string, done func(out string, err e
 	}
 	e.tag.buffer.ReplaceRangeRunes(q, q, []rune(name+" "))
 	go func() {
-		out, err := runCommand(ctx, cmd, path, input, winid)
+		out, err := runCommand(cmd, path, input, winid)
 		e.callCh <- func() {
-			kill()
-			e.commands = slices.DeleteFunc(e.commands, func(x *command) bool { return x == c })
 			// The name is a whole word: "p" is not the end of "sleep".
 			text := " " + e.tag.buffer.GetText()
 			if i := strings.Index(text, " "+name+" "); i >= 0 {
@@ -757,20 +742,6 @@ func (e *Editor) run(win *Window, cmd, input string, done func(out string, err e
 			done(out, err)
 		}
 	}()
-}
-
-// cmdKill kills the commands named, or all of them if none are.
-func (e *Editor) cmdKill(win *Window, names []string) {
-	for _, c := range e.commands {
-		if len(names) == 0 || slices.Contains(names, c.name) {
-			c.kill()
-		}
-	}
-	for _, name := range names {
-		if !slices.ContainsFunc(e.commands, func(c *command) bool { return c.name == name }) {
-			e.showError(nil, win, "Kill: no process "+name)
-		}
-	}
 }
 
 // showOutput shows what a command run for win printed, or else how it

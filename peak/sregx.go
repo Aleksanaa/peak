@@ -19,7 +19,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1090,7 +1089,7 @@ func (ed *edit) runpipe(w *Window, cmd rune, cr string, inserting bool) string {
 	}
 	var out string
 	var err error
-	ed.e.await(func() { out, err = runCommand(context.Background(), r, path, input, winid) })
+	ed.e.await(func() { out, err = runCommand(r, path, input, winid) })
 	if err != nil {
 		ed.warn("%s", out)
 		editerror("%v", err)

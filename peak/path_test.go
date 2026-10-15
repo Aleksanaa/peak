@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,11 +88,11 @@ func TestRunCommandLocal(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := dir + "/x.txt"
-	out, err := runCommand(context.Background(), `echo "$samfile $winid"; pwd; cat`, path, "input", 7)
+	out, err := runCommand(`echo "$samfile $winid"; pwd; cat`, path, "input", 7)
 	if want := path + " 7\n" + dir + "\ninput"; err != nil || out != want {
 		t.Errorf("output %q, %v; want %q", out, err, want)
 	}
-	if _, err := runCommand(context.Background(), "exit 3", path, "", 7); err == nil {
+	if _, err := runCommand("exit 3", path, "", 7); err == nil {
 		t.Error("a failing command reported no error")
 	}
 }
@@ -122,7 +121,7 @@ func TestRunCommandRemote(t *testing.T) {
 	}}, "")
 	t.Cleanup(func() { ns.Umount(mount) })
 
-	out, err := runCommand(context.Background(), "ls -l", mount+"/sub/x.txt", "", 7)
+	out, err := runCommand("ls -l", mount+"/sub/x.txt", "", 7)
 	if err != nil || out != "remote output" {
 		t.Errorf("output %q, %v; want %q", out, err, "remote output")
 	}

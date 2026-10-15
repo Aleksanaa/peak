@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -171,8 +170,8 @@ func listDir(path string) (string, error) {
 // with input on its standard input, and returns what it printed. In a
 // directory a file server mounts, the server runs it, through its run file,
 // which takes no input. In a local one it runs here, with $samfile and
-// $winid naming the window, as acme does, until ctx is done.
-func runCommand(ctx context.Context, cmd, path, input string, winid int) (string, error) {
+// $winid naming the window, as acme does.
+func runCommand(cmd, path, input string, winid int) (string, error) {
 	dir := getPathDir(path)
 	if mountPath, mountFs := ns.FindMount(dir); mountPath != "" {
 		if f, err := mountFs.OpenFile("run", os.O_RDWR, 0); err == nil {
@@ -189,8 +188,7 @@ func runCommand(ctx context.Context, cmd, path, input string, winid int) (string
 	if !ok {
 		return "", fmt.Errorf("%s: don't know how to run command", path)
 	}
-	c := exec.CommandContext(ctx, "sh", "-c", cmd)
-	ownGroup(c)
+	c := exec.Command("sh", "-c", cmd)
 	c.Dir = localDir
 	c.Env = append(os.Environ(), "samfile="+path, "winid="+strconv.Itoa(winid))
 	c.Stdin = strings.NewReader(input)
