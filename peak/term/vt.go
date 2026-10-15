@@ -1,43 +1,18 @@
-//go:build linux || darwin || dragonfly || solaris || openbsd || netbsd || freebsd
-
 package terminal
 
 import (
 	"bytes"
 	"io"
-	"os"
-	"os/exec"
 	"unicode"
 	"unicode/utf8"
-
-	"github.com/creack/pty"
 )
 
 // VT represents the virtual terminal emulator.
 type VT struct {
 	dest *State
 	rc   io.ReadCloser
-	pty  *os.File
 	buf  []byte // read buffer; the first `rem` bytes are a carried partial rune
 	rem  int
-}
-
-// Start initializes a virtual terminal emulator with the target state
-// and a new pty file by starting the *exec.Command. The returned
-// *os.File is the pty file.
-func Start(state *State, cmd *exec.Cmd) (*VT, *os.File, error) {
-	var err error
-	t := &VT{
-		dest: state,
-	}
-	t.pty, err = pty.Start(cmd)
-	if err != nil {
-		return nil, nil, err
-	}
-	t.rc = t.pty
-	t.init()
-	t.dest.ResponseWriter = t.pty
-	return t, t.pty, nil
 }
 
 // Create initializes a virtual terminal emulator with the target state
@@ -59,11 +34,6 @@ func (t *VT) init() {
 	t.dest.cur.attr.bg = DefaultBG
 	t.Resize(80, 24)
 	t.dest.reset()
-}
-
-// File returns the pty file.
-func (t *VT) File() *os.File {
-	return t.pty
 }
 
 // Write parses input and writes terminal changes to state.
@@ -153,10 +123,9 @@ func (t *VT) parse(data []byte) int {
 	return i
 }
 
-// Resize reports new size to pty and updates state.
+// Resize updates state to the new size.
 func (t *VT) Resize(cols, rows int) {
 	t.dest.lock()
 	defer t.dest.unlock()
 	_ = t.dest.resize(cols, rows)
-	t.ptyResize()
 }
