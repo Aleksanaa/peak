@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -161,6 +162,8 @@ func listDir(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Some file systems, such as Windows' WebDAV client, list these too.
+	entries = slices.DeleteFunc(entries, func(e os.FileInfo) bool { return e.Name() == "." || e.Name() == ".." })
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 	names := make([]string, len(entries))
 	for i, entry := range entries {
