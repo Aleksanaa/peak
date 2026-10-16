@@ -1136,10 +1136,16 @@ func TestPlumbLineCol(t *testing.T) {
 		}
 		return nil
 	}
+	// The window is there before its file is read; the text and dot come
+	// together after.
+	loaded := func() bool {
+		w := findWin()
+		return w != nil && w.bodyTextView().buffer.Len() > 0
+	}
 
 	t.Run("LineCol", func(t *testing.T) {
 		e.Plumb(nil, path+":2:5")
-		waitFor(t, e, s, func() bool { return findWin() != nil })
+		waitFor(t, e, s, loaded)
 		win := findWin()
 		tv := win.bodyTextView()
 		if tv == nil {
@@ -1155,7 +1161,7 @@ func TestPlumbLineCol(t *testing.T) {
 
 	t.Run("LineOnly", func(t *testing.T) {
 		e.Plumb(nil, path+":3")
-		waitFor(t, e, s, func() bool { return findWin() != nil })
+		waitFor(t, e, s, loaded)
 		win := findWin()
 		tv := win.bodyTextView()
 		if tv == nil {
