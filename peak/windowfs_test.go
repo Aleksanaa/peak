@@ -289,7 +289,7 @@ func TestWindowFsCtlRead(t *testing.T) {
 
 	// Via readWinPath (the fast path peak uses when navigating to /peak/<id>/ctl internally).
 	vfsPath := fmt.Sprintf("/peak/%d/ctl", win.ID)
-	viaWin, _, _, err := readFileOrDir(vfsPath)
+	viaWin, _, _, _, err := readFileOrDir(vfsPath)
 	if err != nil {
 		t.Fatalf("readFileOrDir(%q): %v", vfsPath, err)
 	}

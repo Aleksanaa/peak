@@ -236,11 +236,12 @@ func (e *Editor) newFileWindow(col *Column, win *Window) *Window {
 // with how it failed. It is the one way a file's text comes into a window.
 func (e *Editor) get(win *Window, path string, done func(error)) {
 	go func() {
-		content, isDir, writable, err := readFileOrDir(path)
+		content, format, isDir, writable, err := readFileOrDir(path)
 		e.callCh <- func() {
 			if err == nil {
 				win.SetName(path)
 				win.bodyTextView().buffer.SetText(content)
+				win.format = format
 				win.loaded(isDir, writable)
 				e.ninep.BroadcastGet(win)
 			}
@@ -327,9 +328,9 @@ func (e *Editor) cmdPut(win *Window, cmd string) {
 	}
 	own := path == normalizePath(target.fileName(), target.GetDir())
 	b := target.bodyTextView().buffer
-	text, version := b.GetText(), b.version
+	text, version, format := b.GetText(), b.version, target.format
 	go func() {
-		err := writeFile(path, []byte(text))
+		err := writeText(path, text, format)
 		e.callCh <- func() {
 			if err != nil {
 				e.showError(target.parent, target, normalizeError(err))
@@ -522,7 +523,7 @@ func (e *Editor) cmdZerox(col *Column, win *Window) {
 		newTv := newWin.bodyTextView()
 		newTv.org = tv.org
 		newTv.buffer.SetDot(tv.buffer.q0, tv.buffer.q1)
-		newWin.kind, newWin.writable = target.kind, target.writable
+		newWin.kind, newWin.writable, newWin.format = target.kind, target.writable, target.format
 		// Versions are per buffer: the copy matches disk iff the original does.
 		if target.IsDirty() {
 			newWin.markSaved(-1)

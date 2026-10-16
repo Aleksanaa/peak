@@ -844,7 +844,7 @@ func TestSimpleEdit(t *testing.T) {
 
 	// Pre-create the directory and file in memory FS so Open succeeds
 	ns.MkdirAll("/peak/mirage", 0755)
-	writeFile(path, []byte(""))
+	writeText(path, "", textFormat{})
 
 	for i := 1; i <= 2; i++ {
 		testString := "Iteration " + strings.Repeat("X", i)
@@ -1039,7 +1039,7 @@ func TestSimplePlumb(t *testing.T) {
 	testString := "DirListing Test Content"
 
 	ns.MkdirAll("/peak/mirage", 0755)
-	writeFile(path, []byte(""))
+	writeText(path, "", textFormat{})
 
 	// 1. Open and Write
 	e.Open(nil, path)
@@ -1124,7 +1124,7 @@ func TestPlumbLineCol(t *testing.T) {
 
 	path := "/peak/mirage/linecol.txt"
 	ns.MkdirAll("/peak/mirage", 0755)
-	writeFile(path, []byte("line one\nline two\nline three\n"))
+	writeText(path, "line one\nline two\nline three\n", textFormat{})
 
 	findWin := func() *Window {
 		for _, c := range e.columns {

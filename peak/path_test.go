@@ -27,7 +27,7 @@ func TestReadFileOrDirBinary(t *testing.T) {
 		if err := os.WriteFile(path, []byte(tt.data), 0644); err != nil {
 			t.Fatal(err)
 		}
-		got, _, _, err := readFileOrDir(path)
+		got, _, _, _, err := readFileOrDir(path)
 		if err != tt.want || err == nil && got != tt.data {
 			t.Errorf("%q: got %q, %v; want %v", tt.data, got, err, tt.want)
 		}
@@ -66,7 +66,7 @@ func TestReadFileOrDir_IgnoresWrongSize(t *testing.T) {
 	ns.Mount(mountPath, &wrongSizeFs{Fs: mem}, "")
 
 	// Call readFileOrDir directly (bypasses the async Get command).
-	got, isDir, _, err := readFileOrDir(mountPath + "/test.txt")
+	got, _, isDir, _, err := readFileOrDir(mountPath + "/test.txt")
 	if err != nil {
 		t.Fatal(err)
 	}

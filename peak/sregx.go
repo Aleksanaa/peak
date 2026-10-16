@@ -18,7 +18,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path"
@@ -582,16 +581,17 @@ const Enoname = "no file name given"
 // runs one.
 type edit struct {
 	e        *Editor
-	col      *Column            // where the command was run, for +Errors
-	curtext  *Window            // the current window, which b changes
-	addr     Address            // the address of the command running
-	nest     int                // how deep in loops the command is
-	glooping int                // how deep in X and Y loops
-	logs     map[*Window]*elog  // the changes to each window, made at the end
-	warned   bool               // of changes out of order
-	texts    map[*Window][]rune // each window's text as the command sees it
-	clean    map[*Window]bool   // windows read whole from their file
-	out      strings.Builder    // what the command prints
+	col      *Column                // where the command was run, for +Errors
+	curtext  *Window                // the current window, which b changes
+	addr     Address                // the address of the command running
+	nest     int                    // how deep in loops the command is
+	glooping int                    // how deep in X and Y loops
+	logs     map[*Window]*elog      // the changes to each window, made at the end
+	warned   bool                   // of changes out of order
+	texts    map[*Window][]rune     // each window's text as the command sees it
+	clean    map[*Window]bool       // windows read whole from their file
+	formats  map[*Window]textFormat // windows read whole from a file: its format
+	out      strings.Builder        // what the command prints
 }
 
 // An editError ends an Edit command, as acme's editerror ends the thread
@@ -614,9 +614,10 @@ func (e *Editor) Edit(col *Column, win *Window, cmd string) {
 	}
 	ed := &edit{
 		e: e, col: col, curtext: win,
-		logs:  make(map[*Window]*elog),
-		texts: make(map[*Window][]rune),
-		clean: make(map[*Window]bool),
+		logs:    make(map[*Window]*elog),
+		texts:   make(map[*Window][]rune),
+		clean:   make(map[*Window]bool),
+		formats: make(map[*Window]textFormat),
 	}
 	if err := ed.run(newCmdParser([]rune(cmd))); err != nil {
 		if msg := err.Error(); msg != "" {
@@ -627,6 +628,9 @@ func (e *Editor) Edit(col *Column, win *Window, cmd string) {
 		for _, w := range e.allWindows() {
 			if l := ed.logs[w]; l != nil && len(*l) > 0 {
 				ed.elogapply(w, *l)
+				if f, ok := ed.formats[w]; ok {
+					w.format = f
+				}
 				if ed.clean[w] {
 					w.markSaved(w.body.GetBuffer().version)
 				}
@@ -907,10 +911,17 @@ func (ed *edit) e_r(w *Window, cp *Cmd) bool {
 	if isdir {
 		editerror("%v is a directory", name)
 	}
-	nulls := bytes.IndexByte(data, 0) >= 0
-	data = bytes.ReplaceAll(data, []byte{0}, nil)
+	text, format, err := decodeText(data)
+	if err != nil { // binary: read as it is
+		text, format = string(data), textFormat{}
+	}
+	if allreplaced {
+		ed.formats[w] = format
+	}
+	nulls := strings.IndexByte(text, 0) >= 0
+	text = strings.ReplaceAll(text, "\x00", "")
 	ed.elogdelete(w, q0, q1)
-	ed.eloginsert(w, q1, []rune(string(data)))
+	ed.eloginsert(w, q1, []rune(text))
 	if nulls {
 		ed.warn("%v: NUL bytes elided\n", name)
 	} else if allreplaced && samename {
@@ -1056,9 +1067,9 @@ func (ed *edit) w(w *Window, cp *Cmd) bool {
 // putfile writes w's text from q0 to q1 to the file name. All of it
 // written to the file it is from is saved.
 func (ed *edit) putfile(w *Window, q0, q1 int, name string) {
-	data := []byte(string(ed.text(w)[q0:q1]))
+	text, format := string(ed.text(w)[q0:q1]), w.format
 	var err error
-	ed.e.await(func() { err = writeFile(name, data) })
+	ed.e.await(func() { err = writeText(name, text, format) })
 	if err != nil {
 		ed.warn("can't write file %s: %v\n", name, err)
 		return

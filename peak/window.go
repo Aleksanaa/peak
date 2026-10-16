@@ -248,6 +248,7 @@ type Window struct {
 
 	kind          WinKind
 	writable      bool
+	format        textFormat // how its file stores the text
 	savedVersion  int
 	warnedVersion int
 

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -120,40 +119,38 @@ func readFile(path string) ([]byte, error) {
 	return afero.ReadFile(ns, path)
 }
 
-// writeFile writes data to a file.
-func writeFile(path string, data []byte) error {
-	return afero.WriteFile(ns, path, data, 0644)
+// writeText writes text to a file, stored in format f.
+func writeText(path, text string, f textFormat) error {
+	return afero.WriteFile(ns, path, f.encode(text), 0644)
 }
 
 // errBinary is how reading a file that is not text fails.
 var errBinary = errors.New("binary file")
 
-// readFileOrDir returns the content of a file, or the listing of a
-// directory, and whether the file is writable (owner-write permission bit
-// set). A file whose first 512 bytes hold a NUL is binary. It reads to
-// EOF, since a served file's size need not be its length.
-func readFileOrDir(path string) (content string, isDir, writable bool, err error) {
+// readFileOrDir returns the text of a file and its format, or the listing
+// of a directory, and whether the file is writable (owner-write permission
+// bit set). A file that is not text is errBinary. It reads to EOF, since a
+// served file's size need not be its length.
+func readFileOrDir(path string) (content string, format textFormat, isDir, writable bool, err error) {
 	fi, err := ns.Stat(path)
 	if err != nil {
-		return "", false, false, err
+		return "", format, false, false, err
 	}
 	if fi.IsDir() {
 		content, err := listDir(path)
-		return content, true, false, err
+		return content, format, true, false, err
 	}
 	f, err := ns.Open(path)
 	if err != nil {
-		return "", false, false, err
+		return "", format, false, false, err
 	}
 	defer f.Close()
 	data, err := io.ReadAll(io.NewSectionReader(f, 0, math.MaxInt64))
 	if err != nil {
-		return "", false, false, err
+		return "", format, false, false, err
 	}
-	if bytes.IndexByte(data[:min(len(data), 512)], 0) >= 0 {
-		return "", false, false, errBinary
-	}
-	return string(data), false, fi.Mode().Perm()&0200 != 0, nil
+	content, format, err = decodeText(data)
+	return content, format, false, fi.Mode().Perm()&0200 != 0, err
 }
 
 // listDir returns a formatted string listing the contents of a directory.

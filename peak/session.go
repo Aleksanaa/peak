@@ -194,7 +194,8 @@ func (w *Window) saveState(colH int) WindowSession {
 		ws.TabWidth = tv.tabWidth
 		if w.IsDirty() {
 			ws.Dirty = true
-			ws.Body = tv.buffer.GetText()
+			// In the file's format, which restore reads back as Get does.
+			ws.Body = string(w.format.encode(tv.buffer.GetText()))
 		}
 	case WinDir:
 		tv := w.bodyTextView()
@@ -222,7 +223,12 @@ func (w *Window) restore(ws *WindowSession) {
 	w.kind = ws.Kind
 	switch {
 	case ws.Dirty:
-		tv.buffer.SetText(ws.Body)
+		body, format, err := decodeText([]byte(ws.Body))
+		if err != nil {
+			body = ws.Body
+		}
+		tv.buffer.SetText(body)
+		w.format = format
 		w.writable = true
 		w.markSaved(-1)
 		place(nil)

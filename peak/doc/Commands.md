@@ -28,7 +28,9 @@ Commands can be typed in any tag or body and executed by middle-clicking.
 ## 3. Window Commands
 
 - Get [path]         Reload the current file from disk, or load path.
-- Put [path]         Save the buffer to disk, or save as path.
+- Put [path]         Save the buffer to disk, or save as path. A file read
+                     with a byte order mark, as UTF-16, or with CRLF line
+                     ends is written back the same way.
 - Undo / Redo        Undo or redo the last text modification.
 - Snarf              Copy the selection to the clipboard.
 - Cut                Cut the selection to the clipboard.
