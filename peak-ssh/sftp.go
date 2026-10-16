@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"crypto/ed25519"
 	"errors"
 	"fmt"
@@ -195,10 +196,7 @@ func (s *SftpFs) parse(name string) (string, string) {
 	if rel == "~" || strings.HasPrefix(rel, "~/") {
 		rel = strings.TrimPrefix(rel, "~")
 		rel = strings.TrimPrefix(rel, "/")
-		if rel == "" {
-			rel = "."
-		}
-		return parts[0], rel
+		return parts[0], cmp.Or(rel, ".")
 	}
 	return parts[0], "/" + rel
 }

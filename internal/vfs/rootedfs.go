@@ -1,6 +1,7 @@
 package vfs
 
 import (
+	"cmp"
 	"os"
 	"path"
 	"strings"
@@ -63,9 +64,5 @@ func (f *rootedFs) WalkRedirect(dir, name string) (string, os.FileInfo, bool) {
 	if !ok {
 		return "", nil, false
 	}
-	rel := strings.TrimPrefix(path.Clean(rp), f.base)
-	if rel == "" {
-		rel = "/"
-	}
-	return rel, fi, true
+	return cmp.Or(strings.TrimPrefix(path.Clean(rp), f.base), "/"), fi, true
 }

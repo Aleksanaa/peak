@@ -1,11 +1,11 @@
 package main
 
 import (
+	"cmp"
 	"os"
 	"path"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -136,10 +136,7 @@ func (e *Editor) argText(win *Window, cmd string) string {
 	sel := e.focusedView.GetBuffer().GetSelectedText()
 	if sel == "" {
 		if target := e.getTargetWindow(win); target != nil {
-			sel = target.body.GetBuffer().GetSelectedText()
-			if sel == "" {
-				sel = target.tag.buffer.GetSelectedText()
-			}
+			sel = cmp.Or(target.body.GetBuffer().GetSelectedText(), target.tag.buffer.GetSelectedText())
 		}
 	}
 	return strings.TrimSpace(sel)
@@ -206,9 +203,7 @@ func (e *Editor) OpenLine(win *Window, path string, line, col int, failed func(f
 // dirOf returns the directory win is in, or else the active window, or else
 // peak.
 func (e *Editor) dirOf(win *Window) string {
-	if win == nil {
-		win = e.active
-	}
+	win = cmp.Or(win, e.active)
 	if win == nil {
 		return getwd()
 	}
@@ -297,10 +292,7 @@ func (e *Editor) cmdGet(win *Window, cmd string) {
 	if target.kind == WinTerm {
 		return
 	}
-	arg := e.argName(target, cmd)
-	if arg == "" {
-		arg = target.GetFilename()
-	}
+	arg := cmp.Or(e.argName(target, cmd), target.GetFilename())
 	path := normalizePath(arg, target.GetDir())
 	e.get(target, path, func(err error) {
 		if err != nil {
@@ -314,10 +306,7 @@ func (e *Editor) cmdPut(win *Window, cmd string) {
 	if target == nil || target.kind == WinTerm {
 		return
 	}
-	arg := e.argName(target, cmd)
-	if arg == "" {
-		arg = target.fileName()
-	}
+	arg := cmp.Or(e.argName(target, cmd), target.fileName())
 	if arg == "" {
 		e.showError(target.parent, target, "no file name")
 		return
@@ -546,8 +535,8 @@ func (e *Editor) cmdSort(col *Column, win *Window) {
 		return
 	}
 
-	sort.Slice(targetCol.windows, func(i, j int) bool {
-		return targetCol.windows[i].GetFilename() < targetCol.windows[j].GetFilename()
+	slices.SortFunc(targetCol.windows, func(a, b *Window) int {
+		return strings.Compare(a.GetFilename(), b.GetFilename())
 	})
 
 	targetCol.Resize(targetCol.rect)

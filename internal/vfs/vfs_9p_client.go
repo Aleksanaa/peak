@@ -1,6 +1,7 @@
 package vfs
 
 import (
+	"cmp"
 	"fmt"
 	"io"
 	"net"
@@ -34,10 +35,7 @@ func NewNinePClientFs(path string) (*NinePClientFs, error) {
 
 // NewNinePClientFsFromConn creates a 9P client over conn.
 func NewNinePClientFsFromConn(conn net.Conn) (*NinePClientFs, error) {
-	userStr := os.Getenv("USER")
-	if userStr == "" {
-		userStr = "guest"
-	}
+	userStr := cmp.Or(os.Getenv("USER"), "guest")
 	c, err := client.NewClient(conn, userStr, "")
 	if err != nil {
 		return nil, err

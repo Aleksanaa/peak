@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -428,12 +429,7 @@ func TestWindowFsErrorsAppends(t *testing.T) {
 
 	write("first\n")
 	waitFor(t, e, s, func() bool {
-		for _, w := range col.windows {
-			if w.kind == WinOut {
-				return true
-			}
-		}
-		return false
+		return slices.ContainsFunc(col.windows, func(w *Window) bool { return w.kind == WinOut })
 	})
 
 	write("second\n")

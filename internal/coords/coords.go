@@ -1,7 +1,8 @@
 package coords
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 	"unicode/utf8"
 )
 
@@ -36,13 +37,9 @@ func MergeByteRanges(ranges []ByteRange) []ByteRange {
 	if len(ranges) == 0 {
 		return nil
 	}
-	sorted := make([]ByteRange, len(ranges))
-	copy(sorted, ranges)
-	sort.Slice(sorted, func(i, j int) bool {
-		if sorted[i].Lo != sorted[j].Lo {
-			return sorted[i].Lo < sorted[j].Lo
-		}
-		return sorted[i].Hi < sorted[j].Hi
+	sorted := slices.Clone(ranges)
+	slices.SortFunc(sorted, func(a, b ByteRange) int {
+		return cmp.Or(cmp.Compare(a.Lo, b.Lo), cmp.Compare(a.Hi, b.Hi))
 	})
 	merged := []ByteRange{sorted[0]}
 	for _, r := range sorted[1:] {

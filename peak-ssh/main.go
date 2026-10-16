@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"flag"
 	"fmt"
 	"log"
@@ -29,10 +30,7 @@ func main() {
 	// connection is used to post the server (/srv/ssh) and auto-mount (/mount).
 	var peakFs afero.Fs
 	if *socketPath == "" || (!*noMount && *mountPath != "") || *peakSocket != "" {
-		sock := *peakSocket
-		if sock == "" {
-			sock = peakfs.Socket()
-		}
+		sock := cmp.Or(*peakSocket, peakfs.Socket())
 		var err error
 		peakFs, err = vfs.NewNinePClientFs(sock)
 		if err != nil {

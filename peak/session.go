@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -240,9 +241,7 @@ func (w *Window) restore(ws *WindowSession) {
 }
 
 func (e *Editor) Dump(file string) error {
-	if file == "" {
-		file = defaultSessionFile()
-	}
+	file = cmp.Or(file, defaultSessionFile())
 	s := Session{
 		CurrentDir: getwd(),
 		GlobalTag:  e.tag.buffer.GetText(),
@@ -254,9 +253,7 @@ func (e *Editor) Dump(file string) error {
 }
 
 func (e *Editor) Load(file string) error {
-	if file == "" {
-		file = defaultSessionFile()
-	}
+	file = cmp.Or(file, defaultSessionFile())
 	data, err := os.ReadFile(file)
 	if err != nil {
 		return err

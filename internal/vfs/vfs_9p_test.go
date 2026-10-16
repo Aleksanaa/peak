@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -51,7 +51,7 @@ func sortedNames(infos []os.FileInfo) []string {
 	for i, fi := range infos {
 		names[i] = fi.Name()
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	return names
 }
 

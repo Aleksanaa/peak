@@ -204,9 +204,7 @@ type srvRegistry struct {
 
 type service struct {
 	conn net.Conn // peak's end of the pipe
-	once sync.Once
-	fs   *vfs.NinePClientFs
-	err  error
+	fs   func() (*vfs.NinePClientFs, error)
 }
 
 func newSrvRegistry() *srvRegistry {
@@ -221,7 +219,9 @@ func (r *srvRegistry) post(name string) (afero.File, error) {
 		return nil, os.ErrExist
 	}
 	ours, theirs := net.Pipe()
-	s := &service{conn: ours}
+	s := &service{conn: ours, fs: sync.OnceValues(func() (*vfs.NinePClientFs, error) {
+		return vfs.NewNinePClientFsFromConn(ours)
+	})}
 	r.services[name] = s
 	return &srvServerFile{name: name, conn: theirs, svc: s, reg: r}, nil
 }
@@ -236,8 +236,7 @@ func (r *srvRegistry) fs(name string) (*vfs.NinePClientFs, error) {
 	if !ok {
 		return nil, fmt.Errorf("srv: %s not found", name)
 	}
-	s.once.Do(func() { s.fs, s.err = vfs.NewNinePClientFsFromConn(s.conn) })
-	return s.fs, s.err
+	return s.fs()
 }
 
 // remove ends service s, posted under name, and with it peak's conversation.
