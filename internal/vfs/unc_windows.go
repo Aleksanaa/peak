@@ -1,6 +1,7 @@
 package vfs
 
 import (
+	"runtime"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -13,7 +14,14 @@ var (
 	procWNetOpenEnum     = mpr.NewProc("WNetOpenEnumW")
 	procWNetEnumResource = mpr.NewProc("WNetEnumResourceW")
 	procWNetCloseEnum    = mpr.NewProc("WNetCloseEnum")
-	procNetShareEnum     = windows.NewLazySystemDLL("netapi32.dll").NewProc("NetShareEnum")
+)
+
+const (
+	resourceConnected      = 1
+	resourceGlobalNet      = 2
+	resourceRemembered     = 3
+	resourceTypeDisk       = 1
+	resourceUsageContainer = 2
 )
 
 // netResource is NETRESOURCEW.
@@ -22,32 +30,18 @@ type netResource struct {
 	LocalName, RemoteName, Comment, Provider *uint16
 }
 
-// shareInfo1 is SHARE_INFO_1.
-type shareInfo1 struct {
-	Name   *uint16
-	Type   uint32
-	Remark *uint16
-}
-
 // connectedServers returns the servers of the shares this user is connected
 // to or has saved connections to, as mapped drives are.
 func connectedServers() ([]string, error) {
-	const (
-		resourceConnected  = 1
-		resourceRemembered = 3
-		resourceTypeDisk   = 1
-	)
 	var servers []string
-	seen := map[string]bool{}
 	for _, scope := range []uintptr{resourceConnected, resourceRemembered} {
-		remotes, err := enumResources(scope, resourceTypeDisk)
+		remotes, err := enumResources(scope, nil)
 		if err != nil {
 			return nil, err
 		}
 		for _, r := range remotes {
 			server, _, _ := strings.Cut(strings.TrimPrefix(r, `\\`), `\`)
-			if server != "" && !seen[strings.ToLower(server)] {
-				seen[strings.ToLower(server)] = true
+			if server != "" && !containsFold(servers, server) {
 				servers = append(servers, server)
 			}
 		}
@@ -55,12 +49,37 @@ func connectedServers() ([]string, error) {
 	return servers, nil
 }
 
-// enumResources returns the remote names of the network resources of scope.
-func enumResources(scope, typ uintptr) ([]string, error) {
+// serverShares returns the disk shares of server, from whichever network
+// provider serves it: SMB, WSL, WebDAV. Hidden shares (C$) are not listed.
+func serverShares(server string) ([]string, error) {
+	name, err := windows.UTF16PtrFromString(`\\` + server)
+	if err != nil {
+		return nil, err
+	}
+	remotes, err := enumResources(resourceGlobalNet, &netResource{
+		Scope: resourceGlobalNet, Type: resourceTypeDisk, Usage: resourceUsageContainer, RemoteName: name,
+	})
+	if err != nil {
+		return nil, err
+	}
+	for i, r := range remotes {
+		remotes[i] = r[strings.LastIndex(r, `\`)+1:]
+	}
+	return remotes, nil
+}
+
+// enumResources returns the remote names of the disk resources of scope, in
+// container if it is not nil.
+func enumResources(scope uintptr, container *netResource) ([]string, error) {
 	var h windows.Handle
-	if r, _, _ := procWNetOpenEnum.Call(scope, typ, 0, 0, uintptr(unsafe.Pointer(&h))); r != 0 {
+	r, _, _ := procWNetOpenEnum.Call(scope, resourceTypeDisk, 0,
+		uintptr(unsafe.Pointer(container)), uintptr(unsafe.Pointer(&h)))
+	if r != 0 {
 		return nil, syscall.Errno(r)
 	}
+	// Windows is handed only container's address: keep it until the
+	// enumeration is closed.
+	defer runtime.KeepAlive(container)
 	defer procWNetCloseEnum.Call(uintptr(h))
 
 	var names []string
@@ -85,38 +104,4 @@ func enumResources(scope, typ uintptr) ([]string, error) {
 			}
 		}
 	}
-}
-
-// serverShares returns the disk shares of server, leaving out the
-// administrative ones (C$, ADMIN$).
-func serverShares(server string) ([]string, error) {
-	const (
-		maxPreferredLength = 0xFFFFFFFF
-		stypeMask          = 0xFF
-		stypeDisktree      = 0
-		stypeSpecial       = 0x80000000
-	)
-	name, err := windows.UTF16PtrFromString(`\\` + server)
-	if err != nil {
-		return nil, err
-	}
-	var (
-		buf         *byte
-		read, total uint32
-	)
-	r, _, _ := procNetShareEnum.Call(uintptr(unsafe.Pointer(name)), 1, uintptr(unsafe.Pointer(&buf)),
-		maxPreferredLength, uintptr(unsafe.Pointer(&read)), uintptr(unsafe.Pointer(&total)), 0)
-	if buf != nil {
-		defer windows.NetApiBufferFree(buf)
-	}
-	if r != 0 {
-		return nil, syscall.Errno(r)
-	}
-	var shares []string
-	for _, s := range unsafe.Slice((*shareInfo1)(unsafe.Pointer(buf)), read) {
-		if s.Type&stypeMask == stypeDisktree && s.Type&stypeSpecial == 0 {
-			shares = append(shares, windows.UTF16PtrToString(s.Name))
-		}
-	}
-	return shares, nil
 }
