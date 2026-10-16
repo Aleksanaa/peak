@@ -305,13 +305,15 @@ func (cp *cmdParser) collecttext() (string, error) {
 				line.WriteRune(c)
 			}
 			if c < 0 {
-				s.WriteString(line.String() + "\n")
+				s.WriteString(line.String())
+				s.WriteByte('\n')
 				break
 			}
 			if line.String() == "." {
 				break
 			}
-			s.WriteString(line.String() + "\n")
+			s.WriteString(line.String())
+			s.WriteByte('\n')
 		}
 		return s.String(), nil
 	}

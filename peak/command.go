@@ -629,7 +629,8 @@ func (e *Editor) warnDirty(col *Column, win *Window, windows []*Window) bool {
 	var msg strings.Builder
 	for _, w := range dirty {
 		w.Warn()
-		msg.WriteString(w.GetFilename() + " modified\n")
+		msg.WriteString(w.GetFilename())
+		msg.WriteString(" modified\n")
 	}
 	e.showError(col, win, msg.String())
 	return false

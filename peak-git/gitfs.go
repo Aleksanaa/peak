@@ -375,7 +375,8 @@ func (fs *repoFs) stagedContent() (string, error) {
 	var sb strings.Builder
 	for path, s := range st {
 		if s.Staging != gogit.Unmodified && s.Staging != gogit.Untracked {
-			sb.WriteString(path + "\n")
+			sb.WriteString(path)
+			sb.WriteByte('\n')
 		}
 	}
 	return sb.String(), nil
