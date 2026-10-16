@@ -94,18 +94,8 @@ func (e *Editor) Init(numCols int, args []string, sessionFile string) {
 	e.setup(s)
 	e.ninep.Listen()
 
-	if numCols < 1 {
-		numCols = 1
-	}
-	colWidth := e.w / numCols
-	for i := 0; i < numCols; i++ {
-		w := colWidth
-		if i == numCols-1 {
-			w = e.w - (i * colWidth)
-		}
-		col := NewColumn(i*colWidth, 1, w, e.h-1, e)
-		col.explicitWidth = w
-		e.columns = append(e.columns, col)
+	for range max(numCols, 1) {
+		e.columns = append(e.columns, NewColumn(0, 1, 0, e.h-1, e))
 	}
 	e.resize()
 
