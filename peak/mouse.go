@@ -65,14 +65,14 @@ func (c *Column) hit(x, y int) mouseTarget {
 	return mouseTarget{col: c, x: x, y: y} // the column handle, or off every window
 }
 
-func (w *Window) hit(x, y int) mouseTarget {
-	if t := w.tagRect(); t.contains(x, y) {
-		return mouseTarget{win: w, view: w.tag, x: x - t.x, y: y - t.y}
+func (win *Window) hit(x, y int) mouseTarget {
+	if t := win.tagRect(); t.contains(x, y) {
+		return mouseTarget{win: win, view: win.tag, x: x - t.x, y: y - t.y}
 	}
-	if b := w.bodyRect(); b.contains(x, y) {
-		return mouseTarget{win: w, view: w.body, x: x - b.x, y: y - b.y}
+	if b := win.bodyRect(); b.contains(x, y) {
+		return mouseTarget{win: win, view: win.body, x: x - b.x, y: y - b.y}
 	}
-	return mouseTarget{win: w, x: x, y: y} // handle rows / scroll gutter
+	return mouseTarget{win: win, x: x, y: y} // handle rows / scroll gutter
 }
 
 // chordAllowed reports whether a chord may operate locally on the pressed view.

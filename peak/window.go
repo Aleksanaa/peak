@@ -259,46 +259,46 @@ type Window struct {
 	spans []colorSpan
 }
 
-func (w *Window) PreferredSize() int { return w.explicitHeight }
-func (w *Window) MinSize() int       { return w.tag.h }
+func (win *Window) PreferredSize() int { return win.explicitHeight }
+func (win *Window) MinSize() int       { return win.tag.h }
 
 // The handle and the scroll bar share the window's first column, beside the
 // tag and the body.
-func (w *Window) tagRect() rect  { return rect{1, 0, w.w - 1, w.tag.h} }
-func (w *Window) bodyRect() rect { return rect{1, w.tag.h, w.w - 1, max(0, w.h-w.tag.h)} }
+func (win *Window) tagRect() rect  { return rect{1, 0, win.w - 1, win.tag.h} }
+func (win *Window) bodyRect() rect { return rect{1, win.tag.h, win.w - 1, max(0, win.h-win.tag.h)} }
 
-func (w *Window) Draw(cv canvas) {
-	theme := &w.editor.theme
+func (win *Window) Draw(cv canvas) {
+	theme := &win.editor.theme
 	handle := theme.Handle
-	switch w.kind {
+	switch win.kind {
 	case WinOut, WinTerm:
 		handle = theme.HandleError
 	case WinFile:
-		if w.IsDirty() {
+		if win.IsDirty() {
 			handle = theme.HandleDirty
-		} else if w.writable {
+		} else if win.writable {
 			handle = theme.HandleWritable
 		} else {
 			handle = theme.HandleUnwritable
 		}
 	}
-	cv.fill(rect{0, 0, 1, w.tag.h}, tcell.StyleDefault.Background(handle).Foreground(color.Black))
+	cv.fill(rect{0, 0, 1, win.tag.h}, tcell.StyleDefault.Background(handle).Foreground(color.Black))
 
-	w.tag.underlineLast = w.editor.active == w
-	w.editor.drawView(w.tag, cv.sub(w.tagRect()))
+	win.tag.underlineLast = win.editor.active == win
+	win.editor.drawView(win.tag, cv.sub(win.tagRect()))
 
-	if tv, ok := w.body.(*TextView); ok {
+	if tv, ok := win.body.(*TextView); ok {
 		tv.styleAt = nil
-		if len(w.spans) > 0 {
-			tv.styleAt = w.spanStyle(tv)
+		if len(win.spans) > 0 {
+			tv.styleAt = win.spanStyle(tv)
 		}
 	}
-	w.editor.drawView(w.body, cv.sub(w.bodyRect()))
+	win.editor.drawView(win.body, cv.sub(win.bodyRect()))
 
-	if scroll, total, visible := w.body.GetScroll(); visible > 0 && total > visible {
+	if scroll, total, visible := win.body.GetScroll(); visible > 0 && total > visible {
 		thumb := max(1, visible*visible/total)
 		at := min(visible-thumb, scroll*visible/total)
-		cv.fill(rect{0, w.tag.h + at, 1, thumb}, tcell.StyleDefault.Background(theme.ScrollThumb))
+		cv.fill(rect{0, win.tag.h + at, 1, thumb}, tcell.StyleDefault.Background(theme.ScrollThumb))
 	}
 }
 

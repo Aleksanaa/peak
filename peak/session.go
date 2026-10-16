@@ -182,28 +182,28 @@ func (c *Column) saveState(totalW int) ColumnSession {
 	return cs
 }
 
-func (w *Window) saveState(colH int) WindowSession {
+func (win *Window) saveState(colH int) WindowSession {
 	ws := WindowSession{
-		HeightPct: 100 * w.explicitHeight / colH,
-		Kind:      w.kind,
-		Tag:       w.tag.buffer.GetText(),
+		HeightPct: 100 * win.explicitHeight / colH,
+		Kind:      win.kind,
+		Tag:       win.tag.buffer.GetText(),
 	}
-	switch w.kind {
+	switch win.kind {
 	case WinFile:
-		tv := w.bodyTextView()
+		tv := win.bodyTextView()
 		ws.Org, ws.Q0, ws.Q1 = tv.org, tv.buffer.q0, tv.buffer.q1
 		ws.TabWidth = tv.tabWidth
-		if w.IsDirty() {
+		if win.IsDirty() {
 			ws.Dirty = true
 			// In the file's format, which restore reads back as Get does.
-			ws.Body = string(w.format.encode(tv.buffer.GetText()))
+			ws.Body = string(win.format.encode(tv.buffer.GetText()))
 		}
 	case WinDir:
-		tv := w.bodyTextView()
+		tv := win.bodyTextView()
 		ws.Org, ws.Q0, ws.Q1 = tv.org, tv.buffer.q0, tv.buffer.q1
 	case WinTerm:
-		ws.TermCmd = w.body.(*TermView).cmd
-		ws.TermDir = w.GetDir()
+		ws.TermCmd = win.body.(*TermView).cmd
+		ws.TermDir = win.GetDir()
 	}
 	return ws
 }
@@ -211,8 +211,8 @@ func (w *Window) saveState(colH int) WindowSession {
 // restore loads w's text as ws says, the saved body or the file its tag
 // names, and puts the view and dot back where they were, as far as the text
 // still reaches. A file since gone leaves the window empty.
-func (w *Window) restore(ws *WindowSession) {
-	tv := w.bodyTextView()
+func (win *Window) restore(ws *WindowSession) {
+	tv := win.bodyTextView()
 	if ws.TabWidth > 0 {
 		tv.tabWidth = ws.TabWidth
 	}
@@ -221,7 +221,7 @@ func (w *Window) restore(ws *WindowSession) {
 		tv.org = min(ws.Org, n)
 		tv.buffer.SetDot(min(ws.Q0, n), min(ws.Q1, n))
 	}
-	w.kind = ws.Kind
+	win.kind = ws.Kind
 	switch {
 	case ws.Dirty:
 		body, format, err := decodeText([]byte(ws.Body))
@@ -229,14 +229,14 @@ func (w *Window) restore(ws *WindowSession) {
 			body = ws.Body
 		}
 		tv.buffer.SetText(body)
-		w.format = format
-		w.writable = true
-		w.markSaved(-1)
+		win.format = format
+		win.writable = true
+		win.markSaved(-1)
 		place(nil)
-	case w.fileName() == "": // a new window, whose file is not named yet
-		w.loaded(false, true)
+	case win.fileName() == "": // a new window, whose file is not named yet
+		win.loaded(false, true)
 	default:
-		w.editor.get(w, w.GetFilename(), place)
+		win.editor.get(win, win.GetFilename(), place)
 	}
 }
 
