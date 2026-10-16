@@ -151,11 +151,9 @@ func (e *Editor) Run() {
 
 	e.Draw()
 	for {
-		var timer *time.Timer
 		var tick <-chan time.Time
 		if e.repeat != nil {
-			timer = time.NewTimer(50 * time.Millisecond)
-			tick = timer.C
+			tick = time.After(50 * time.Millisecond)
 		}
 
 		select {
@@ -177,9 +175,6 @@ func (e *Editor) Run() {
 		case <-tick:
 			e.repeat()
 			e.Draw()
-		}
-		if timer != nil {
-			timer.Stop()
 		}
 	}
 }
