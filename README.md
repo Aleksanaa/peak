@@ -44,6 +44,16 @@ Or with Nix: `nix build`.
 
 macOS has no middle-click by default. To use this editor you need [MiddleClick](https://github.com/artginzburg/MiddleClick).
 
+## Windows
+
+Peak runs on Windows 10 1809+ in Windows Terminal (Needs ConPTY and unix socket support).
+
+- Paths are converted to Git Bash style. `C:` => `/c`, `\\server\share` => `/unc/server/share`. `C:\...` can be typed but will be converted
+- `/unc` lists the servers reported by `net use` and those have opened in peak
+- `Win` runs on ConPTY: `$PEAKSHELL` => `$SHELL` => `cmd`. Picks up git bash if opened with it (through reading `$SHELL`)
+- Commands run with `$PEAKRUNNER` => `sh` (git bash) => `cmd`. Output in the OEM code page (GBK, CP437...) is decoded to UTF8
+- UTF-16 and BOM files converted to UTF-8, and CRLF to LF when loading, and converted back when saving
+
 ## Documentation
 
 Check [`peak/doc`](peak/doc). In editor they are at `/peak/doc`. Run `Help` to open the path.
