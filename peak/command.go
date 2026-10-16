@@ -12,6 +12,7 @@ import (
 
 	"github.com/aleksana/peak/internal/quote"
 	"github.com/aleksana/peak/internal/session"
+	"github.com/aleksana/peak/internal/vfs/afero"
 )
 
 // Execute parses and runs internal or external commands.
@@ -460,35 +461,28 @@ func (e *Editor) cmdWin(col *Column, win *Window, cmd string) {
 }
 
 func (e *Editor) openRemoteTermWindow(targetCol *Column, win *Window, mountPath, sessRel, dir string) {
-	ioPath := path.Join(mountPath, sessRel, "io")
-	ctlPath := path.Join(mountPath, sessRel, "ctl")
-
-	ioRead, err := ns.OpenFile(ioPath, os.O_RDONLY, 0)
-	if err != nil {
-		e.callCh <- func() {
-			e.showError(targetCol, win, "remote io: "+err.Error())
+	var opened []afero.File
+	failed := ""
+	open := func(name string, flag int) afero.File {
+		if failed != "" {
+			return nil
 		}
+		f, err := ns.OpenFile(path.Join(mountPath, sessRel, name), flag, 0)
+		if err != nil {
+			failed = "remote " + name + ": " + err.Error()
+			return nil
+		}
+		opened = append(opened, f)
+		return f
+	}
+	sess := session.NewRemote(open("io", os.O_RDONLY), open("io", os.O_WRONLY), open("ctl", os.O_WRONLY))
+	if failed != "" {
+		for _, f := range opened {
+			f.Close()
+		}
+		e.Call(func() { e.showError(targetCol, win, failed) })
 		return
 	}
-	ioWrite, err := ns.OpenFile(ioPath, os.O_WRONLY, 0)
-	if err != nil {
-		ioRead.Close()
-		e.callCh <- func() {
-			e.showError(targetCol, win, "remote io: "+err.Error())
-		}
-		return
-	}
-	ctlF, err := ns.OpenFile(ctlPath, os.O_WRONLY, 0)
-	if err != nil {
-		ioRead.Close()
-		ioWrite.Close()
-		e.callCh <- func() {
-			e.showError(targetCol, win, "remote ctl: "+err.Error())
-		}
-		return
-	}
-
-	sess := session.NewRemote(ioRead, ioWrite, ctlF)
 	title := path.Join(dir, "-"+path.Base(mountPath))
 
 	e.Call(func() {
