@@ -27,10 +27,7 @@ func (e *Editor) Execute(col *Column, win *Window, cmd string) bool {
 
 	switch root {
 	case "Exit":
-		if !e.warnDirty(nil, nil, e.allWindows()) {
-			return false
-		}
-		return true
+		return e.warnDirty(nil, nil, e.allWindows())
 	case "Get":
 		e.cmdGet(win, cmd)
 	case "Put":
@@ -204,7 +201,7 @@ func (e *Editor) OpenLine(win *Window, path string, line, col int, failed func(f
 // dirOf returns the directory win is in, or else the active window, or else
 // peak.
 func (e *Editor) dirOf(win *Window) string {
-	win = cmp.Or(win, e.active)
+	win = e.getTargetWindow(win)
 	if win == nil {
 		return getwd()
 	}
@@ -246,12 +243,9 @@ func (e *Editor) get(win *Window, path string, done func(error)) {
 	}()
 }
 
-func (e *Editor) getTargetWindow(win *Window) *Window {
-	if win != nil {
-		return win
-	}
-	return e.active
-}
+// getTargetWindow returns the window a command acts on: win, the one it was
+// run in, or else the active window.
+func (e *Editor) getTargetWindow(win *Window) *Window { return cmp.Or(win, e.active) }
 
 func (e *Editor) getTargetColumn(col *Column, win *Window) *Column {
 	if col != nil {
@@ -536,47 +530,38 @@ func (e *Editor) cmdSort(col *Column, win *Window) {
 	targetCol.Resize(targetCol.rect)
 }
 
+// targetBody returns the text body of win, or else of the active window; nil
+// for no window or a terminal.
+func (e *Editor) targetBody(win *Window) *TextView {
+	if win = e.getTargetWindow(win); win != nil {
+		return win.bodyTextView()
+	}
+	return nil
+}
+
 func (e *Editor) cmdTab(col *Column, win *Window, cmd string) {
-	target := e.getTargetWindow(win)
-	if target == nil {
+	win = e.getTargetWindow(win)
+	tv := e.targetBody(win)
+	if tv == nil {
 		return
 	}
-
 	fields := strings.Fields(cmd)
 	if len(fields) == 1 {
-		// Show current tab width
-		tv := target.bodyTextView()
-		if tv != nil {
-			msg := target.GetFilename() + ": Tab " + strconv.Itoa(tv.tabWidth) + "\n"
-			e.showError(col, target, msg)
-		}
-		return
-	}
-
-	// Set new tab width
-	newTab, err := strconv.Atoi(fields[1])
-	if err == nil && newTab > 0 {
-		if tv := target.bodyTextView(); tv != nil {
-			tv.tabWidth = newTab
-		}
+		e.showError(col, win, win.GetFilename()+": Tab "+strconv.Itoa(tv.tabWidth)+"\n")
+	} else if n, err := strconv.Atoi(fields[1]); err == nil && n > 0 {
+		tv.tabWidth = n
 	}
 }
 
 func (e *Editor) cmdUndo(win *Window) {
-	target := e.getTargetWindow(win)
-	if target != nil {
-		if tv := target.bodyTextView(); tv != nil {
-			tv.buffer.Undo()
-		}
+	if tv := e.targetBody(win); tv != nil {
+		tv.buffer.Undo()
 	}
 }
 
 func (e *Editor) cmdRedo(win *Window) {
-	target := e.getTargetWindow(win)
-	if target != nil {
-		if tv := target.bodyTextView(); tv != nil {
-			tv.buffer.Redo()
-		}
+	if tv := e.targetBody(win); tv != nil {
+		tv.buffer.Redo()
 	}
 }
 
