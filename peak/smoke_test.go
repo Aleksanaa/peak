@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -21,7 +22,7 @@ func GetWordCoordinate(s tcell.Screen, word string, startX, startY int) (int, in
 		if y == startY {
 			xMin = startX
 		}
-		for x := 0; x < width; x++ {
+		for x := range width {
 			str, _, _ := s.Get(x, y)
 			r := ' '
 			if len(str) > 0 {
@@ -40,8 +41,8 @@ func GetWordCoordinate(s tcell.Screen, word string, startX, startY int) (int, in
 // GetColorCoordinate finds the first cell with the specified foreground or background color.
 func GetColorCoordinate(s tcell.Screen, color tcell.Color) (int, int, bool) {
 	width, height := s.Size()
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
+	for y := range height {
+		for x := range width {
 			_, style, _ := s.Get(x, y)
 			if style.GetForeground() == color || style.GetBackground() == color {
 				return x, y, true
@@ -264,7 +265,7 @@ func TestDelColClick(t *testing.T) {
 
 	// Start with 3 columns
 	colWidth := e.w / 3
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		col := NewColumn(i*colWidth, 1, colWidth, e.h-1, e)
 		e.columns = append(e.columns, col)
 	}
@@ -479,7 +480,7 @@ func TestGetDirClick(t *testing.T) {
 	t.Logf("Initial text position: (%d, %d)", tx, ty)
 
 	// Simulate 6 WheelDown events on the README.md window body (tx, ty)
-	for i := 0; i < 6; i++ {
+	for range 6 {
 		// WheelDown on the text coordinate
 		ev := tcell.NewEventMouse(tx, ty, tcell.WheelDown, 0)
 		e.HandleEvent(ev)
@@ -506,7 +507,7 @@ func TestDragWindow(t *testing.T) {
 
 	// Create 3 columns
 	colWidth := e.w / 3
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		col := NewColumn(i*colWidth, 1, colWidth, e.h-1, e)
 		e.columns = append(e.columns, col)
 	}
@@ -900,13 +901,7 @@ func TestSimpleEdit(t *testing.T) {
 				closed = true
 				break
 			}
-			foundWin := false
-			for _, w := range c.windows {
-				if w == win {
-					foundWin = true
-					break
-				}
-			}
+			foundWin := slices.Contains(c.windows, win)
 			if !foundWin {
 				closed = true
 				break
@@ -1352,7 +1347,7 @@ func TestTextViewWheelScrollPreservedAcrossDraws(t *testing.T) {
 	e.columns = append(e.columns, col)
 
 	var lines []string
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		lines = append(lines, fmt.Sprintf("L%02d", i))
 	}
 	body := strings.Join(lines, "\n")
@@ -1366,7 +1361,7 @@ func TestTextViewWheelScrollPreservedAcrossDraws(t *testing.T) {
 		t.Fatal("could not find 'L05' on screen")
 	}
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		e.HandleEvent(tcell.NewEventMouse(tx, ty, tcell.WheelDown, 0))
 	}
 	e.Draw()

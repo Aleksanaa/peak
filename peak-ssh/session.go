@@ -350,7 +350,7 @@ func (fs *hostFs) rootDir() afero.File {
 		entries = append(entries, vfs.NewFileInfo(host, 0755, true))
 	}
 	fs.mu.Unlock()
-	fs.sftp.conns.Range(func(k, _ interface{}) bool {
+	fs.sftp.conns.Range(func(k, _ any) bool {
 		h := k.(string)
 		if !seen[h] {
 			seen[h] = true

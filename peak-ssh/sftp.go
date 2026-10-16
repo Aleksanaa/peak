@@ -133,8 +133,7 @@ func (s *SftpFs) hostKeys(host string) (ssh.HostKeyCallback, []string, error) {
 	}
 	trust := func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 		err := check(hostname, remote, key)
-		var keyErr *knownhosts.KeyError
-		if !errors.As(err, &keyErr) || len(keyErr.Want) > 0 {
+		if keyErr, ok := errors.AsType[*knownhosts.KeyError](err); !ok || len(keyErr.Want) > 0 {
 			return err
 		}
 		r, ok := s.refused.LoadAndDelete(host)
@@ -153,9 +152,8 @@ func knownAlgos(check ssh.HostKeyCallback, host string) []string {
 	// A key no host has is refused with the keys host has.
 	pub, _, _ := ed25519.GenerateKey(nil)
 	probe, _ := ssh.NewPublicKey(pub)
-	var keyErr *knownhosts.KeyError
 	var algos []string
-	if errors.As(check(host, &net.TCPAddr{}, probe), &keyErr) {
+	if keyErr, ok := errors.AsType[*knownhosts.KeyError](check(host, &net.TCPAddr{}, probe)); ok {
 		for _, k := range keyErr.Want {
 			if t := k.Key.Type(); t == ssh.KeyAlgoRSA {
 				algos = append(algos, ssh.KeyAlgoRSASHA512, ssh.KeyAlgoRSASHA256)

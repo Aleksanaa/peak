@@ -187,7 +187,7 @@ func (b *Buffer) SetText(content string) {
 		b.saveState()
 	}
 	b.lines = nil
-	for _, l := range strings.Split(content, "\n") {
+	for l := range strings.SplitSeq(content, "\n") {
 		b.lines = append(b.lines, []rune(l))
 	}
 	b.q0, b.q1 = 0, 0

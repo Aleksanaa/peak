@@ -101,7 +101,7 @@ func decode(data []byte) (Session, error) {
 	}
 	nums := func(s string) []int {
 		var out []int
-		for _, f := range strings.Fields(s) {
+		for f := range strings.FieldsSeq(s) {
 			if n, err := strconv.Atoi(f); err == nil {
 				out = append(out, n)
 			}

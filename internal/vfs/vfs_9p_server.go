@@ -92,10 +92,7 @@ func (s *NinePSrv) Version(c go9p.Conn, r *proto.TRVersion) (proto.FCall, error)
 	// go9p's ParseCall rejects messages > MaxMsgLen (65535). An Rread carries
 	// 11 bytes of header, so max safe data per read is MaxMsgLen-11 = 65524.
 	// Capping msize here ensures the client never requests more than that.
-	msize := r.Msize
-	if msize > proto.MaxMsgLen {
-		msize = proto.MaxMsgLen
-	}
+	msize := min(r.Msize, proto.MaxMsgLen)
 	return &proto.TRVersion{Header: proto.Header{Type: proto.Rversion, Tag: r.Tag}, Msize: msize, Version: "9P2000"}, nil
 }
 
@@ -309,10 +306,7 @@ func (s *NinePSrv) Read(c go9p.Conn, r *proto.TRead) (proto.FCall, error) {
 		if r.Offset >= uint64(len(b)) {
 			return &proto.RRead{Header: proto.Header{Type: proto.Rread, Tag: r.Tag}, Count: 0, Data: nil}, nil
 		}
-		end := r.Offset + uint64(r.Count)
-		if end > uint64(len(b)) {
-			end = uint64(len(b))
-		}
+		end := min(r.Offset+uint64(r.Count), uint64(len(b)))
 		data := b[r.Offset:end]
 		return &proto.RRead{Header: proto.Header{Type: proto.Rread, Tag: r.Tag}, Count: uint32(len(data)), Data: data}, nil
 	}

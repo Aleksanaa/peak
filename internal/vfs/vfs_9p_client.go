@@ -286,4 +286,4 @@ func (fi *NinePFileInfo) Size() int64        { return int64(fi.stat.Length) }
 func (fi *NinePFileInfo) Mode() os.FileMode  { return os.FileMode(fi.stat.Mode) }
 func (fi *NinePFileInfo) ModTime() time.Time { return time.Unix(int64(fi.stat.Mtime), 0) }
 func (fi *NinePFileInfo) IsDir() bool        { return fi.stat.Mode&0x80000000 != 0 }
-func (fi *NinePFileInfo) Sys() interface{}   { return fi.stat }
+func (fi *NinePFileInfo) Sys() any           { return fi.stat }

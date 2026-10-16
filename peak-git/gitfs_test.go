@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -148,12 +149,7 @@ func (tr *testRepo) readdirNames(t *testing.T, name string) []string {
 }
 
 func hasName(names []string, want string) bool {
-	for _, n := range names {
-		if n == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(names, want)
 }
 
 // ---- parsePath ----
@@ -282,7 +278,7 @@ func TestLogContent(t *testing.T) {
 		t.Errorf("log missing first commit: %q", content)
 	}
 	// Each line: hash date message
-	for _, line := range strings.Split(strings.TrimSpace(content), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(content), "\n") {
 		parts := strings.Fields(line)
 		if len(parts) < 3 {
 			t.Errorf("log line too short: %q", line)

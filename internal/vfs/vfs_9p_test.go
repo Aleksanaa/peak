@@ -274,7 +274,7 @@ func TestNinePLargeDir(t *testing.T) {
 	mem := afero.NewMemMapFs()
 	mustMkdirAll(t, mem, "/big")
 	const n = 1000
-	for i := 0; i < n; i++ {
+	for i := range n {
 		mustWriteFile(t, mem, fmt.Sprintf("/big/f%04d.txt", i), "x")
 	}
 	cli := newTestPair(t, mem)

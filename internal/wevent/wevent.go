@@ -38,7 +38,7 @@ type Reader interface {
 // Format encodes ev as a single v2 record terminated by '\n'.
 func Format(ev Event) []byte {
 	nr := utf8.RuneCountInString(ev.Text)
-	return []byte(fmt.Sprintf("%c%c%d %d %d %d %s\n", ev.Origin, ev.Type, ev.Q0, ev.Q1, ev.Flag, nr, ev.Text))
+	return fmt.Appendf(nil, "%c%c%d %d %d %d %s\n", ev.Origin, ev.Type, ev.Q0, ev.Q1, ev.Flag, nr, ev.Text)
 }
 
 // Read consumes one v2 record from r. At a clean record boundary it

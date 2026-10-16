@@ -432,8 +432,7 @@ func (fs *repoFs) setStagedIndex(data string) error {
 		return err
 	}
 	// Reset index then stage listed files
-	paths := strings.Fields(data)
-	for _, p := range paths {
+	for p := range strings.FieldsSeq(data) {
 		if err := w.AddWithOptions(&gogit.AddOptions{Path: p}); err != nil {
 			return fmt.Errorf("add %s: %w", p, err)
 		}
@@ -444,7 +443,7 @@ func (fs *repoFs) setStagedIndex(data string) error {
 func (fs *repoFs) doCommit(data string) error {
 	// Strip comment lines (starting with #)
 	var lines []string
-	for _, l := range strings.Split(data, "\n") {
+	for l := range strings.SplitSeq(data, "\n") {
 		if !strings.HasPrefix(strings.TrimSpace(l), "#") {
 			lines = append(lines, l)
 		}
@@ -691,8 +690,7 @@ func (fs *repoFs) remoteDir(remote string) (afero.File, error) {
 	prefix := "refs/remotes/" + remote + "/"
 	var entries []os.FileInfo
 	_ = refs.ForEach(func(ref *plumbing.Reference) error {
-		if strings.HasPrefix(ref.Name().String(), prefix) {
-			branch := strings.TrimPrefix(ref.Name().String(), prefix)
+		if branch, ok := strings.CutPrefix(ref.Name().String(), prefix); ok {
 			entries = append(entries, &gitFi{name: branch, isDir: true})
 		}
 		return nil
@@ -809,10 +807,7 @@ func (f *dirFile) Readdir(count int) ([]os.FileInfo, error) {
 	if f.offset >= len(f.entries) {
 		return nil, io.EOF
 	}
-	end := f.offset + count
-	if end > len(f.entries) {
-		end = len(f.entries)
-	}
+	end := min(f.offset+count, len(f.entries))
 	res := f.entries[f.offset:end]
 	f.offset = end
 	return res, nil
@@ -869,7 +864,7 @@ func (fi *gitFi) Name() string       { return fi.name }
 func (fi *gitFi) Size() int64        { return fi.size }
 func (fi *gitFi) IsDir() bool        { return fi.isDir }
 func (fi *gitFi) ModTime() time.Time { return time.Time{} }
-func (fi *gitFi) Sys() interface{}   { return nil }
+func (fi *gitFi) Sys() any           { return nil }
 func (fi *gitFi) Mode() os.FileMode {
 	if fi.isDir {
 		return os.ModeDir | 0755
@@ -900,8 +895,8 @@ func snapReadAt(data, p []byte, off int64) (int, error) {
 
 func firstLine(s string) string {
 	s = strings.TrimSpace(s)
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
+	if before, _, ok := strings.Cut(s, "\n"); ok {
+		return before
 	}
 	return s
 }
