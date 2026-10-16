@@ -25,7 +25,7 @@
 
                 src = lib.cleanSource ./.;
 
-                vendorHash = "sha256-JsmeQX9l1rvsBOdp/QRId0y2rnpqQiiwP1RZtNWl+ww=";
+                vendorHash = "sha256-hKmBuV3jTJvycSwF4fJLgWxls+qq2WjntyMXun8u6CY=";
 
                 env.CGO_ENABLED = 0;
 
