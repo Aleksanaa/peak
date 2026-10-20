@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aleksana/peak/internal/session"
+	"github.com/aleksanaa/peak/internal/session"
 )
 
 // Work the main goroutine waits on may itself Call into the main goroutine

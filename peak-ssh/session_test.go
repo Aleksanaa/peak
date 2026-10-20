@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/aleksana/peak/internal/vfs"
-	"github.com/aleksana/peak/internal/vfs/afero"
+	"github.com/aleksanaa/peak/internal/vfs"
+	"github.com/aleksanaa/peak/internal/vfs/afero"
 )
 
 // The directories and session files read over 9P as peak reads them,

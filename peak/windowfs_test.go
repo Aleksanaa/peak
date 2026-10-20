@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aleksana/peak/internal/vfs"
-	"github.com/aleksana/peak/internal/wevent"
+	"github.com/aleksanaa/peak/internal/vfs"
+	"github.com/aleksanaa/peak/internal/wevent"
 	"github.com/gdamore/tcell/v3"
 )
 

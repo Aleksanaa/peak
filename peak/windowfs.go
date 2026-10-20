@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/aleksana/peak/internal/vfs"
-	"github.com/aleksana/peak/internal/vfs/afero"
+	"github.com/aleksanaa/peak/internal/vfs"
+	"github.com/aleksanaa/peak/internal/vfs/afero"
 )
 
 // windowFs implements afero.Fs for a single window's /peak/<id>/ directory.

@@ -8,10 +8,10 @@ import (
 	"net"
 	"os"
 
-	"github.com/aleksana/peak/internal/peakfs"
-	"github.com/aleksana/peak/internal/quote"
-	"github.com/aleksana/peak/internal/vfs"
-	"github.com/aleksana/peak/internal/vfs/afero"
+	"github.com/aleksanaa/peak/internal/peakfs"
+	"github.com/aleksanaa/peak/internal/quote"
+	"github.com/aleksanaa/peak/internal/vfs"
+	"github.com/aleksanaa/peak/internal/vfs/afero"
 )
 
 func main() {

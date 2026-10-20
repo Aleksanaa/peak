@@ -11,10 +11,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/aleksana/peak/internal/quote"
-	"github.com/aleksana/peak/internal/session"
-	"github.com/aleksana/peak/internal/vfs"
-	"github.com/aleksana/peak/internal/vfs/afero"
+	"github.com/aleksanaa/peak/internal/quote"
+	"github.com/aleksanaa/peak/internal/session"
+	"github.com/aleksanaa/peak/internal/vfs"
+	"github.com/aleksanaa/peak/internal/vfs/afero"
 )
 
 // toDir ensures a directory path ends with a trailing slash.

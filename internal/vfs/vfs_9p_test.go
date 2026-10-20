@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/aleksana/peak/internal/vfs/afero"
+	"github.com/aleksanaa/peak/internal/vfs/afero"
 )
 
 // newTestPair sets up a NinePSrv backed by fs and a NinePClientFs connected

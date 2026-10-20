@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/aleksana/peak/internal/quote"
+	"github.com/aleksanaa/peak/internal/quote"
 	"github.com/gdamore/tcell/v3"
 	uwidth "golang.org/x/text/width"
 )

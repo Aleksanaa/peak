@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/aleksana/peak/internal/vfs/afero"
+	"github.com/aleksanaa/peak/internal/vfs/afero"
 )
 
 // Socket returns the path of the 9P socket of the peak that runs this program,

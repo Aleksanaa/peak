@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aleksana/peak/internal/vfs/afero"
+	"github.com/aleksanaa/peak/internal/vfs/afero"
 )
 
 // FileStub provides no-op implementations of the afero.File interface.

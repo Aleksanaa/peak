@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/aleksana/peak/internal/wevent"
+	"github.com/aleksanaa/peak/internal/wevent"
 	"github.com/odvcencio/gotreesitter"
 )
 

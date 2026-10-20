@@ -1,4 +1,4 @@
-module github.com/aleksana/peak
+module github.com/aleksanaa/peak
 
 go 1.26.0
 

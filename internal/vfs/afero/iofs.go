@@ -11,7 +11,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/aleksana/peak/internal/vfs/afero/internal/common"
+	"github.com/aleksanaa/peak/internal/vfs/afero/internal/common"
 )
 
 // IOFS adopts afero.Fs to stdlib io/fs.FS

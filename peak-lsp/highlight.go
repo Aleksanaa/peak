@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/aleksana/peak/internal/coords"
-	"github.com/aleksana/peak/internal/wevent"
+	"github.com/aleksanaa/peak/internal/coords"
+	"github.com/aleksanaa/peak/internal/wevent"
 	"github.com/odvcencio/gotreesitter"
 )
 

@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/aleksana/peak/internal/quote"
-	"github.com/aleksana/peak/peak/regexp"
+	"github.com/aleksanaa/peak/internal/quote"
+	"github.com/aleksanaa/peak/peak/regexp"
 )
 
 var (

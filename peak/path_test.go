@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aleksana/peak/internal/vfs"
-	"github.com/aleksana/peak/internal/vfs/afero"
+	"github.com/aleksanaa/peak/internal/vfs"
+	"github.com/aleksanaa/peak/internal/vfs/afero"
 )
 
 // A file with a NUL in its first 512 bytes is binary; one with a NUL only

@@ -3,7 +3,7 @@ package session
 import (
 	"fmt"
 
-	"github.com/aleksana/peak/internal/vfs/afero"
+	"github.com/aleksanaa/peak/internal/vfs/afero"
 )
 
 // RemoteSession implements Session over VFS files from a mounted filesystem's

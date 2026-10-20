@@ -4,9 +4,9 @@ import (
 	"path"
 	"strings"
 
-	"github.com/aleksana/peak/internal/quote"
-	"github.com/aleksana/peak/internal/session"
-	"github.com/aleksana/peak/internal/wevent"
+	"github.com/aleksanaa/peak/internal/quote"
+	"github.com/aleksanaa/peak/internal/session"
+	"github.com/aleksanaa/peak/internal/wevent"
 	"github.com/gdamore/tcell/v3"
 	"github.com/gdamore/tcell/v3/color"
 )

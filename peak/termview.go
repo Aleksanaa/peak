@@ -8,9 +8,9 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/aleksana/peak/internal/session"
-	"github.com/aleksana/peak/internal/vfs"
-	terminal "github.com/aleksana/peak/peak/term"
+	"github.com/aleksanaa/peak/internal/session"
+	"github.com/aleksanaa/peak/internal/vfs"
+	terminal "github.com/aleksanaa/peak/peak/term"
 	"github.com/atotto/clipboard"
 	"github.com/gdamore/tcell/v3"
 	"github.com/gdamore/tcell/v3/color"

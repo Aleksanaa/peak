@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/aleksana/peak/internal/vfs/afero"
+	"github.com/aleksanaa/peak/internal/vfs/afero"
 )
 
 // uncFs serves Windows network shares as /server/share/...: the root lists

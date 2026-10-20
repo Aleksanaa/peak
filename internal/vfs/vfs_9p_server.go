@@ -11,7 +11,7 @@ import (
 	"path"
 	"sync"
 
-	"github.com/aleksana/peak/internal/vfs/afero"
+	"github.com/aleksanaa/peak/internal/vfs/afero"
 	"github.com/knusbaum/go9p"
 	"github.com/knusbaum/go9p/proto"
 )

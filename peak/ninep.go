@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/aleksana/peak/internal/quote"
-	"github.com/aleksana/peak/internal/vfs"
-	"github.com/aleksana/peak/internal/vfs/afero"
+	"github.com/aleksanaa/peak/internal/quote"
+	"github.com/aleksanaa/peak/internal/vfs"
+	"github.com/aleksanaa/peak/internal/vfs/afero"
 )
 
 //go:embed doc

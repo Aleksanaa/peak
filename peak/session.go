@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/aleksana/peak/internal/session"
+	"github.com/aleksanaa/peak/internal/session"
 )
 
 const sessionVersion = 2

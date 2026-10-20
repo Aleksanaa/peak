@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aleksana/peak/internal/vfs/afero"
+	"github.com/aleksanaa/peak/internal/vfs/afero"
 )
 
 // rootedFs exposes a subtree of a CompositeFs to the 9P server. It translates

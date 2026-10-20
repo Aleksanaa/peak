@@ -10,9 +10,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/aleksana/peak/internal/quote"
-	"github.com/aleksana/peak/internal/session"
-	"github.com/aleksana/peak/internal/vfs/afero"
+	"github.com/aleksanaa/peak/internal/quote"
+	"github.com/aleksanaa/peak/internal/session"
+	"github.com/aleksanaa/peak/internal/vfs/afero"
 )
 
 // Execute parses and runs internal or external commands.

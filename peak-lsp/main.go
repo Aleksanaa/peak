@@ -5,9 +5,9 @@ import (
 	"log"
 	"sync"
 
-	"github.com/aleksana/peak/internal/peakfs"
-	"github.com/aleksana/peak/internal/vfs"
-	"github.com/aleksana/peak/internal/vfs/afero"
+	"github.com/aleksanaa/peak/internal/peakfs"
+	"github.com/aleksanaa/peak/internal/vfs"
+	"github.com/aleksanaa/peak/internal/vfs/afero"
 )
 
 func main() {

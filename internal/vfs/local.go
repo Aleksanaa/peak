@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aleksana/peak/internal/vfs/afero"
+	"github.com/aleksanaa/peak/internal/vfs/afero"
 )
 
 // The namespace names files with slash-separated paths, as Plan 9 does, on

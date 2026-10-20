@@ -3,7 +3,7 @@ package main
 import (
 	"slices"
 
-	"github.com/aleksana/peak/internal/session"
+	"github.com/aleksanaa/peak/internal/session"
 	"github.com/gdamore/tcell/v3"
 	"github.com/gdamore/tcell/v3/color"
 )

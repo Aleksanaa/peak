@@ -10,8 +10,8 @@ import (
 	"sync"
 
 	"al.essio.dev/pkg/shellescape"
-	"github.com/aleksana/peak/internal/vfs"
-	"github.com/aleksana/peak/internal/vfs/afero"
+	"github.com/aleksanaa/peak/internal/vfs"
+	"github.com/aleksanaa/peak/internal/vfs/afero"
 	"golang.org/x/crypto/ssh"
 )
 

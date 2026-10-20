@@ -11,8 +11,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/aleksana/peak/internal/vfs"
-	"github.com/aleksana/peak/internal/wevent"
+	"github.com/aleksanaa/peak/internal/vfs"
+	"github.com/aleksanaa/peak/internal/wevent"
 )
 
 // colorSpan marks a rune range with a named syntax attribute.

@@ -9,8 +9,8 @@ import (
 	"path"
 	"time"
 
-	"github.com/aleksana/peak/internal/vfs/afero"
-	"github.com/aleksana/peak/internal/vfs/go9p/client"
+	"github.com/aleksanaa/peak/internal/vfs/afero"
+	"github.com/aleksanaa/peak/internal/vfs/go9p/client"
 	"github.com/knusbaum/go9p/proto"
 )
 
